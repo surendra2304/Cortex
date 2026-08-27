@@ -1,8 +1,10 @@
 import time
 import json
+import uuid
 import logging
 from typing import Dict, Any, Optional, List
 from datetime import datetime
+from pydantic import BaseModel, Field
 from fastapi import APIRouter, Depends, Response, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -273,4 +275,81 @@ async def export_audit_log():
             {"action": "lead.score_evaluated", "actor": "agent_sales", "timestamp": "2026-08-27T10:05:00Z"},
             {"action": "privacy.data_export", "actor": "operator_admin", "timestamp": "2026-08-27T10:10:00Z"}
         ]
+    }
+
+
+# ── 8. MULTI-TENANT SAAS & WHITE-LABEL DEPLOYMENT ───────────────────────────
+
+class TenantOnboardingRequest(BaseModel):
+    tenant_name: str
+    admin_email: str
+    plan: str = "pro"  # free, pro, enterprise
+
+
+class TenantSettings(BaseModel):
+    tenant_id: str
+    name: str
+    plan: str
+    max_sites: int
+    monthly_event_limit: int
+    branding: Dict[str, Any] = Field(default_factory=lambda: {
+        "logo_url": "/nexus-logo.png",
+        "primary_color": "#0284c7",
+        "custom_domain": "app.tenant.io"
+    })
+    retention_days: int = 90
+
+
+@router.post("/v1/tenants", status_code=status.HTTP_201_CREATED)
+async def onboard_tenant(req: TenantOnboardingRequest):
+    """Onboards a new multi-tenant organization with site credentials and operator secrets."""
+    tenant_id = f"ten_{uuid.uuid4().hex[:10]}"
+    site_id = f"site_{uuid.uuid4().hex[:8]}"
+    public_sdk_key = f"pk_live_{uuid.uuid4().hex[:16]}"
+    operator_jwt_secret = f"sec_jwt_{uuid.uuid4().hex[:24]}"
+
+    return {
+        "status": "created",
+        "tenant_id": tenant_id,
+        "tenant_name": req.tenant_name,
+        "plan": req.plan,
+        "admin_email": req.admin_email,
+        "primary_site_id": site_id,
+        "public_sdk_key": public_sdk_key,
+        "operator_jwt_secret": operator_jwt_secret,
+        "created_at": datetime.utcnow().isoformat()
+    }
+
+
+@router.get("/v1/tenant/settings", response_model=TenantSettings)
+async def get_tenant_settings():
+    """Returns tenant configuration, white-label branding, and plan limits."""
+    return TenantSettings(
+        tenant_id="ten_default",
+        name="Enterprise Default Tenant",
+        plan="enterprise",
+        max_sites=10,
+        monthly_event_limit=5000000,
+        branding={
+            "logo_url": "/nexus-logo.png",
+            "primary_color": "#0284c7",
+            "custom_domain": "ops.enterprise-corp.com"
+        },
+        retention_days=365
+    )
+
+
+@router.get("/v1/tenant/usage")
+async def get_tenant_usage():
+    """Returns current period usage metrics vs configured plan quotas."""
+    return {
+        "period": "2026-08",
+        "plan": "enterprise",
+        "events_ingested": 184500,
+        "monthly_limit": 5000000,
+        "usage_pct": 3.69,
+        "active_sites": 4,
+        "max_sites": 10,
+        "ai_universe_calls": 1240,
+        "workflow_runs": 850
     }

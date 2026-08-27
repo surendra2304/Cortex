@@ -17,7 +17,8 @@ export const NAV_ITEMS = [
   { name: "Incidents", href: "/incidents" },
   { name: "Integrations", href: "/integrations" },
   { name: "Connectors", href: "/connectors" },
-  { name: "Governance", href: "/governance" }
+  { name: "Governance", href: "/governance" },
+  { name: "Settings", href: "/settings" }
 ];
 
 export default function Sidebar() {
