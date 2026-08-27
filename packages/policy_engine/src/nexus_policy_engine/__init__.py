@@ -69,3 +69,17 @@ class PolicyEngine:
             risk_score=1.0,
             evaluated_at=datetime.utcnow()
         )
+
+
+from nexus_policy_engine.privacy import (
+    SecretScrubber,
+    PrivacyComplianceService,
+    DataSubjectExport
+)
+
+__all__ = [
+    "PolicyEngine",
+    "SecretScrubber",
+    "PrivacyComplianceService",
+    "DataSubjectExport"
+]
