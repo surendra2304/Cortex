@@ -4,17 +4,17 @@ This document serves as the master index and running summary of engineering prog
 
 ---
 
-### ?? [Day 1 ? 2026-08-27: Dashboard Live Data Fetching & Policy Engine Approval UI](diary/2026-08-27.md)
-- **?? Focus**: Dashboard data fetching with SWR/Axios, API client wrapper, live views (Visitors, Leads, Agents), and Human-in-the-Loop Approval Modal.
+### ?? [Day 1 ? 2026-08-27: Concrete Tool Integrations, Redis Idempotency & Audit Records Migration](diary/2026-08-27.md)
+- **?? Focus**: Concrete ToolBus, EmailTool, CRMTool, WebhookTool, Redis-backed idempotency, and AuditRecord Alembic migration.
 - **?? What I Accomplished**:
-  - I created the Axios API client wrapper with operator token interceptors (`apps/dashboard/src/lib/api.ts`).
-  - I wired live SWR data fetching on Visitors, Leads, and Agents dashboard pages.
-  - I created the `ApprovalModal.tsx` component enabling operators to review proposed actions, confidence, and parameters.
-  - I integrated action approvals in `governance/page.tsx` triggering `POST /v1/actions/:id/approve`.
-  - I validated all unit tests achieving a 100% green pass rate under pytest.
+  - I refactored `ToolBus` with dynamic registration and atomic Redis idempotency locks.
+  - I created concrete tool executors in `nexus_integrations` (`EmailTool`, `CRMTool`, `WebhookTool`).
+  - I created Alembic migration `003_create_audit_records.py` and mapped `AuditRecordModel`.
+  - I updated the `Orchestrator` to record execution verification into audit records.
+  - I authored unit tests for all concrete tools and idempotency flows reaching 22 passing tests (100%).
 - **??? Fixes & Hardening**:
-  - I added error handling and loading indicators across all dashboard views.
+  - I implemented Redis `NX` atomic idempotency keys preventing duplicate outbound API actions.
   - I ensured strict diary constraint verification using automated compliance scripts.
-- **?? Test Results**: **18 passed** (100% green pass rate under pytest).
+- **?? Test Results**: **22 passed** (100% green pass rate under pytest).
 
 ---

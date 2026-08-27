@@ -86,3 +86,17 @@ class LeadModel(Base):
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     profile = relationship("ProfileModel", back_populates="leads")
+
+
+class AuditRecordModel(Base):
+    __tablename__ = "audit_records"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    actor_id = Column(String(64), nullable=False)
+    action = Column(String(128), nullable=False, index=True)
+    target_resource = Column(String(255), nullable=False)
+    changes = Column(JSONB, default=dict, nullable=False)
+    verification_status = Column(String(32), default="verified", nullable=False)
+    trace_id = Column(String(64), nullable=True, index=True)
+    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

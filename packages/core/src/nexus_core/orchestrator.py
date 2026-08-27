@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
 sys.path.insert(0, os.path.abspath("packages/agents/src"))
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
+sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
@@ -18,47 +19,54 @@ from nexus_core.models import AuditRecord
 from nexus_event_schema import EventSchema
 from nexus_agents import AgentRegistry, AgentInput, AgentOutput
 from nexus_ai_universe_adapter import AIUniverseClient, IntelligenceRequest
-from nexus_tool_runtime import Tool, Execution, SideEffectLevel, ToolCapability
+from nexus_tool_runtime import Tool, Execution, SideEffectLevel, ToolBus, ToolCapability
+from nexus_integrations import (
+    EmailToolExecutor, create_email_tool,
+    CRMToolExecutor, create_crm_tool,
+    WebhookToolExecutor, create_webhook_tool
+)
 from nexus_policy_engine import PolicyEngine
 from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
 
 logger = logging.getLogger("nexus-orchestrator")
 
 
-class ToolBus:
-    def __init__(self):
-        self._tools: Dict[str, Tool] = {
-            "banner_injection": Tool(
-                name="banner_injection",
-                capabilities=[ToolCapability.BANNER_INJECTION],
-                side_effect_level=SideEffectLevel.HIGH_IMPACT
-            ),
-            "account_update": Tool(
-                name="account_update",
-                capabilities=[ToolCapability.ACCOUNT_UPDATE],
-                side_effect_level=SideEffectLevel.SENSITIVE
-            ),
-            "session_inspect": Tool(
-                name="session_inspect",
-                capabilities=[ToolCapability.SESSION_INSPECT],
-                side_effect_level=SideEffectLevel.READ
-            )
-        }
+def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
+    """Instantiate ToolBus with production concrete tool integrations."""
+    bus = ToolBus(redis_client=redis_client)
 
-    def get_tool(self, name: str) -> Optional[Tool]:
-        return self._tools.get(name)
+    # Register concrete tools
+    bus.register_tool(create_email_tool(), EmailToolExecutor())
+    bus.register_tool(create_crm_tool(), CRMToolExecutor())
+    bus.register_tool(create_webhook_tool(), WebhookToolExecutor())
 
-    async def execute(self, tool_name: str, params: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "status": "success",
-            "tool": tool_name,
-            "executed_at": datetime.utcnow().isoformat(),
-            "output": f"Simulated execution for {tool_name} with params {params}"
-        }
+    # Register baseline fallback tools
+    banner_tool = Tool(
+        name="banner_injection",
+        capabilities=[ToolCapability.BANNER_INJECTION],
+        side_effect_level=SideEffectLevel.HIGH_IMPACT
+    )
+    bus.register_tool(banner_tool, lambda p, ctx: {"injected": True, "variant": p.get("variant")})
+
+    inspect_tool = Tool(
+        name="session_inspect",
+        capabilities=[ToolCapability.SESSION_INSPECT],
+        side_effect_level=SideEffectLevel.READ
+    )
+    bus.register_tool(inspect_tool, lambda p, ctx: {"inspected": True, "depth": p.get("inspect_depth", "summary")})
+
+    account_tool = Tool(
+        name="account_update",
+        capabilities=[ToolCapability.ACCOUNT_UPDATE],
+        side_effect_level=SideEffectLevel.SENSITIVE
+    )
+    bus.register_tool(account_tool, lambda p, ctx: {"updated": True, "account_params": p})
+
+    return bus
 
 
 class Orchestrator:
-    """10-Phase NEXUS Cognitive Loop Orchestrator"""
+    """10-Phase NEXUS Cognitive Loop Orchestrator with Concrete Tool Execution & Audit Recording."""
 
     def __init__(
         self,
@@ -70,7 +78,7 @@ class Orchestrator:
         self.agent_registry = agent_registry or AgentRegistry()
         self.ai_client = ai_client or AIUniverseClient()
         self.policy_engine = policy_engine or PolicyEngine(human_in_the_loop_enabled=True)
-        self.tool_bus = tool_bus or ToolBus()
+        self.tool_bus = tool_bus or build_default_tool_bus()
         self.audit_records: List[AuditRecord] = []
 
     async def run_cognitive_loop(self, event: EventSchema) -> Dict[str, Any]:
@@ -121,7 +129,8 @@ class Orchestrator:
                 tool_name=tool.name,
                 actor={"type": "agent", "id": agent.agent_id},
                 reason=prop.rationale,
-                params=prop.params
+                params=prop.params,
+                idempotency_key=f"idemp_{loop_id}_{prop.action_type}"
             )
             decision = self.policy_engine.evaluate(execution, tool)
             execution.policy_decision = decision
@@ -135,20 +144,23 @@ class Orchestrator:
                 "reason": decision.reason
             })
 
-        # 6. EXECUTE: Dispatch approved actions via Tool Bus (or record skipped/approval-needed)
+        # 6. EXECUTE: Dispatch approved actions via Tool Bus
         execution_results = []
         if authorized_actions:
             for exec_item, tool in authorized_actions:
-                res = await self.tool_bus.execute(tool.name, exec_item.params)
-                exec_item.result = res
-                exec_item.executed_at = datetime.utcnow()
+                res = await self.tool_bus.execute(tool.name, exec_item.params, exec_item)
                 execution_results.append(res)
                 trace.append({"phase": "6.Execute", "tool": tool.name, "result": res})
         else:
             trace.append({"phase": "6.Execute", "status": "no_auto_approved_actions_executed", "count": 0})
 
         # 7. VERIFY: Verify execution outputs and state invariants
-        verification_passed = True
+        verification_passed = all(
+            exec_item.verification.get("status") == "verified"
+            for exec_item, _ in authorized_actions
+            if exec_item.verification
+        ) if authorized_actions else True
+
         trace.append({"phase": "7.Verify", "status": "verified" if verification_passed else "failed"})
 
         # 8. MEASURE: Calculate outcome metrics and expected impact
@@ -162,7 +174,11 @@ class Orchestrator:
             actor_id=agent.agent_id,
             action=f"cognitive_loop:{agent_output.decision}",
             target_resource=f"site/{event.site_id}",
-            changes={"agent_output": agent_output.model_dump(mode="json"), "executions": execution_results}
+            changes={
+                "agent_output": agent_output.model_dump(mode="json"),
+                "executions": execution_results,
+                "verification": "passed" if verification_passed else "failed"
+            }
         )
         self.audit_records.append(audit)
         trace.append({"phase": "9.Learn", "audit_id": audit.id})
