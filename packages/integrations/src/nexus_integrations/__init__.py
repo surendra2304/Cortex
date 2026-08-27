@@ -1,8 +1,33 @@
-from typing import Any, Dict, Optional
-import httpx
+from typing import Any, Dict, Optional, List
 import os
 import logging
 from datetime import datetime
+import asyncio
+
+# SendGrid SDK
+try:
+    from sendgrid import SendGridAPIClient
+    from sendgrid.helpers.mail import Mail, Email, To, Content
+    HAVE_SENDGRID = True
+except ImportError:
+    HAVE_SENDGRID = False
+
+# Twilio SDK
+try:
+    from twilio.rest import Client as TwilioClient
+    HAVE_TWILIO = True
+except ImportError:
+    HAVE_TWILIO = False
+
+# HubSpot SDK
+try:
+    from hubspot import HubSpot
+    from hubspot.crm.contacts import SimplePublicObjectInputForCreate as ContactCreateInput
+    from hubspot.crm.contacts import SimplePublicObjectInput as ContactUpdateInput
+    from hubspot.crm.deals import SimplePublicObjectInputForCreate as DealCreateInput
+    HAVE_HUBSPOT = True
+except ImportError:
+    HAVE_HUBSPOT = False
 
 from nexus_tool_runtime import Tool, SideEffectLevel, ToolCapability, IdempotencyStrategy
 
@@ -10,24 +35,20 @@ logger = logging.getLogger("nexus-integrations")
 
 
 def is_mock_mode_enabled() -> bool:
-    """Checks if global mock mode is enabled via environment variable."""
     val = os.getenv("MOCK_MODE", "true").lower()
     return val in ("true", "1", "yes")
 
 
-# 1. EmailTool Implementation
+# ==============================================================================
+# 1. SendGrid Email Tool
+# ==============================================================================
 class EmailToolExecutor:
-    """Concrete email delivery tool executor supporting production SMTP & resilient mock mode."""
+    """Production SendGrid email tool executor with fallback to mock mode."""
 
-    def __init__(
-        self,
-        smtp_host: Optional[str] = None,
-        port: int = 587,
-        mock_mode: Optional[bool] = None
-    ):
-        self.smtp_host = smtp_host or os.getenv("SMTP_HOST")
-        self.port = port
-        self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not self.smtp_host)
+    def __init__(self, api_key: Optional[str] = None, from_email: Optional[str] = None, mock_mode: Optional[bool] = None):
+        self.api_key = api_key or os.getenv("SENDGRID_API_KEY")
+        self.from_email = from_email or os.getenv("SENDGRID_FROM_EMAIL", "notifications@nexus.dev")
+        self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not self.api_key)
 
     async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
         to_email = params.get("to")
@@ -37,9 +58,9 @@ class EmailToolExecutor:
         if not to_email or not subject:
             raise ValueError("EmailTool requires 'to' and 'subject' parameters.")
 
-        if self.mock_mode:
+        if self.mock_mode or not HAVE_SENDGRID:
             logger.warning(
-                f"[MOCK MODE] EmailTool simulated delivery to '{to_email}' with subject '{subject}'. No live SMTP dispatch occurred."
+                f"[MOCK MODE] EmailTool simulated delivery to '{to_email}' with subject '{subject}'. No live SMTP/SendGrid call made."
             )
             return {
                 "delivered": True,
@@ -50,23 +71,37 @@ class EmailToolExecutor:
                 "mode": "mock"
             }
 
-        # Real SMTP delivery logic (when live SMTP credentials configured)
-        logger.info(f"Dispatching live email to '{to_email}' via {self.smtp_host}:{self.port}...")
-        return {
-            "delivered": True,
-            "recipient": to_email,
-            "subject": subject,
-            "message_id": f"msg_live_{datetime.utcnow().strftime('%Y%m%d%H%M%S')}_{abs(hash(to_email)) % 10000}",
-            "dispatched_at": datetime.utcnow().isoformat(),
-            "mode": "live"
-        }
+        # Real SendGrid API execution
+        try:
+            sg = SendGridAPIClient(self.api_key)
+            message = Mail(
+                from_email=self.from_email,
+                to_emails=to_email,
+                subject=subject,
+                html_content=body or "<p>Notification from NEXUS</p>"
+            )
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(None, sg.send, message)
+            
+            return {
+                "delivered": response.status_code in (200, 202),
+                "recipient": to_email,
+                "subject": subject,
+                "status_code": response.status_code,
+                "message_id": response.headers.get("X-Message-Id", f"sg_{uuid_hex[:8]}"),
+                "dispatched_at": datetime.utcnow().isoformat(),
+                "mode": "live"
+            }
+        except Exception as exc:
+            logger.error(f"SendGrid dispatch failed ({exc}).")
+            raise
 
 
 def create_email_tool() -> Tool:
     return Tool(
         name="email_tool",
         version="1.0.0",
-        description="Dispatches automated transactional and engagement emails to users.",
+        description="Dispatches automated transactional and engagement emails via SendGrid.",
         capabilities=[ToolCapability.EMAIL_DISPATCH],
         side_effect_level=SideEffectLevel.SENSITIVE,
         auth_scope="integrations:email",
@@ -78,67 +113,257 @@ def create_email_tool() -> Tool:
             "properties": {
                 "to": {"type": "string", "format": "email"},
                 "subject": {"type": "string"},
-                "body": {"type": "string"},
-                "template_id": {"type": "string"}
+                "body": {"type": "string"}
             }
         }
     )
 
 
-# 2. CRMTool Implementation
-class CRMToolExecutor:
-    """Concrete CRM tool executor supporting production API sync & resilient mock mode."""
+# ==============================================================================
+# 2. Twilio SMS & Voice Tools
+# ==============================================================================
+class SMSToolExecutor:
+    """Production Twilio SMS dispatcher with mock mode fallback."""
 
     def __init__(
         self,
-        crm_endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
+        account_sid: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        from_number: Optional[str] = None,
         mock_mode: Optional[bool] = None
     ):
-        self.crm_endpoint = crm_endpoint or os.getenv("CRM_API_ENDPOINT")
-        self.api_key = api_key or os.getenv("CRM_API_KEY")
+        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
+        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
+        self.from_number = from_number or os.getenv("TWILIO_FROM_NUMBER", "+15005550006")
+        self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not (self.account_sid and self.auth_token))
+
+    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+        to_phone = params.get("to")
+        body = params.get("body")
+
+        if not to_phone or not body:
+            raise ValueError("SMSTool requires 'to' and 'body' parameters.")
+
+        if self.mock_mode or not HAVE_TWILIO:
+            logger.warning(f"[MOCK MODE] SMSTool simulated SMS to '{to_phone}'. No live Twilio dispatch.")
+            return {
+                "delivered": True,
+                "recipient": to_phone,
+                "message_sid": f"SM_mock_{abs(hash(to_phone)) % 100000}",
+                "dispatched_at": datetime.utcnow().isoformat(),
+                "mode": "mock"
+            }
+
+        try:
+            client = TwilioClient(self.account_sid, self.auth_token)
+            loop = asyncio.get_event_loop()
+            msg = await loop.run_in_executor(
+                None,
+                lambda: client.messages.create(to=to_phone, from_=self.from_number, body=body)
+            )
+            return {
+                "delivered": True,
+                "recipient": to_phone,
+                "message_sid": msg.sid,
+                "status": msg.status,
+                "dispatched_at": datetime.utcnow().isoformat(),
+                "mode": "live"
+            }
+        except Exception as exc:
+            logger.error(f"Twilio SMS dispatch failed ({exc}).")
+            raise
+
+
+def create_sms_tool() -> Tool:
+    return Tool(
+        name="sms_tool",
+        version="1.0.0",
+        description="Dispatches SMS notifications to customer phone numbers via Twilio.",
+        capabilities=[ToolCapability.OUTBOUND_WEBHOOK],
+        side_effect_level=SideEffectLevel.SENSITIVE,
+        auth_scope="integrations:sms",
+        rate_limit=60,
+        idempotency_strategy=IdempotencyStrategy.IDEMPOTENCY_KEY,
+        input_schema={
+            "type": "object",
+            "required": ["to", "body"],
+            "properties": {
+                "to": {"type": "string"},
+                "body": {"type": "string"}
+            }
+        }
+    )
+
+
+class VoiceToolExecutor:
+    """Production Twilio Voice call dispatcher with TwiML instructions."""
+
+    def __init__(
+        self,
+        account_sid: Optional[str] = None,
+        auth_token: Optional[str] = None,
+        from_number: Optional[str] = None,
+        mock_mode: Optional[bool] = None
+    ):
+        self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
+        self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
+        self.from_number = from_number or os.getenv("TWILIO_FROM_NUMBER", "+15005550006")
+        self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not (self.account_sid and self.auth_token))
+
+    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+        to_phone = params.get("to")
+        twiml = params.get("twiml", "<Response><Say>NEXUS High-Priority System Alert</Say></Response>")
+
+        if not to_phone:
+            raise ValueError("VoiceTool requires 'to' parameter.")
+
+        if self.mock_mode or not HAVE_TWILIO:
+            logger.warning(f"[MOCK MODE] VoiceTool simulated call to '{to_phone}'. No live Twilio dispatch.")
+            return {
+                "initiated": True,
+                "recipient": to_phone,
+                "call_sid": f"CA_mock_{abs(hash(to_phone)) % 100000}",
+                "initiated_at": datetime.utcnow().isoformat(),
+                "mode": "mock"
+            }
+
+        try:
+            client = TwilioClient(self.account_sid, self.auth_token)
+            loop = asyncio.get_event_loop()
+            call = await loop.run_in_executor(
+                None,
+                lambda: client.calls.create(to=to_phone, from_=self.from_number, twiml=twiml)
+            )
+            return {
+                "initiated": True,
+                "recipient": to_phone,
+                "call_sid": call.sid,
+                "status": call.status,
+                "initiated_at": datetime.utcnow().isoformat(),
+                "mode": "live"
+            }
+        except Exception as exc:
+            logger.error(f"Twilio Voice dispatch failed ({exc}).")
+            raise
+
+
+def create_voice_tool() -> Tool:
+    return Tool(
+        name="voice_tool",
+        version="1.0.0",
+        description="Initiates automated voice phone calls and voice notifications via Twilio.",
+        capabilities=[ToolCapability.OUTBOUND_WEBHOOK],
+        side_effect_level=SideEffectLevel.SENSITIVE,
+        auth_scope="integrations:voice",
+        rate_limit=20,
+        idempotency_strategy=IdempotencyStrategy.IDEMPOTENCY_KEY,
+        input_schema={
+            "type": "object",
+            "required": ["to"],
+            "properties": {
+                "to": {"type": "string"},
+                "twiml": {"type": "string"}
+            }
+        }
+    )
+
+
+# ==============================================================================
+# 3. HubSpot CRM Tool
+# ==============================================================================
+class CRMToolExecutor:
+    """Production HubSpot CRM tool executor supporting create/update contact and create deal."""
+
+    def __init__(self, api_key: Optional[str] = None, mock_mode: Optional[bool] = None):
+        self.api_key = api_key or os.getenv("HUBSPOT_API_KEY")
         self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not self.api_key)
 
     async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
-        lead_id = params.get("lead_id")
-        action = params.get("action", "upsert")
+        action = params.get("action", "create_contact")
         payload = params.get("payload", {})
+        lead_id = params.get("lead_id", "lead_default")
 
-        if not lead_id:
-            raise ValueError("CRMTool requires a valid 'lead_id'.")
-
-        if self.mock_mode:
+        if self.mock_mode or not HAVE_HUBSPOT:
             logger.warning(
-                f"[MOCK MODE] CRMTool simulated operation '{action}' for lead '{lead_id}'. No external API calls made."
+                f"[MOCK MODE] CRMTool simulated action '{action}' for lead '{lead_id}'. No external HubSpot API call made."
             )
             return {
                 "crm_sync_status": "synced",
                 "lead_id": lead_id,
-                "crm_record_id": f"crm_mock_rec_{abs(hash(lead_id)) % 100000}",
+                "crm_record_id": f"hubspot_mock_{abs(hash(lead_id)) % 100000}",
                 "action": action,
-                "updated_fields": list(payload.keys()),
+                "properties": list(payload.keys()),
                 "synced_at": datetime.utcnow().isoformat(),
                 "mode": "mock"
             }
 
-        # Real CRM API dispatch logic (when live API keys provided)
-        logger.info(f"Syncing live lead '{lead_id}' to CRM endpoint '{self.crm_endpoint}'...")
-        return {
-            "crm_sync_status": "synced",
-            "lead_id": lead_id,
-            "crm_record_id": f"crm_live_rec_{abs(hash(lead_id)) % 100000}",
-            "action": action,
-            "updated_fields": list(payload.keys()),
-            "synced_at": datetime.utcnow().isoformat(),
-            "mode": "live"
-        }
+        try:
+            hs = HubSpot(access_token=self.api_key)
+            loop = asyncio.get_event_loop()
+
+            if action == "create_contact":
+                properties = {
+                    "email": payload.get("email"),
+                    "firstname": payload.get("first_name"),
+                    "lastname": payload.get("last_name"),
+                    "company": payload.get("company"),
+                    "lifecyclestage": payload.get("lifecycle_stage", "lead")
+                }
+                c_input = ContactCreateInput(properties={k: v for k, v in properties.items() if v is not None})
+                contact_resp = await loop.run_in_executor(None, hs.crm.contacts.basic_api.create, c_input)
+                return {
+                    "crm_sync_status": "synced",
+                    "action": "create_contact",
+                    "crm_record_id": contact_resp.id,
+                    "properties": contact_resp.properties,
+                    "synced_at": datetime.utcnow().isoformat(),
+                    "mode": "live"
+                }
+
+            elif action == "update_contact":
+                contact_id = params.get("crm_record_id") or lead_id
+                u_input = ContactUpdateInput(properties=payload)
+                contact_resp = await loop.run_in_executor(None, hs.crm.contacts.basic_api.update, contact_id, u_input)
+                return {
+                    "crm_sync_status": "synced",
+                    "action": "update_contact",
+                    "crm_record_id": contact_resp.id,
+                    "properties": contact_resp.properties,
+                    "synced_at": datetime.utcnow().isoformat(),
+                    "mode": "live"
+                }
+
+            elif action == "create_deal":
+                deal_props = {
+                    "dealname": payload.get("deal_name", f"Deal for {lead_id}"),
+                    "amount": str(payload.get("amount", "10000")),
+                    "dealstage": payload.get("deal_stage", "appointmentscheduled"),
+                    "pipeline": payload.get("pipeline", "default")
+                }
+                d_input = DealCreateInput(properties=deal_props)
+                deal_resp = await loop.run_in_executor(None, hs.crm.deals.basic_api.create, d_input)
+                return {
+                    "crm_sync_status": "synced",
+                    "action": "create_deal",
+                    "crm_record_id": deal_resp.id,
+                    "properties": deal_resp.properties,
+                    "synced_at": datetime.utcnow().isoformat(),
+                    "mode": "live"
+                }
+
+            else:
+                raise ValueError(f"Unsupported HubSpot CRM action: '{action}'.")
+
+        except Exception as exc:
+            logger.error(f"HubSpot CRM execution failed ({exc}).")
+            raise
 
 
 def create_crm_tool() -> Tool:
     return Tool(
         name="crm_tool",
-        version="1.0.0",
-        description="Creates, updates, or syncs leads and accounts in external CRM systems.",
+        version="2.0.0",
+        description="Creates, updates contacts, and provisions deals in HubSpot CRM.",
         capabilities=[ToolCapability.CRM_SYNC, ToolCapability.ACCOUNT_UPDATE],
         side_effect_level=SideEffectLevel.HIGH_IMPACT,
         auth_scope="integrations:crm",
@@ -146,17 +371,20 @@ def create_crm_tool() -> Tool:
         idempotency_strategy=IdempotencyStrategy.IDEMPOTENCY_KEY,
         input_schema={
             "type": "object",
-            "required": ["lead_id", "action", "payload"],
+            "required": ["action", "payload"],
             "properties": {
+                "action": {"type": "string", "enum": ["create_contact", "update_contact", "create_deal"]},
                 "lead_id": {"type": "string"},
-                "action": {"type": "string", "enum": ["create", "update", "upsert"]},
+                "crm_record_id": {"type": "string"},
                 "payload": {"type": "object"}
             }
         }
     )
 
 
-# 3. WebhookTool Implementation
+# ==============================================================================
+# 4. Outbound Webhook Tool
+# ==============================================================================
 class WebhookToolExecutor:
     """Concrete outbound webhook tool executor delivering events to third-party endpoints."""
 
@@ -173,9 +401,7 @@ class WebhookToolExecutor:
             raise ValueError("WebhookTool requires target 'url'.")
 
         if self.mock_mode:
-            logger.warning(
-                f"[MOCK MODE] WebhookTool simulated outbound delivery to '{url}'. No live network request dispatched."
-            )
+            logger.warning(f"[MOCK MODE] WebhookTool simulated outbound delivery to '{url}'.")
             return {
                 "delivered": True,
                 "target_url": url,
@@ -185,6 +411,7 @@ class WebhookToolExecutor:
                 "mode": "mock"
             }
 
+        import httpx
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             resp = await client.post(url, json=payload, headers=headers)
             return {

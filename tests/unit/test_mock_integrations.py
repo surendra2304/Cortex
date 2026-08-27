@@ -42,7 +42,7 @@ async def test_crm_tool_mock_mode():
     assert result["status"] == "success"
     assert result["result"]["crm_sync_status"] == "synced"
     assert result["result"]["mode"] == "mock"
-    assert "crm_mock_rec_" in result["result"]["crm_record_id"]
+    assert "hubspot_mock_" in result["result"]["crm_record_id"]
 
 
 @pytest.mark.asyncio

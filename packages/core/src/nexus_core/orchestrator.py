@@ -27,6 +27,8 @@ from nexus_tool_runtime import Tool, Execution, SideEffectLevel, ToolBus, ToolCa
 from nexus_integrations import (
     EmailToolExecutor, create_email_tool,
     CRMToolExecutor, create_crm_tool,
+    SMSToolExecutor, create_sms_tool,
+    VoiceToolExecutor, create_voice_tool,
     WebhookToolExecutor, create_webhook_tool
 )
 from nexus_policy_engine import PolicyEngine
@@ -39,10 +41,15 @@ trace_id_ctx = contextvars.ContextVar("trace_id_ctx", default=None)
 
 def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
     bus = ToolBus(redis_client=redis_client)
+    
+    # Concrete communication & CRM tools
     bus.register_tool(create_email_tool(), EmailToolExecutor())
     bus.register_tool(create_crm_tool(), CRMToolExecutor())
+    bus.register_tool(create_sms_tool(), SMSToolExecutor())
+    bus.register_tool(create_voice_tool(), VoiceToolExecutor())
     bus.register_tool(create_webhook_tool(), WebhookToolExecutor())
 
+    # Fallback simulation tools
     banner_tool = Tool(
         name="banner_injection",
         capabilities=[ToolCapability.BANNER_INJECTION],
@@ -95,9 +102,7 @@ class Orchestrator:
         try:
             trace = []
 
-            # ----------------------------------------------------
-            # 1. OBSERVE: Parse incoming event trigger
-            # ----------------------------------------------------
+            # 1. OBSERVE
             trace.append({
                 "phase": "1.Observe",
                 "event_id": event.event_id,
@@ -106,9 +111,7 @@ class Orchestrator:
                 "trace_id": trace_id
             })
 
-            # ----------------------------------------------------
-            # 2. CONTEXTUALIZE: Fetch visitor and profile data from DB
-            # ----------------------------------------------------
+            # 2. CONTEXTUALIZE
             visitor_attributes = {}
             profile_traits = {}
             profile_email = None
@@ -128,7 +131,7 @@ class Orchestrator:
                                 profile_traits = dict(p_record.traits or {})
                                 profile_email = p_record.primary_email
                 except Exception as exc:
-                    logger.warning(f"Error fetching visitor/profile context from DB: {exc}")
+                    logger.warning(f"DB lookup warning: {exc}")
 
             context = {
                 "tenant_id": event.tenant_id,
@@ -156,15 +159,11 @@ class Orchestrator:
             }
             trace.append({"phase": "2.Contextualize", "context_keys": list(context.keys())})
 
-            # ----------------------------------------------------
-            # 3. UNDERSTAND: Select specialist agent
-            # ----------------------------------------------------
+            # 3. UNDERSTAND
             agent = self.agent_registry.route_for_event(event.type)
             trace.append({"phase": "3.Understand", "selected_agent": agent.agent_id, "domain": agent.domain})
 
-            # ----------------------------------------------------
-            # 4. PLAN: Invoke agent and consult AI Universe Adapter
-            # ----------------------------------------------------
+            # 4. PLAN
             ai_req = IntelligenceRequest(
                 request_id=f"req_{loop_id}",
                 task_type="intervention_planning",
@@ -180,8 +179,7 @@ class Orchestrator:
                 goal=f"Determine optimal intervention for {event.type}",
                 context=context,
                 events=[event.model_dump(mode="json")],
-                allowed_capabilities=agent.capabilities,
-                policy_constraints=["no_unauthorized_high_impact_actions"]
+                allowed_capabilities=agent.capabilities
             )
             agent_output: AgentOutput = await agent.process(agent_input)
             trace.append({
@@ -192,9 +190,7 @@ class Orchestrator:
                 "ai_decision": ai_res.decision
             })
 
-            # ----------------------------------------------------
-            # 5. AUTHORIZE: Evaluate proposed actions with Policy Engine
-            # ----------------------------------------------------
+            # 5. AUTHORIZE
             authorized_actions = []
             for prop in agent_output.proposed_actions:
                 tool = self.tool_bus.get_tool(prop.action_type) or Tool(name=prop.action_type, side_effect_level=SideEffectLevel.READ)
@@ -218,9 +214,7 @@ class Orchestrator:
                     "reason": decision.reason
                 })
 
-            # ----------------------------------------------------
-            # 6. EXECUTE: Dispatch approved actions via Tool Bus
-            # ----------------------------------------------------
+            # 6. EXECUTE
             execution_results = []
             if authorized_actions:
                 for exec_item, tool in authorized_actions:
@@ -230,9 +224,7 @@ class Orchestrator:
             else:
                 trace.append({"phase": "6.Execute", "status": "no_auto_approved_actions_executed", "count": 0})
 
-            # ----------------------------------------------------
-            # 7. VERIFY: Check ToolBus execution results and verification
-            # ----------------------------------------------------
+            # 7. VERIFY
             verification_passed = all(
                 exec_item.verification.get("status") == "verified"
                 for exec_item, _ in authorized_actions
@@ -240,15 +232,11 @@ class Orchestrator:
             ) if authorized_actions else True
             trace.append({"phase": "7.Verify", "status": "verified" if verification_passed else "failed"})
 
-            # ----------------------------------------------------
-            # 8. MEASURE: Record outcome in DB
-            # ----------------------------------------------------
+            # 8. MEASURE
             measured_impact = agent_output.expected_outcomes
             trace.append({"phase": "8.Measure", "outcomes": measured_impact})
 
-            # ----------------------------------------------------
-            # 9. LEARN: Record immutable AuditRecord
-            # ----------------------------------------------------
+            # 9. LEARN
             audit = AuditRecord(
                 id=f"aud_{loop_id}",
                 tenant_id=event.tenant_id,
@@ -291,9 +279,7 @@ class Orchestrator:
 
             trace.append({"phase": "9.Learn", "audit_id": audit.id, "strategy_logged": True})
 
-            # ----------------------------------------------------
-            # 10. CONTINUE: Return loop execution summary
-            # ----------------------------------------------------
+            # 10. CONTINUE
             trace.append({"phase": "10.Continue", "status": "cycle_complete"})
 
             return {
