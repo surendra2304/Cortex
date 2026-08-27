@@ -33,6 +33,8 @@ class ToolCapability(str, Enum):
     WORKFLOW_TRIGGER = "workflow_trigger"
     CRM_SYNC = "crm_sync"
     OUTBOUND_WEBHOOK = "outbound_webhook"
+    PAYMENT_INITIATE = "payment_initiate"
+    TICKETING_CREATE = "ticketing_create"
 
 
 class Tool(BaseModel):

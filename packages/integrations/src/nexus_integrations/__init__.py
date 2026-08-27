@@ -444,3 +444,339 @@ def create_webhook_tool() -> Tool:
             }
         }
     )
+
+
+# ==============================================================================
+# 5. Stripe Payments Tool
+# ==============================================================================
+
+# Stripe SDK — optional import guard
+try:
+    import stripe as _stripe_sdk
+    HAVE_STRIPE = True
+except ImportError:
+    HAVE_STRIPE = False
+
+
+class PaymentsToolExecutor:
+    """
+    Stripe Payments executor supporting create_payment_link, retrieve_payment_intent,
+    and create_customer actions.  All SDK calls are synchronous and are safely wrapped
+    in asyncio.run_in_executor so the async event loop is never blocked.
+    Falls back to mock mode if STRIPE_SECRET_KEY is absent or MOCK_MODE=true.
+    """
+
+    def __init__(self, secret_key: Optional[str] = None, mock_mode: Optional[bool] = None):
+        self.secret_key = secret_key or os.getenv("STRIPE_SECRET_KEY")
+        self.mock_mode = mock_mode if mock_mode is not None else (
+            is_mock_mode_enabled() or not self.secret_key
+        )
+
+    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+        action = params.get("action", "create_payment_link")
+        payload = params.get("payload", {})
+
+        # ── Mock path ──────────────────────────────────────────────────────────
+        if self.mock_mode or not HAVE_STRIPE:
+            logger.warning(
+                f"[MOCK MODE] PaymentsTool simulated action '{action}'. "
+                "No live Stripe API call made."
+            )
+            mock_id = f"stripe_mock_{action}_{abs(hash(str(payload))) % 100000}"
+            if action == "create_payment_link":
+                return {
+                    "status": "created",
+                    "payment_link_id": mock_id,
+                    "url": f"https://buy.stripe.com/mock/{mock_id}",
+                    "amount": payload.get("amount", 0),
+                    "currency": payload.get("currency", "usd"),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            elif action == "retrieve_payment_intent":
+                return {
+                    "status": "succeeded",
+                    "payment_intent_id": payload.get("payment_intent_id", mock_id),
+                    "amount": payload.get("amount", 0),
+                    "currency": payload.get("currency", "usd"),
+                    "customer_id": payload.get("customer_id"),
+                    "retrieved_at": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            elif action == "create_customer":
+                return {
+                    "status": "created",
+                    "customer_id": mock_id,
+                    "email": payload.get("email"),
+                    "name": payload.get("name"),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            else:
+                raise ValueError(f"Unsupported PaymentsTool action: '{action}'.")
+
+        # ── Live Stripe path ───────────────────────────────────────────────────
+        _stripe_sdk.api_key = self.secret_key
+        loop = asyncio.get_event_loop()
+
+        try:
+            if action == "create_payment_link":
+                price_data = payload.get("price_data", {})
+
+                def _create_link():
+                    price = _stripe_sdk.Price.create(
+                        unit_amount=int(price_data.get("unit_amount", 0)),
+                        currency=price_data.get("currency", "usd"),
+                        product_data={"name": price_data.get("product_name", "NEXUS Service")},
+                    )
+                    link = _stripe_sdk.PaymentLink.create(
+                        line_items=[{"price": price.id, "quantity": 1}]
+                    )
+                    return link
+
+                link = await loop.run_in_executor(None, _create_link)
+                return {
+                    "status": "created",
+                    "payment_link_id": link.id,
+                    "url": link.url,
+                    "active": link.active,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "mode": "live",
+                }
+
+            elif action == "retrieve_payment_intent":
+                pi_id = payload.get("payment_intent_id")
+                if not pi_id:
+                    raise ValueError("retrieve_payment_intent requires 'payment_intent_id'.")
+
+                pi = await loop.run_in_executor(
+                    None, lambda: _stripe_sdk.PaymentIntent.retrieve(pi_id)
+                )
+                return {
+                    "status": pi.status,
+                    "payment_intent_id": pi.id,
+                    "amount": pi.amount,
+                    "currency": pi.currency,
+                    "customer_id": pi.customer,
+                    "retrieved_at": datetime.utcnow().isoformat(),
+                    "mode": "live",
+                }
+
+            elif action == "create_customer":
+                customer = await loop.run_in_executor(
+                    None,
+                    lambda: _stripe_sdk.Customer.create(
+                        email=payload.get("email"),
+                        name=payload.get("name"),
+                        metadata=payload.get("metadata", {}),
+                    ),
+                )
+                return {
+                    "status": "created",
+                    "customer_id": customer.id,
+                    "email": customer.email,
+                    "name": customer.name,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "mode": "live",
+                }
+
+            else:
+                raise ValueError(f"Unsupported PaymentsTool action: '{action}'.")
+
+        except Exception as exc:
+            logger.error(f"Stripe PaymentsTool execution failed for action '{action}': {exc}")
+            raise
+
+
+def create_payments_tool() -> Tool:
+    return Tool(
+        name="payments_tool",
+        version="1.0.0",
+        description=(
+            "Creates Stripe payment links, retrieves payment intents, "
+            "and provisions Stripe customer records."
+        ),
+        capabilities=[ToolCapability.PAYMENT_INITIATE],
+        side_effect_level=SideEffectLevel.HIGH_IMPACT,
+        auth_scope="integrations:payments",
+        rate_limit=30,
+        idempotency_strategy=IdempotencyStrategy.IDEMPOTENCY_KEY,
+        input_schema={
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create_payment_link", "retrieve_payment_intent", "create_customer"],
+                },
+                "payload": {"type": "object"},
+            },
+        },
+    )
+
+
+# ==============================================================================
+# 6. Zendesk Ticketing Tool
+# ==============================================================================
+
+class TicketingToolExecutor:
+    """
+    Zendesk ticketing executor supporting create_ticket and update_ticket.
+    Uses httpx (already async) to call the Zendesk REST API.
+    Reads ZENDESK_SUBDOMAIN and ZENDESK_API_TOKEN from env vars.
+    Falls back to mock mode if credentials are absent or MOCK_MODE=true.
+    """
+
+    def __init__(
+        self,
+        subdomain: Optional[str] = None,
+        api_token: Optional[str] = None,
+        zendesk_email: Optional[str] = None,
+        mock_mode: Optional[bool] = None,
+    ):
+        self.subdomain = subdomain or os.getenv("ZENDESK_SUBDOMAIN")
+        self.api_token = api_token or os.getenv("ZENDESK_API_TOKEN")
+        # Zendesk token auth requires "user_email/token" basic auth
+        self.zendesk_email = zendesk_email or os.getenv("ZENDESK_EMAIL", "admin@nexus.dev")
+        self.mock_mode = mock_mode if mock_mode is not None else (
+            is_mock_mode_enabled() or not (self.subdomain and self.api_token)
+        )
+
+    def _base_url(self) -> str:
+        return f"https://{self.subdomain}.zendesk.com/api/v2"
+
+    def _auth(self):
+        """Returns httpx BasicAuth using Zendesk email/token scheme."""
+        import httpx
+        return httpx.BasicAuth(
+            username=f"{self.zendesk_email}/token",
+            password=self.api_token or "",
+        )
+
+    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+        action = params.get("action", "create_ticket")
+        payload = params.get("payload", {})
+
+        # ── Mock path ──────────────────────────────────────────────────────────
+        if self.mock_mode:
+            mock_id = abs(hash(str(payload))) % 100000
+            logger.warning(
+                f"[MOCK MODE] TicketingTool simulated action '{action}'. "
+                "No live Zendesk API call made."
+            )
+            if action == "create_ticket":
+                return {
+                    "status": "created",
+                    "ticket_id": mock_id,
+                    "ticket_url": f"https://mock.zendesk.com/tickets/{mock_id}",
+                    "subject": payload.get("subject", "Support Request"),
+                    "priority": payload.get("priority", "normal"),
+                    "created_at": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            elif action == "update_ticket":
+                return {
+                    "status": "updated",
+                    "ticket_id": payload.get("ticket_id", mock_id),
+                    "updated_fields": list(payload.keys()),
+                    "updated_at": datetime.utcnow().isoformat(),
+                    "mode": "mock",
+                }
+            else:
+                raise ValueError(f"Unsupported TicketingTool action: '{action}'.")
+
+        # ── Live Zendesk path ──────────────────────────────────────────────────
+        import httpx
+
+        try:
+            async with httpx.AsyncClient(auth=self._auth(), timeout=10.0) as client:
+                if action == "create_ticket":
+                    ticket_body = {
+                        "ticket": {
+                            "subject": payload.get("subject", "Support Request"),
+                            "comment": {"body": payload.get("description", "")},
+                            "priority": payload.get("priority", "normal"),
+                            "type": payload.get("ticket_type", "question"),
+                            "tags": payload.get("tags", ["nexus-auto"]),
+                            "requester": {
+                                "name": payload.get("requester_name", "NEXUS System"),
+                                "email": payload.get("requester_email", self.zendesk_email),
+                            },
+                        }
+                    }
+                    resp = await client.post(
+                        f"{self._base_url()}/tickets.json",
+                        json=ticket_body,
+                    )
+                    resp.raise_for_status()
+                    ticket = resp.json()["ticket"]
+                    return {
+                        "status": "created",
+                        "ticket_id": ticket["id"],
+                        "ticket_url": ticket.get("url", ""),
+                        "subject": ticket["subject"],
+                        "priority": ticket["priority"],
+                        "created_at": ticket.get("created_at", datetime.utcnow().isoformat()),
+                        "mode": "live",
+                    }
+
+                elif action == "update_ticket":
+                    ticket_id = payload.get("ticket_id")
+                    if not ticket_id:
+                        raise ValueError("update_ticket requires 'ticket_id' in payload.")
+
+                    update_body: Dict[str, Any] = {"ticket": {}}
+                    for field in ("status", "priority", "comment", "tags", "assignee_id"):
+                        if field in payload:
+                            if field == "comment":
+                                update_body["ticket"]["comment"] = {"body": payload["comment"]}
+                            else:
+                                update_body["ticket"][field] = payload[field]
+
+                    resp = await client.put(
+                        f"{self._base_url()}/tickets/{ticket_id}.json",
+                        json=update_body,
+                    )
+                    resp.raise_for_status()
+                    ticket = resp.json()["ticket"]
+                    return {
+                        "status": "updated",
+                        "ticket_id": ticket["id"],
+                        "updated_fields": list(update_body["ticket"].keys()),
+                        "updated_at": ticket.get("updated_at", datetime.utcnow().isoformat()),
+                        "mode": "live",
+                    }
+
+                else:
+                    raise ValueError(f"Unsupported TicketingTool action: '{action}'.")
+
+        except Exception as exc:
+            logger.error(f"Zendesk TicketingTool execution failed for action '{action}': {exc}")
+            raise
+
+
+def create_ticketing_tool() -> Tool:
+    return Tool(
+        name="ticketing_tool",
+        version="1.0.0",
+        description=(
+            "Creates and updates Zendesk support tickets for customer-facing issues, "
+            "account escalations, and automated incident reporting."
+        ),
+        capabilities=[ToolCapability.TICKETING_CREATE],
+        side_effect_level=SideEffectLevel.SENSITIVE,
+        auth_scope="integrations:ticketing",
+        rate_limit=60,
+        idempotency_strategy=IdempotencyStrategy.IDEMPOTENCY_KEY,
+        input_schema={
+            "type": "object",
+            "required": ["action"],
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["create_ticket", "update_ticket"],
+                },
+                "payload": {"type": "object"},
+            },
+        },
+    )

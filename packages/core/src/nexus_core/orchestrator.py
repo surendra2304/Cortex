@@ -29,7 +29,9 @@ from nexus_integrations import (
     CRMToolExecutor, create_crm_tool,
     SMSToolExecutor, create_sms_tool,
     VoiceToolExecutor, create_voice_tool,
-    WebhookToolExecutor, create_webhook_tool
+    WebhookToolExecutor, create_webhook_tool,
+    PaymentsToolExecutor, create_payments_tool,
+    TicketingToolExecutor, create_ticketing_tool,
 )
 from nexus_policy_engine import PolicyEngine
 from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
@@ -48,6 +50,10 @@ def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
     bus.register_tool(create_sms_tool(), SMSToolExecutor())
     bus.register_tool(create_voice_tool(), VoiceToolExecutor())
     bus.register_tool(create_webhook_tool(), WebhookToolExecutor())
+
+    # Payments & Support tools
+    bus.register_tool(create_payments_tool(), PaymentsToolExecutor())
+    bus.register_tool(create_ticketing_tool(), TicketingToolExecutor())
 
     # Fallback simulation tools
     banner_tool = Tool(

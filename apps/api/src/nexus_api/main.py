@@ -17,6 +17,7 @@ from nexus_api.config import settings
 from nexus_api.tracing import TracingMiddleware
 from nexus_api.events_router import router as events_router
 from nexus_api.webhooks_router import router as webhooks_router
+from nexus_api.stripe_webhook_router import router as stripe_webhook_router
 from nexus_api.public_gateway import router as public_gateway_router
 
 app = FastAPI(
@@ -39,6 +40,7 @@ app.add_middleware(
 app.include_router(public_gateway_router)
 app.include_router(events_router)
 app.include_router(webhooks_router)
+app.include_router(stripe_webhook_router)
 
 
 @app.get("/v1/health", tags=["System"])
