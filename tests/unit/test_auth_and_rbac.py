@@ -34,11 +34,41 @@ def test_rbac_roles_enforcement():
     assert res_operator_approve.status_code == 200
     assert res_operator_approve.json()["status"] == "approved"
 
-    # 4. Operator CANNOT invoke Friday admin command
-    res_operator_friday = client.post("/v1/friday/command", json={"command": "recalibrate"}, headers={"Authorization": f"Bearer {operator_token}"})
-    assert res_operator_friday.status_code == 403
+    # 4. POST /v1/friday/command uses X-Friday-Api-Key header auth (not JWT Bearer).
+    #    With a key configured and MOCK_MODE=false, any JWT Bearer token (even admin)
+    #    correctly returns 401 (missing X-Friday-Api-Key header).
+    import nexus_api.auth as _auth
+    _saved_key = _auth.FRIDAY_API_KEY
+    _saved_env_key = os.environ.get("FRIDAY_API_KEY")
+    _saved_mock = os.environ.get("MOCK_MODE")
+    try:
+        _auth.FRIDAY_API_KEY = "rbac_test_secret_999"
+        os.environ["FRIDAY_API_KEY"] = "rbac_test_secret_999"
+        os.environ["MOCK_MODE"] = "false"
 
-    # 5. Admin CAN invoke Friday command
-    res_admin_friday = client.post("/v1/friday/command", json={"command": "recalibrate"}, headers={"Authorization": f"Bearer {admin_token}"})
-    assert res_admin_friday.status_code == 200
-    assert res_admin_friday.json()["status"] == "acknowledged"
+        res_operator_friday = client.post(
+            "/v1/friday/command",
+            json={"goal": "test", "required_capability": "growth", "requested_action": "page_view"},
+            headers={"Authorization": f"Bearer {operator_token}"},
+        )
+        assert res_operator_friday.status_code == 401, \
+            f"Expected 401 (missing X-Friday-Api-Key), got {res_operator_friday.status_code}"
+
+        # 5. Admin JWT also returns 401 — FRIDAY uses its own auth scheme, not RBAC.
+        res_admin_friday = client.post(
+            "/v1/friday/command",
+            json={"goal": "test", "required_capability": "growth", "requested_action": "page_view"},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert res_admin_friday.status_code == 401, \
+            f"Expected 401 (missing X-Friday-Api-Key), got {res_admin_friday.status_code}"
+    finally:
+        _auth.FRIDAY_API_KEY = _saved_key
+        if _saved_env_key is not None:
+            os.environ["FRIDAY_API_KEY"] = _saved_env_key
+        else:
+            os.environ.pop("FRIDAY_API_KEY", None)
+        if _saved_mock is not None:
+            os.environ["MOCK_MODE"] = _saved_mock
+        else:
+            os.environ.pop("MOCK_MODE", None)

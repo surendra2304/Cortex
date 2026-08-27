@@ -9,6 +9,7 @@ class ActorType(str, Enum):
     USER = "user"
     AGENT = "agent"
     SYSTEM = "system"
+    FRIDAY_SYSTEM = "friday_system"
 
 
 class Actor(BaseModel):

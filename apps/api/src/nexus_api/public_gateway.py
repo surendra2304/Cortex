@@ -300,18 +300,7 @@ async def get_audit_logs(
     }
 
 
-# 10. Friday Command Bridge - Requires ADMIN role
-@router.post("/friday/command")
-async def execute_friday_command(
-    payload: Dict[str, Any],
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_ADMIN))
-):
-    command = payload.get("command", "")
-    return {
-        "status": "acknowledged",
-        "command": command,
-        "executed_by": "FRIDAY_SUPERVISOR_BRIDGE",
-        "caller": auth["sub"],
-        "timestamp": datetime.utcnow().isoformat(),
-        "trace_id": get_current_trace_id()
-    }
+# Note: The full FRIDAY integration gateway (POST /v1/friday/command,
+# GET /v1/friday/health_summary, GET /v1/friday/priority_leads,
+# GET /v1/friday/incidents) is implemented in nexus_api.friday_router and
+# mounted separately in main.py.  The stub below is intentionally removed.

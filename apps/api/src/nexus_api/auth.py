@@ -7,6 +7,8 @@ import os
 import logging
 from jose import jwt, JWTError
 
+import hmac
+
 logger = logging.getLogger("nexus-auth")
 security = HTTPBearer(auto_error=False)
 
@@ -15,18 +17,23 @@ OIDC_ISSUER = os.getenv("OIDC_ISSUER")
 OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "nexus-api")
 JWT_SECRET = os.getenv("JWT_SECRET", "super_secret_jwt_signing_key_replace_in_production")
 
+# FRIDAY integration shared secret
+FRIDAY_API_KEY = os.getenv("FRIDAY_API_KEY", "")
+
 
 class Role(str, Enum):
     NEXUS_VIEWER = "nexus_viewer"
     NEXUS_OPERATOR = "nexus_operator"
     NEXUS_ADMIN = "nexus_admin"
+    FRIDAY_SYSTEM = "friday_system"
 
 
 # Role hierarchy mapping
 ROLE_HIERARCHY = {
     Role.NEXUS_VIEWER: [Role.NEXUS_VIEWER],
     Role.NEXUS_OPERATOR: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR],
-    Role.NEXUS_ADMIN: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR, Role.NEXUS_ADMIN]
+    Role.NEXUS_ADMIN: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR, Role.NEXUS_ADMIN],
+    Role.FRIDAY_SYSTEM: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR, Role.NEXUS_ADMIN, Role.FRIDAY_SYSTEM],
 }
 
 # In-memory cached JWKS keys
@@ -148,3 +155,55 @@ def require_role(required_role: Role):
             )
         return user
     return role_checker
+
+
+async def verify_friday_token(
+    x_friday_api_key: Optional[str] = Header(None, alias="X-Friday-Api-Key")
+) -> Dict[str, Any]:
+    """
+    Validates that the request originates from the FRIDAY general OS by checking
+    the X-Friday-Api-Key header against the FRIDAY_API_KEY env var.
+
+    Uses hmac.compare_digest for constant-time comparison to prevent timing attacks.
+    In dev (MOCK_MODE=true and no FRIDAY_API_KEY set), the check is bypassed with a
+    clear warning log so engineers can test locally without a live FRIDAY instance.
+    """
+    configured_key = FRIDAY_API_KEY or os.getenv("FRIDAY_API_KEY", "")
+    is_mock = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
+
+    # Dev bypass: no key configured and mock mode active
+    if not configured_key and is_mock:
+        logger.warning(
+            "[MOCK MODE] FRIDAY_API_KEY not set — bypassing FRIDAY token verification. "
+            "DO NOT use this in production."
+        )
+        return {
+            "sub": "friday_system",
+            "role": Role.FRIDAY_SYSTEM.value,
+            "tenant_id": "system",
+            "system": "FRIDAY",
+        }
+
+    if not x_friday_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Friday-Api-Key header. FRIDAY service token is required.",
+        )
+
+    # Constant-time comparison to prevent timing side-channel attacks
+    provided = x_friday_api_key.encode("utf-8")
+    expected = configured_key.encode("utf-8")
+    if not hmac.compare_digest(provided, expected):
+        logger.warning("FRIDAY authentication attempt with invalid API key rejected.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid FRIDAY service token.",
+        )
+
+    logger.info("FRIDAY system authenticated successfully.")
+    return {
+        "sub": "friday_system",
+        "role": Role.FRIDAY_SYSTEM.value,
+        "tenant_id": "system",
+        "system": "FRIDAY",
+    }

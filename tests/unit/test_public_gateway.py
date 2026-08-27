@@ -117,8 +117,9 @@ def test_public_gateway_actions_and_audit():
     assert res_audit.json()["resource_type"] == "actions"
 
 
-def test_friday_command_bridge():
+def test_public_gateway_health():
+    """The existing /v1/health endpoint should remain reachable after FRIDAY router changes."""
     client = TestClient(app)
-    res = client.post("/v1/friday/command", json={"command": "STATUS_REPORT"})
+    res = client.get("/v1/health")
     assert res.status_code == 200
-    assert res.json()["executed_by"] == "FRIDAY_SUPERVISOR_BRIDGE"
+    assert res.json()["status"] == "healthy"
