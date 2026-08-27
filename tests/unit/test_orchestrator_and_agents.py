@@ -28,19 +28,17 @@ async def test_agent_registry_routing():
 
 @pytest.mark.asyncio
 async def test_workflow_state_machine():
-    ctx = WorkflowContext(
-        workflow_id="wf_101",
-        tenant_id="tenant_alpha",
-        site_id="site_beta",
-        trigger_data={"event": "lead_created"}
+    sm = WorkflowStateMachine(db=None)
+    ctx = await sm.start_workflow(
+        workflow_name="HIGH_INTENT_FOLLOWUP",
+        trigger_event={"type": "lead_created"}
     )
-    sm = WorkflowStateMachine(ctx)
-    sm.transition(WorkflowState.CONTEXT_ASSEMBLY)
-    sm.transition(WorkflowState.AGENT_RUN)
-    sm.transition(WorkflowState.COMPLETED)
+    await sm.transition(ctx, WorkflowState.PLANNING, "PLAN")
+    await sm.transition(ctx, WorkflowState.EXECUTING, "EXECUTE")
+    await sm.transition(ctx, WorkflowState.COMPLETED, "COMPLETE")
 
     assert ctx.current_state == WorkflowState.COMPLETED
-    assert len(ctx.history) == 3
+    assert len(ctx.steps) == 4
 
 
 @pytest.mark.asyncio

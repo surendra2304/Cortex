@@ -286,3 +286,17 @@ class CohortEngine:
             })
 
         return results
+
+
+from nexus_analytics.outcomes import OutcomeTracker, OutcomeVerdict, StrategyStatus, OutcomeRecord
+
+__all__ = [
+    "ScoringEngine",
+    "ScoreBreakdown",
+    "FunnelEngine",
+    "CohortEngine",
+    "OutcomeTracker",
+    "OutcomeVerdict",
+    "StrategyStatus",
+    "OutcomeRecord"
+]

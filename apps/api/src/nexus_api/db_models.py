@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -159,3 +159,53 @@ class MemoryEntryModel(Base):
     source = Column(String(64), default="cognitive_loop", nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class WorkflowRunModel(Base):
+    __tablename__ = "workflow_runs"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    workflow_name = Column(String(64), nullable=False, index=True)
+    trigger_event = Column(String(128), nullable=False)
+    state = Column(String(32), nullable=False, index=True)  # TRIGGERED, PLANNING, EXECUTING, COMPLETED, etc.
+    steps = Column(JSONB, default=list, nullable=False)
+    context_data = Column("context", JSONB, default=dict, nullable=False)
+    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class ApprovalQueueModel(Base):
+    __tablename__ = "approval_queue"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    workflow_run_id = Column(String(64), nullable=True, index=True)
+    action_type = Column(String(64), nullable=False)
+    target = Column(String(128), nullable=False)
+    params = Column(JSONB, default=dict, nullable=False)
+    rationale = Column(Text, nullable=False)
+    evidence_refs = Column(JSONB, default=list, nullable=False)
+    risk_score = Column(Float, default=0.5, nullable=False)
+    status = Column(String(32), default="pending", nullable=False)  # pending, approved, rejected, expired
+    decision_by = Column(String(128), nullable=True)
+    decision_reason = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class StrategyPerformanceModel(Base):
+    __tablename__ = "strategy_performance"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    strategy_key = Column(String(128), nullable=False, index=True)
+    status = Column(String(32), default="PROBATION", nullable=False)  # PROVEN, PROBATION, DEMOTED
+    total_executions = Column(Integer, default=0, nullable=False)
+    successes = Column(Integer, default=0, nullable=False)
+    failures = Column(Integer, default=0, nullable=False)
+    success_rate = Column(Float, default=0.0, nullable=False)
+    confidence = Column(Float, default=0.0, nullable=False)
+    recent_outcomes = Column(JSONB, default=list, nullable=False)
+    last_updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)

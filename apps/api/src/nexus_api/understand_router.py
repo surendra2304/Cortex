@@ -206,3 +206,150 @@ async def get_memory_entries(
         "scope_id": scope_id,
         "entries": [e.model_dump(mode="json") for e in entries]
     }
+
+
+# ── 5. WORKFLOWS & AUTOMATION ────────────────────────────────────────────────
+
+from nexus_workflow_engine import WorkflowStateMachine, WorkflowState
+from nexus_analytics import OutcomeTracker
+from nexus_api.db_models import WorkflowRunModel, ApprovalQueueModel
+
+outcome_tracker = OutcomeTracker()
+
+
+@router.get("/workflows")
+async def list_available_workflows():
+    """Returns definitions of all 5 first-class operational workflows."""
+    return [
+        {"name": "HIGH_INTENT_FOLLOWUP", "description": "High intent detection -> business hours check -> email dispatch -> open/reply outcome tracking"},
+        {"name": "LEAD_QUALIFICATION_ROUTING", "description": "Lead score computation -> AI qualification review -> route to sales tier"},
+        {"name": "ABANDONED_FORM_RECOVERY", "description": "Form started without submit -> wait -> recovery email -> completion tracking"},
+        {"name": "CONVERSION_DROP_DIAGNOSIS", "description": "Funnel anomaly detected -> slice segments -> AI debate mode -> auto-remediate"},
+        {"name": "CHURN_RISK_INTERVENTION", "description": "Churn signals -> ChurnRiskAgent -> AI strategy -> win-back proposal"}
+    ]
+
+
+@router.post("/workflows/{workflow_name}/run")
+async def trigger_workflow_run(
+    workflow_name: str,
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Trigger a new execution run of a named workflow."""
+    sm = WorkflowStateMachine(db=db)
+    ctx = await sm.start_workflow(
+        workflow_name=workflow_name,
+        trigger_event=payload.get("trigger_event", {"type": "manual_trigger"}),
+        context_data=payload.get("context_data", {})
+    )
+
+    if workflow_name == "HIGH_INTENT_FOLLOWUP":
+        await sm.execute_high_intent_followup(ctx, None)
+    elif workflow_name == "CONVERSION_DROP_DIAGNOSIS":
+        await sm.execute_conversion_drop_diagnosis(ctx, None)
+
+    return {"status": "started", "run_id": ctx.run_id, "state": ctx.current_state.value, "steps": ctx.steps}
+
+
+@router.get("/workflows/runs/{run_id}")
+async def get_workflow_run_details(
+    run_id: str,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Fetch execution run history and step timeline for a workflow run."""
+    stmt = select(WorkflowRunModel).where(WorkflowRunModel.id == run_id)
+    res = await db.execute(stmt)
+    run = res.scalar_one_or_none()
+    if not run:
+        raise HTTPException(status_code=404, detail="Workflow run not found")
+
+    return {
+        "run_id": run.id,
+        "workflow_name": run.workflow_name,
+        "trigger_event": run.trigger_event,
+        "state": run.state,
+        "steps": run.steps,
+        "context_data": run.context_data,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None
+    }
+
+
+# ── 6. APPROVAL QUEUE (HUMAN-IN-THE-LOOP) ────────────────────────────────────
+
+@router.get("/approvals/pending")
+async def get_pending_approvals(
+    tenant_id: str = "default",
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Returns all pending approval items requiring operator decision."""
+    stmt = select(ApprovalQueueModel).where(
+        ApprovalQueueModel.tenant_id == tenant_id,
+        ApprovalQueueModel.status == "pending"
+    ).order_by(desc(ApprovalQueueModel.risk_score))
+    res = await db.execute(stmt)
+    return [
+        {
+            "id": a.id,
+            "workflow_run_id": a.workflow_run_id,
+            "action_type": a.action_type,
+            "target": a.target,
+            "params": a.params,
+            "rationale": a.rationale,
+            "evidence_refs": a.evidence_refs,
+            "risk_score": a.risk_score,
+            "expires_at": a.expires_at.isoformat()
+        }
+        for a in res.scalars().all()
+    ]
+
+
+@router.post("/actions/{action_id}/approve")
+async def approve_action(
+    action_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Approve a pending high-impact action."""
+    stmt = select(ApprovalQueueModel).where(ApprovalQueueModel.id == action_id)
+    res = await db.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Approval item not found")
+
+    item.status = "approved"
+    item.decision_by = payload.get("operator_id", "nexus_operator") if payload else "nexus_operator"
+    item.decided_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "approved", "action_id": action_id}
+
+
+@router.post("/actions/{action_id}/reject")
+async def reject_action(
+    action_id: str,
+    payload: Optional[Dict[str, Any]] = None,
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Reject a pending high-impact action with reason."""
+    stmt = select(ApprovalQueueModel).where(ApprovalQueueModel.id == action_id)
+    res = await db.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Approval item not found")
+
+    item.status = "rejected"
+    item.decision_by = payload.get("operator_id", "nexus_operator") if payload else "nexus_operator"
+    item.decision_reason = payload.get("reason", "Operator rejected action") if payload else "Operator rejected action"
+    item.decided_at = datetime.utcnow()
+    await db.commit()
+    return {"status": "rejected", "action_id": action_id, "reason": item.decision_reason}
+
+
+# ── 7. STRATEGY PERFORMANCE & OUTCOMES ───────────────────────────────────────
+
+@router.get("/strategies/performance")
+async def get_strategies_performance(
+    db: AsyncSession = Depends(get_db_session)
+):
+    """Returns PROVEN, PROBATION, and DEMOTED strategy performance ratings."""
+    return await outcome_tracker.get_strategy_performance(db)
