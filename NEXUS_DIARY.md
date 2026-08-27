@@ -4,17 +4,16 @@ This document serves as the master index and running summary of engineering prog
 
 ---
 
-### ?? [Day 1 ? 2026-08-27: Monorepo Foundation, Cognitive Loop & Agent Ecosystem](diary/2026-08-27.md)
-- **?? Focus**: Monorepo foundation, Browser SDK, Event Gateway, Policy Engine, Agent Ecosystem, Workflow Engine, and 10-Phase Cognitive Loop.
+### ?? [Day 1 ? 2026-08-27: Full Platform Foundation, Cognitive Loop & Control Center Dashboard](diary/2026-08-27.md)
+- **?? Focus**: Monorepo foundation, Browser SDK, Event Gateway, Policy Engine, Agent Ecosystem, 10-Phase Cognitive Loop, Public API Gateway, and React Next.js Dashboard.
 - **?? What I Accomplished**:
-  - I created the `nexus_agents` package with `AgentInput`, `AgentOutput`, `SpecialistAgent`, and `AgentRegistry`.
-  - I implemented domain agents for Growth, Sales, Support, and Reliability operations.
-  - I engineered `nexus_workflow_engine` with `WorkflowStateMachine` and dead-letter queues.
-  - I built the 10-phase `Orchestrator` implementing the full NEXUS Cognitive Loop.
-  - I authored unit test suites validating the end-to-end cognitive loop and agent routing (100% passing).
+  - I created the Public API Gateway routes (`/visitors`, `/leads`, `/analytics`, `/agents`, `/workflows`, `/actions/:id/approve`, `/audit`, `/friday/command`).
+  - I built the `TracingMiddleware` maintaining distributed `trace_id` across request lifecycles.
+  - I scaffolded the React/Next.js dashboard with Tailwind CSS and created all 12 operational pages.
+  - I authored unit test suites validating public endpoints, auth stubs, and trace propagation (100% passing).
 - **??? Fixes & Hardening**:
-  - I ensured complete trace capture across all 10 cognitive phases regardless of tool approval states.
+  - I hardened distributed tracing propagation in Starlette middleware and FastAPI response headers.
   - I verified strict diary line constraints using automated verification tests.
-- **?? Test Results**: **10 passed** (100% green pass rate under pytest).
+- **?? Test Results**: **16 passed** (100% green pass rate under pytest).
 
 ---

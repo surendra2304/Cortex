@@ -7,10 +7,17 @@ import os
 # Add local packages to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/core/src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/event_schema/src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/agents/src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/ai_universe_adapter/src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/tool_runtime/src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/policy_engine/src")))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/workflow_engine/src")))
 
 from nexus_api.config import settings
+from nexus_api.tracing import TracingMiddleware
 from nexus_api.events_router import router as events_router
 from nexus_api.webhooks_router import router as webhooks_router
+from nexus_api.public_gateway import router as public_gateway_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -20,6 +27,7 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+app.add_middleware(TracingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
@@ -28,6 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(public_gateway_router)
 app.include_router(events_router)
 app.include_router(webhooks_router)
 
