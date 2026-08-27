@@ -224,3 +224,16 @@ async def match_personalization_experience(payload: Dict[str, Any]):
     ]
     matched = exp_engine.evaluate_personalization_rules(traits, page_path, rules)
     return {"matched": matched is not None, "experience": matched}
+
+
+# ── 6. NATURAL LANGUAGE ANALYTICS QUERYING ───────────────────────────────────
+
+from nexus_analytics import AdvancedAnalyticsEngine, NLQueryRequest, NLQueryResponse
+
+nl_analytics_engine = AdvancedAnalyticsEngine()
+
+
+@router.post("/analytics/query", response_model=NLQueryResponse)
+async def query_analytics_natural_language(req: NLQueryRequest):
+    """Parses natural language operations questions and returns structured query results."""
+    return nl_analytics_engine.parse_natural_language_query(req.question)

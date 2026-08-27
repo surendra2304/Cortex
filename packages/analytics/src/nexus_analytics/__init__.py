@@ -295,6 +295,11 @@ from nexus_analytics.experiments import (
     ExperimentVariant,
     ExperimentStatus
 )
+from nexus_analytics.nl_query import (
+    AdvancedAnalyticsEngine,
+    NLQueryRequest,
+    NLQueryResponse
+)
 
 __all__ = [
     "ScoringEngine",
@@ -308,5 +313,8 @@ __all__ = [
     "ExperimentationEngine",
     "ExperimentDefinition",
     "ExperimentVariant",
-    "ExperimentStatus"
+    "ExperimentStatus",
+    "AdvancedAnalyticsEngine",
+    "NLQueryRequest",
+    "NLQueryResponse"
 ]

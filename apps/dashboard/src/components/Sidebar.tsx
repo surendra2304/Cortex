@@ -3,6 +3,7 @@ import Link from "next/link";
 
 export const NAV_ITEMS = [
   { name: "Overview", href: "/" },
+  { name: "Analytics", href: "/analytics" },
   { name: "Visitors", href: "/visitors" },
   { name: "Leads", href: "/leads" },
   { name: "Funnels", href: "/funnels" },
