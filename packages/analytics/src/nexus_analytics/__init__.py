@@ -289,6 +289,12 @@ class CohortEngine:
 
 
 from nexus_analytics.outcomes import OutcomeTracker, OutcomeVerdict, StrategyStatus, OutcomeRecord
+from nexus_analytics.experiments import (
+    ExperimentationEngine,
+    ExperimentDefinition,
+    ExperimentVariant,
+    ExperimentStatus
+)
 
 __all__ = [
     "ScoringEngine",
@@ -298,5 +304,9 @@ __all__ = [
     "OutcomeTracker",
     "OutcomeVerdict",
     "StrategyStatus",
-    "OutcomeRecord"
+    "OutcomeRecord",
+    "ExperimentationEngine",
+    "ExperimentDefinition",
+    "ExperimentVariant",
+    "ExperimentStatus"
 ]

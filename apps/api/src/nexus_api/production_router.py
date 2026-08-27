@@ -1,7 +1,7 @@
 import time
 import json
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from fastapi import APIRouter, Depends, Response, HTTPException, status, WebSocket, WebSocketDisconnect
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -169,3 +169,58 @@ from nexus_integrations import get_connector_registry
 async def list_registered_connectors():
     """Returns real-time health, scopes, and circuit breaker status for all ecosystem connectors."""
     return get_connector_registry()
+
+
+# ── 5. EXPERIMENTATION & PERSONALIZATION ─────────────────────────────────────
+
+from nexus_analytics import ExperimentationEngine, ExperimentDefinition, ExperimentVariant, ExperimentStatus
+
+exp_engine = ExperimentationEngine()
+
+DEMO_EXPERIMENTS: List[ExperimentDefinition] = [
+    ExperimentDefinition(
+        id="exp_hero_cta_v1",
+        name="Homepage Hero CTA Optimization",
+        hypothesis="High-contrast aggressive CTA variant increases demo request conversion rate by >15%.",
+        target_page="/",
+        primary_metric="conversion_rate",
+        variants=[
+            ExperimentVariant(id="var_control", name="Control (Standard Blue)", weight=0.5, visitors_count=1200, conversions_count=84, payload={"cta_color": "#2563eb", "text": "Get Started"}),
+            ExperimentVariant(id="var_variant_b", name="Variant B (Emerald Glow)", weight=0.5, visitors_count=1240, conversions_count=128, payload={"cta_color": "#059669", "text": "Deploy Autonomous Agent Now"})
+        ],
+        status=ExperimentStatus.ACTIVE
+    )
+]
+
+
+@router.get("/experiments")
+async def list_experiments():
+    """List all active and concluded A/B experiments with statistical significance results."""
+    results = []
+    for exp in DEMO_EXPERIMENTS:
+        stats = {}
+        if len(exp.variants) >= 2:
+            stats = exp_engine.calculate_significance(exp.variants[0], exp.variants[1])
+        results.append({
+            "id": exp.id,
+            "name": exp.name,
+            "hypothesis": exp.hypothesis,
+            "target_page": exp.target_page,
+            "status": exp.status.value,
+            "variants": [v.model_dump() for v in exp.variants],
+            "statistics": stats
+        })
+    return results
+
+
+@router.post("/personalization/match")
+async def match_personalization_experience(payload: Dict[str, Any]):
+    """Matches visitor traits to dynamic experience variants."""
+    traits = payload.get("traits", {})
+    page_path = payload.get("path", "/")
+    rules = [
+        {"segment": "enterprise", "path": "/", "experience_payload": {"hero_title": "Autonomous Website Intelligence for Enterprise Teams", "badge": "SOC2 Certified"}},
+        {"device": "mobile", "path": "/", "experience_payload": {"nav_mode": "compact_sheet", "cta_size": "large"}}
+    ]
+    matched = exp_engine.evaluate_personalization_rules(traits, page_path, rules)
+    return {"matched": matched is not None, "experience": matched}
