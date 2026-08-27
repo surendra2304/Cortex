@@ -4,12 +4,13 @@ from datetime import datetime
 import sys
 import os
 
-# Add local packages to sys.path for development imports
+# Add local packages to sys.path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/core/src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/event_schema/src")))
 
 from nexus_api.config import settings
-from nexus_event_schema import EventSchema, IngestEventResponse
+from nexus_api.events_router import router as events_router
+from nexus_api.webhooks_router import router as webhooks_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -27,6 +28,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(events_router)
+app.include_router(webhooks_router)
+
 
 @app.get("/v1/health", tags=["System"])
 async def health_check():
@@ -36,15 +40,6 @@ async def health_check():
         "environment": settings.app_env,
         "timestamp": datetime.utcnow().isoformat()
     }
-
-
-@app.post("/v1/events", response_model=IngestEventResponse, tags=["Events"])
-async def ingest_event(event: EventSchema):
-    return IngestEventResponse(
-        status="accepted",
-        event_id=event.event_id,
-        processed_at=datetime.utcnow()
-    )
 
 
 if __name__ == "__main__":
