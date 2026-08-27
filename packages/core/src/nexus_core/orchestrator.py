@@ -32,15 +32,11 @@ logger = logging.getLogger("nexus-orchestrator")
 
 
 def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
-    """Instantiate ToolBus with production concrete tool integrations."""
     bus = ToolBus(redis_client=redis_client)
-
-    # Register concrete tools
     bus.register_tool(create_email_tool(), EmailToolExecutor())
     bus.register_tool(create_crm_tool(), CRMToolExecutor())
     bus.register_tool(create_webhook_tool(), WebhookToolExecutor())
 
-    # Register baseline fallback tools
     banner_tool = Tool(
         name="banner_injection",
         capabilities=[ToolCapability.BANNER_INJECTION],
@@ -66,7 +62,7 @@ def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
 
 
 class Orchestrator:
-    """10-Phase NEXUS Cognitive Loop Orchestrator with Concrete Tool Execution & Audit Recording."""
+    """10-Phase NEXUS Cognitive Loop Orchestrator with Trust-Labeled Evidence & Dissent Auditing."""
 
     def __init__(
         self,
@@ -83,12 +79,13 @@ class Orchestrator:
 
     async def run_cognitive_loop(self, event: EventSchema) -> Dict[str, Any]:
         loop_id = f"loop_{uuid.uuid4().hex[:8]}"
+        trace_id = event.trace_id or f"trc_{uuid.uuid4().hex[:8]}"
         trace = []
 
         # 1. OBSERVE: Receive and parse incoming trigger event
         trace.append({"phase": "1.Observe", "event_id": event.event_id, "type": event.type})
 
-        # 2. CONTEXTUALIZE: Assemble tenant, site, visitor, and session state
+        # 2. CONTEXTUALIZE: Assemble state with explicit trust classifications
         context = {
             "tenant_id": event.tenant_id,
             "site_id": event.site_id,
@@ -96,19 +93,40 @@ class Orchestrator:
             "session_id": event.session_id,
             "event_data": event.data
         }
-        trace.append({"phase": "2.Contextualize", "context": context})
+        trust_labels = {
+            "tenant_id": "system_fact",
+            "site_id": "system_fact",
+            "actor": "verified_telemetry",
+            "event_data": "untrusted_user_input" if "input" in event.type else "verified_telemetry"
+        }
+        provenance = {
+            "origin_site": event.site_id,
+            "tenant_id": event.tenant_id,
+            "trace_id": trace_id,
+            "occurred_at": event.occurred_at.isoformat()
+        }
+        trace.append({"phase": "2.Contextualize", "context": context, "trust_labels": trust_labels})
 
-        # 3. UNDERSTAND: Select specialist agent and consult AI Universe if needed
+        # 3. UNDERSTAND: Select specialist agent and route to AI Universe Adapter
         agent = self.agent_registry.route_for_event(event.type)
         ai_req = IntelligenceRequest(
             request_id=f"req_{loop_id}",
             task_type="intent_scoring",
             goal=f"Determine optimal intervention for {event.type}",
             context=context,
-            evidence=[{"event_type": event.type, "actor_id": event.actor.id}]
+            evidence=[{"event_type": event.type, "actor_id": event.actor.id, "trust_label": "verified_telemetry"}],
+            trust_labels=trust_labels,
+            provenance=provenance
         )
         ai_res = await self.ai_client.evaluate(ai_req)
-        trace.append({"phase": "3.Understand", "agent_id": agent.agent_id, "ai_decision": ai_res.decision})
+        trace.append({
+            "phase": "3.Understand",
+            "agent_id": agent.agent_id,
+            "ai_decision": ai_res.decision,
+            "confidence": ai_res.confidence,
+            "fallback_applied": ai_res.fallback_applied,
+            "unresolved_disagreements": ai_res.unresolved_disagreements
+        })
 
         # 4. PLAN: Agent formulates action proposal
         agent_input = AgentInput(
@@ -167,7 +185,7 @@ class Orchestrator:
         measured_impact = agent_output.expected_outcomes
         trace.append({"phase": "8.Measure", "outcomes": measured_impact})
 
-        # 9. LEARN: Record audit log and policy feedback
+        # 9. LEARN: Record immutable AuditRecord with trust labels, dissent, and provenance
         audit = AuditRecord(
             id=f"aud_{loop_id}",
             tenant_id=event.tenant_id,
@@ -177,11 +195,16 @@ class Orchestrator:
             changes={
                 "agent_output": agent_output.model_dump(mode="json"),
                 "executions": execution_results,
-                "verification": "passed" if verification_passed else "failed"
+                "verification": "passed" if verification_passed else "failed",
+                "ai_decision": ai_res.decision,
+                "ai_confidence": ai_res.confidence,
+                "ai_dissent": ai_res.unresolved_disagreements,
+                "ai_provenance": ai_res.provenance,
+                "trust_labels": trust_labels
             }
         )
         self.audit_records.append(audit)
-        trace.append({"phase": "9.Learn", "audit_id": audit.id})
+        trace.append({"phase": "9.Learn", "audit_id": audit.id, "dissent_logged": bool(ai_res.unresolved_disagreements)})
 
         # 10. CONTINUE: Return loop result state and schedule next cycle
         trace.append({"phase": "10.Continue", "status": "cycle_complete"})
