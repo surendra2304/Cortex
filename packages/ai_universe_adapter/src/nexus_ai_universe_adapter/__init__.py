@@ -132,3 +132,98 @@ class AIUniverseClient:
                 return self._get_deterministic_fallback(request, str(exc))
 
         return self._get_deterministic_fallback(request, "max_retries_exceeded")
+
+
+from enum import Enum
+
+
+class AIMode(str, Enum):
+    """AI Universe deliberation mode — controls how many agents participate."""
+    FAST   = "fast"    # Single specialist, low latency — for AMBIGUOUS decisions
+    REVIEW = "review"  # Two-agent critique pass — moderate ambiguity
+    DEBATE = "debate"  # Multi-round adversarial deliberation — STRATEGIC decisions
+
+
+class RequestClassification(str, Enum):
+    """Classification of an intelligence request — determines whether AI Universe is called."""
+    TRIVIAL    = "trivial"    # Deterministic only — NO AI call
+    ROUTINE    = "routine"    # Deterministic first, optional AI copy optimization
+    AMBIGUOUS  = "ambiguous"  # AI Universe recommended
+    STRATEGIC  = "strategic"  # AI Universe strongly required
+
+
+class RequestClassifier:
+    """
+    Per NEXUS spec section 17: NOT every event goes to AI Universe.
+    Deterministic-first: agents run first, AI called only when classification warrants it.
+    """
+
+    # Event type prefixes that are always TRIVIAL (no AI)
+    TRIVIAL_PREFIXES = (
+        "page_view", "session.start", "session.end", "session.heartbeat",
+        "score.refresh", "metric.update", "notification.sent", "click",
+        "scroll", "mouseover"
+    )
+
+    # Event types that are ROUTINE (deterministic + optional AI copy)
+    ROUTINE_PREFIXES = (
+        "lead.score_refresh", "report.scheduled", "digest.",
+        "email.opened", "email.clicked"
+    )
+
+    # Event types that are STRATEGIC (AI strongly recommended)
+    STRATEGIC_PREFIXES = (
+        "high_intent", "conversion", "campaign", "experiment.launch",
+        "churn.risk_high", "incident.p0", "incident.p1",
+        "qualification.final", "friday_command"
+    )
+
+    # Event types that are AMBIGUOUS (AI recommended)
+    AMBIGUOUS_PREFIXES = (
+        "pricing", "checkout", "demo", "enterprise", "lead.qualify",
+        "error", "anomaly", "drop", "funnel"
+    )
+
+    def classify(
+        self,
+        event_type: str,
+        context: Dict[str, Any],
+        agent_output: Optional[Any] = None
+    ) -> tuple:
+        """
+        Returns (RequestClassification, Optional[AIMode])
+        AIMode is None for TRIVIAL and ROUTINE.
+        """
+        event_lower = event_type.lower()
+
+        # Check TRIVIAL first (most common path — fast exit)
+        for prefix in self.TRIVIAL_PREFIXES:
+            if event_lower.startswith(prefix) or event_lower == prefix:
+                return RequestClassification.TRIVIAL, None
+
+        # Check ROUTINE
+        for prefix in self.ROUTINE_PREFIXES:
+            if event_lower.startswith(prefix):
+                return RequestClassification.ROUTINE, None
+
+        # Check STRATEGIC
+        for prefix in self.STRATEGIC_PREFIXES:
+            if event_lower.startswith(prefix):
+                return RequestClassification.STRATEGIC, AIMode.DEBATE
+
+        # Check AMBIGUOUS
+        for prefix in self.AMBIGUOUS_PREFIXES:
+            if event_lower.startswith(prefix):
+                # Use REVIEW mode if agent output has low confidence
+                if agent_output and hasattr(agent_output, 'confidence'):
+                    mode = AIMode.REVIEW if agent_output.confidence < 0.6 else AIMode.FAST
+                else:
+                    mode = AIMode.FAST
+                return RequestClassification.AMBIGUOUS, mode
+
+        # Default: AMBIGUOUS/FAST for unrecognized types
+        return RequestClassification.AMBIGUOUS, AIMode.FAST
+
+    def should_call_ai(self, classification: RequestClassification) -> bool:
+        """Returns True only for AMBIGUOUS and STRATEGIC — never TRIVIAL or ROUTINE."""
+        return classification in (RequestClassification.AMBIGUOUS, RequestClassification.STRATEGIC)

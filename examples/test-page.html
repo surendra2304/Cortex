@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXUS SDK Test Harness</title>
+  <style>
+    body { font-family: monospace; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #0a0a0a; color: #e0e0e0; }
+    h1 { color: #6ee7f7; }
+    h2 { color: #a0f0a0; border-bottom: 1px solid #333; padding-bottom: 4px; }
+    .section { margin: 24px 0; padding: 16px; background: #111; border: 1px solid #222; border-radius: 6px; }
+    button { margin: 4px; padding: 8px 14px; background: #1a3a5c; color: #fff; border: 1px solid #2a5a8c; border-radius: 4px; cursor: pointer; font-family: monospace; }
+    button:hover { background: #1e4a7c; }
+    button.danger { background: #5c1a1a; border-color: #8c2a2a; }
+    button.danger:hover { background: #7c1e1e; }
+    button.success { background: #1a5c1a; border-color: #2a8c2a; }
+    #log { background: #050505; border: 1px solid #1a1a1a; padding: 12px; height: 300px; overflow-y: auto; font-size: 12px; border-radius: 4px; }
+    .log-entry { margin: 2px 0; padding: 2px 0; border-bottom: 1px solid #111; }
+    .log-entry.info { color: #6ee7f7; }
+    .log-entry.success { color: #6ef7a0; }
+    .log-entry.warn { color: #f7e06e; }
+    .log-entry.error { color: #f76e6e; }
+    .status-bar { display: flex; gap: 16px; padding: 8px 12px; background: #111; border-radius: 4px; font-size: 12px; margin-bottom: 16px; }
+    .status-pill { padding: 2px 8px; border-radius: 10px; }
+    .status-pill.on { background: #1a5c1a; color: #6ef7a0; }
+    .status-pill.off { background: #5c1a1a; color: #f76e6e; }
+    input { background: #111; color: #e0e0e0; border: 1px solid #333; padding: 6px 10px; border-radius: 4px; font-family: monospace; width: 220px; }
+  </style>
+</head>
+<body>
+
+<h1>🧠 NEXUS SDK Test Harness</h1>
+<p style="color:#888">Interactive verification harness for the NEXUS Browser SDK. Connects to local NEXUS API (http://localhost:8000).</p>
+
+<div class="status-bar">
+  <span>Visitor ID: <code id="vid">—</code></span>
+  <span>Session ID: <code id="sid">—</code></span>
+  <span>Queue: <code id="queue-size">0</code></span>
+  <span>Consent: <span id="consent-status" class="status-pill on">ON</span></span>
+</div>
+
+<div class="section">
+  <h2>1. Initialization</h2>
+  <button onclick="initSDK()" class="success">init({ siteId, publicKey })</button>
+  <button onclick="initDebug()">init (debug: true)</button>
+</div>
+
+<div class="section">
+  <h2>2. Tracking Events</h2>
+  <button onclick="trackPageView()">page_view</button>
+  <button onclick="trackPricing()">pricing.viewed</button>
+  <button onclick="trackDemo()">demo.requested</button>
+  <button onclick="trackEnterprise()">enterprise.page_view</button>
+  <button onclick="trackError()">error.checkout</button>
+  <button onclick="trackExitIntent()">exit_intent.detected</button>
+  <button onclick="trackHighIntent()">high_intent.detected</button>
+</div>
+
+<div class="section">
+  <h2>3. Identity</h2>
+  <input id="user-id-input" placeholder="user@enterprise-corp.com" value="lead@enterprise-corp.com" />
+  <button onclick="identifyUser()" class="success">identify()</button>
+</div>
+
+<div class="section">
+  <h2>4. Consent</h2>
+  <button onclick="grantConsent()" class="success">consent(true) — Enable</button>
+  <button onclick="revokeConsent()" class="danger">consent(false) — Disable</button>
+</div>
+
+<div class="section">
+  <h2>5. Queue Control</h2>
+  <button onclick="manualFlush()">flush() — Send Now</button>
+  <button onclick="queueBurst()">Queue 25 events (Batch Flush Test)</button>
+</div>
+
+<div class="section">
+  <h2>📋 SDK Log</h2>
+  <button onclick="clearLog()" style="float:right;font-size:11px">Clear</button>
+  <div id="log"></div>
+</div>
+
+<script>
+  function log(level, msg, data) {
+    const logEl = document.getElementById('log');
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${level}`;
+    const time = new Date().toLocaleTimeString();
+    entry.textContent = `[${time}] [${level.toUpperCase()}] ${msg}${data ? ' ' + JSON.stringify(data) : ''}`;
+    logEl.appendChild(entry);
+    logEl.scrollTop = logEl.scrollHeight;
+    console.log(`[Harness] ${msg}`, data || '');
+  }
+
+  function updateStatus() {
+    if (typeof Nexus !== 'undefined') {
+      document.getElementById('vid').textContent = Nexus.getVisitorId ? Nexus.getVisitorId() : '—';
+      document.getElementById('sid').textContent = Nexus.getSessionId ? Nexus.getSessionId() : '—';
+      document.getElementById('queue-size').textContent = Nexus.getQueueSize ? Nexus.getQueueSize() : 0;
+      const consent = Nexus.isConsentGranted ? Nexus.isConsentGranted() : true;
+      const pill = document.getElementById('consent-status');
+      pill.textContent = consent ? 'ON' : 'OFF';
+      pill.className = `status-pill ${consent ? 'on' : 'off'}`;
+    }
+  }
+
+  setInterval(updateStatus, 500);
+  function clearLog() { document.getElementById('log').innerHTML = ''; }
+
+  function getSDK() {
+    if (typeof Nexus === 'undefined') {
+      log('warn', 'Nexus global not found. Ensure SDK is built or loaded.');
+      return null;
+    }
+    return Nexus;
+  }
+
+  function initSDK() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.init({ siteId: 'test_site_main', publicKey: 'pk_test_harness_local', debug: false });
+    log('success', 'SDK initialized', { siteId: 'test_site_main' });
+  }
+
+  function initDebug() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.init({ siteId: 'test_site_main', publicKey: 'pk_test_harness_local', debug: true, flushIntervalMs: 5000 });
+    log('success', 'SDK initialized in DEBUG mode');
+  }
+
+  function trackPageView() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('page_view', { title: 'Pricing & Plans', path: '/pricing', referrer: 'https://google.com' });
+    log('info', 'Tracked: page_view');
+  }
+
+  function trackPricing() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('pricing.viewed', { plan: 'enterprise', currency: 'USD', monthly_price: 499 });
+    log('info', 'Tracked: pricing.viewed');
+  }
+
+  function trackDemo() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('demo.requested', { company_size: '500+', use_case: 'conversion_optimization' });
+    log('info', 'Tracked: demo.requested');
+  }
+
+  function trackEnterprise() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('enterprise.page_view', { page: 'security_compliance', time_on_page: 120 });
+    log('info', 'Tracked: enterprise.page_view');
+  }
+
+  function trackError() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('error.checkout', { error_code: 'PAYMENT_DECLINED', page: 'checkout', retry_count: 2 });
+    log('warn', 'Tracked: error.checkout');
+  }
+
+  function trackExitIntent() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('exit_intent.detected', { page: '/pricing', time_on_page: 45, scroll_depth: 0.7 });
+    log('info', 'Tracked: exit_intent.detected');
+  }
+
+  function trackHighIntent() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.track('high_intent.detected', { score: 0.91, signals: ['pricing_view', 'demo_request'] });
+    log('success', 'Tracked: high_intent.detected');
+  }
+
+  function identifyUser() {
+    const sdk = getSDK(); if (!sdk) return;
+    const userId = document.getElementById('user-id-input').value || 'test@enterprise-corp.com';
+    sdk.identify(userId, { company: 'Enterprise Corp', role: 'CTO' });
+    log('success', 'Identified', { userId });
+  }
+
+  function grantConsent() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.consent(true);
+    log('success', 'Consent granted');
+  }
+
+  function revokeConsent() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.consent(false);
+    log('warn', 'Consent revoked — queue cleared and all tracking blocked');
+  }
+
+  function manualFlush() {
+    const sdk = getSDK(); if (!sdk) return;
+    sdk.flush().then(() => log('success', 'Manual flush completed'));
+  }
+
+  function queueBurst() {
+    const sdk = getSDK(); if (!sdk) return;
+    for (let i = 0; i < 25; i++) {
+      sdk.track(`test.event_${i}`, { index: i, batch_test: true });
+    }
+    log('info', 'Queued 25 events (batch trigger threshold is 20)');
+  }
+
+  log('info', 'NEXUS Test Harness ready. Click init to begin.');
+</script>
+</body>
+</html>
