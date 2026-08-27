@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -59,9 +59,9 @@ class EventModel(Base):
     site_id = Column(String(64), nullable=False, index=True)
     session_id = Column(String(64), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     type = Column(String(128), nullable=False, index=True)
-    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
     actor_type = Column(String(32), default="visitor", nullable=False)
-    actor_id = Column(String(64), nullable=False)
+    actor_id = Column(String(64), nullable=False, index=True)
     source = Column(String(64), default="web-sdk", nullable=False)
     data = Column(JSONB, default=dict, nullable=False)
     consent = Column(JSONB, nullable=True)
@@ -71,6 +71,12 @@ class EventModel(Base):
     user_agent = Column(Text, nullable=True)
 
     session = relationship("SessionModel", back_populates="events")
+
+    __table_args__ = (
+        Index("idx_events_site_type_occurred", "site_id", "type", "occurred_at"),
+        Index("idx_events_actor_occurred", "actor_id", "occurred_at"),
+        Index("idx_events_session", "session_id"),
+    )
 
 
 class LeadModel(Base):
