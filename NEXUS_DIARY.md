@@ -10,7 +10,7 @@ This document serves as the master record of engineering progress, architecture 
   - Initial implementation was built too broadly in a single day.
   - The 4 specialist agents (`GrowthAgent`, `SalesAgent`, `SupportAgent`, `ReliabilityAgent`) were initially implemented with hardcoded static responses rather than genuine input-driven reasoning.
   - Intelligence routing was superficial (a single AI call pattern rather than mode-based routing).
-  - Implementation temporarily deviated from the specification's phased approach and closed-loop learning requirements.
+  - Implementation temporarily deviated from the core specification and closed-loop learning requirements.
 
 ---
 

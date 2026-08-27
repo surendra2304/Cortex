@@ -161,20 +161,22 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 
 ---
 
-## 12. Implementation Status (Build Phases)
+## 12. Subsystem Architecture Status
 
-| Phase | Milestone | Status |
+| Operational Subsystem | Core Capabilities | Status |
 | :--- | :--- | :--- |
-| **Phase 0** | Repository & Architecture Foundation | ✅ Complete |
-| **Phase 1** | Ingestion, Event Gateway & Storage Engine | ✅ Complete |
-| **Phase 2** | Understand Layer (Identity, Scoring, Funnels, Memory) | ✅ Complete |
-| **Phase 3** | Act Layer (Workflow Engine, Human-in-the-Loop Approvals) | ✅ Complete |
-| **Phase 4** | Universal Tool Bus & Deep Integrations (7 Connectors) | ✅ Complete |
-| **Phase 5** | AI Universe Deliberation Adapter (FAST, REVIEW, DEBATE) | ✅ Complete |
-| **Phase 6** | Closed-Loop Outcome Measurement & Strategy Learning | ✅ Complete |
-| **Phase 7** | A/B Experimentation Engine & Personalization | ✅ Complete |
-| **Phase 8** | FRIDAY Cross-System Integration Bridge & Outbound Client | ✅ Complete |
-| **Phase 9** | Production Hardening, Metrics, Indexing & Verification | ✅ Complete (85/85 tests green) |
+| **Ingestion Gateway & Event Store** | TypeScript SDK, Webhooks, Partitioned Postgres, Redis Streams | ✅ Operational |
+| **Understand Intelligence Layer** | Identity Resolution Graph, 4-Factor Lead Scoring, Funnel Anomalies | ✅ Operational |
+| **Specialist Agent Ecosystem** | 6 Input-Driven Specialist Agents (Growth, Sales, Support, Reliability...) | ✅ Operational |
+| **AI Universe Deliberation Engine** | FAST, REVIEW, DEBATE Deliberation Modes & Deterministic Fallbacks | ✅ Operational |
+| **Action & Workflow Engine** | 5 Operational Workflows, Human-in-the-Loop Approvals | ✅ Operational |
+| **Universal Tool & Connector Bus** | 7 Connectors (SendGrid, Twilio, HubSpot, Calendly, Stripe, Zendesk...) | ✅ Operational |
+| **Closed-Loop Learning Layer** | 48h Outcome Attribution, Strategy Promotion (>60%) & Demotion (<30%) | ✅ Operational |
+| **A/B Testing & Personalization** | Two-Proportion Z-Test Significance, Sticky Hashing, Dynamic Rules | ✅ Operational |
+| **FRIDAY Integration Bridge** | Bidirectional Gateway, Inbound Commands, Outbound FridayClient | ✅ Operational |
+| **Real-Time Streaming Hub** | Multiplexed WebSocket Hub (`/ws/v1/live`), Sub-100ms Push, Ring Buffers | ✅ Operational |
+| **Advanced Analytics & NL Query** | Conversational SQL Parser, Multi-Touch Attribution (Time-Decay 7d) | ✅ Operational |
+| **Privacy, Governance & SaaS** | GDPR/CCPA Exports & Deletions, PII Scrubber, Multi-Tenant Isolation | ✅ Operational (95/95 tests green) |
 
 ---
 
