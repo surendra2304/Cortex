@@ -4,29 +4,28 @@ from datetime import datetime
 import uuid
 import sys
 import os
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/agents/src"))
+sys.path.insert(0, os.path.abspath("packages/identity/src"))
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 
 from nexus_core.models import Lead, Visitor, AuditRecord, Workflow
 from nexus_agents import AgentRegistry, AgentInput
+from nexus_identity import IdentityService
 from nexus_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient
+from nexus_api.config import get_db_session
+from nexus_api.db_models import VisitorModel, ProfileModel, LeadModel, SessionModel
 from nexus_api.tracing import get_current_trace_id
 
 router = APIRouter(prefix="/v1", tags=["Public API Gateway"])
 
-# In-memory data store stubs
-VISITORS_DB: Dict[str, Dict[str, Any]] = {
-    "vis_123": {
-        "id": "vis_123",
-        "tenant_id": "tenant_1",
-        "site_id": "site_main",
-        "attributes": {"country": "US", "browser": "Chrome"},
-        "first_seen_at": datetime.utcnow().isoformat()
-    }
-}
-LEADS_DB: List[Dict[str, Any]] = []
+agent_registry = AgentRegistry()
+ai_client = AIUniverseClient()
+identity_service = IdentityService()
+
 ACTIONS_DB: Dict[str, Dict[str, Any]] = {
     "act_high_1": {
         "id": "act_high_1",
@@ -36,16 +35,11 @@ ACTIONS_DB: Dict[str, Dict[str, Any]] = {
         "reason": "High impact conversion banner"
     }
 }
-AUDIT_DB: List[Dict[str, Any]] = []
-
-agent_registry = AgentRegistry()
-ai_client = AIUniverseClient()
 
 
 # Auth Stub
 async def verify_jwt_token(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
     if not authorization:
-        # Default mock user context for development / API access
         return {"sub": "usr_dev_123", "role": "admin", "tenant_id": "tenant_default"}
     if not authorization.startswith("Bearer "):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
@@ -53,37 +47,156 @@ async def verify_jwt_token(authorization: Optional[str] = Header(None)) -> Dict[
     return {"sub": f"usr_{token[:8]}", "role": "operator", "tenant_id": "tenant_default"}
 
 
-# 1. Visitors
+# 1. Identity Resolution (POST /v1/identify)
+@router.post("/identify")
+async def identify_visitor(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db_session),
+    auth: Dict[str, Any] = Depends(verify_jwt_token)
+):
+    visitor_id = payload.get("visitor_id")
+    if not visitor_id:
+        raise HTTPException(status_code=400, detail="visitor_id is required")
+
+    result = await identity_service.resolve_identity(
+        db=db,
+        visitor_id=visitor_id,
+        user_id=payload.get("user_id"),
+        tenant_id=auth["tenant_id"],
+        site_id=payload.get("site_id", "default"),
+        traits=payload.get("traits", {})
+    )
+    return {"status": "success", "result": result, "trace_id": get_current_trace_id()}
+
+
+# 2. Visitors (GET /v1/visitors/:id)
 @router.get("/visitors/{visitor_id}")
-async def get_visitor(visitor_id: str, auth: Dict[str, Any] = Depends(verify_jwt_token)):
-    visitor = VISITORS_DB.get(visitor_id)
+async def get_visitor(
+    visitor_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    auth: Dict[str, Any] = Depends(verify_jwt_token)
+):
+    stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
+    res = await db.execute(stmt)
+    visitor = res.scalar_one_or_none()
+
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
-    return {"visitor": visitor, "trace_id": get_current_trace_id()}
+
+    # Fetch associated profile if resolved
+    profile_data = None
+    if visitor.profile_id:
+        prof_stmt = select(ProfileModel).where(ProfileModel.id == visitor.profile_id)
+        prof_res = await db.execute(prof_stmt)
+        profile = prof_res.scalar_one_or_none()
+        if profile:
+            profile_data = {
+                "id": profile.id,
+                "primary_email": profile.primary_email,
+                "identities": profile.identities,
+                "traits": profile.traits
+            }
+
+    return {
+        "visitor": {
+            "id": visitor.id,
+            "tenant_id": visitor.tenant_id,
+            "site_id": visitor.site_id,
+            "profile_id": visitor.profile_id,
+            "attributes": visitor.attributes,
+            "first_seen_at": visitor.first_seen_at.isoformat() if visitor.first_seen_at else None,
+            "last_seen_at": visitor.last_seen_at.isoformat() if visitor.last_seen_at else None,
+            "profile": profile_data
+        },
+        "trace_id": get_current_trace_id()
+    }
 
 
-# 2. Leads
+# 3. Leads (GET /v1/leads/:id & POST/GET /v1/leads)
+@router.get("/leads/{lead_id}")
+async def get_lead(
+    lead_id: str,
+    db: AsyncSession = Depends(get_db_session),
+    auth: Dict[str, Any] = Depends(verify_jwt_token)
+):
+    stmt = select(LeadModel).where(LeadModel.id == lead_id)
+    res = await db.execute(stmt)
+    lead = res.scalar_one_or_none()
+
+    if not lead:
+        raise HTTPException(status_code=404, detail="Lead not found")
+
+    return {
+        "lead": {
+            "id": lead.id,
+            "tenant_id": lead.tenant_id,
+            "profile_id": lead.profile_id,
+            "score": lead.score,
+            "status": lead.status,
+            "source": lead.source,
+            "metadata": lead.lead_metadata,
+            "created_at": lead.created_at.isoformat() if lead.created_at else None
+        },
+        "trace_id": get_current_trace_id()
+    }
+
+
 @router.get("/leads")
-async def list_leads(auth: Dict[str, Any] = Depends(verify_jwt_token)):
-    return {"leads": LEADS_DB, "total": len(LEADS_DB), "trace_id": get_current_trace_id()}
+async def list_leads(
+    db: AsyncSession = Depends(get_db_session),
+    auth: Dict[str, Any] = Depends(verify_jwt_token)
+):
+    stmt = select(LeadModel).where(LeadModel.tenant_id == auth["tenant_id"])
+    res = await db.execute(stmt)
+    leads = res.scalars().all()
+    return {
+        "leads": [
+            {
+                "id": l.id,
+                "score": l.score,
+                "status": l.status,
+                "source": l.source,
+                "created_at": l.created_at.isoformat() if l.created_at else None
+            }
+            for l in leads
+        ],
+        "total": len(leads),
+        "trace_id": get_current_trace_id()
+    }
 
 
 @router.post("/leads")
-async def create_lead(payload: Dict[str, Any], auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def create_lead(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db_session),
+    auth: Dict[str, Any] = Depends(verify_jwt_token)
+):
     lead_id = f"lead_{uuid.uuid4().hex[:8]}"
-    lead_data = {
-        "id": lead_id,
-        "tenant_id": auth["tenant_id"],
-        "score": payload.get("score", 50.0),
-        "status": payload.get("status", "new"),
-        "created_at": datetime.utcnow().isoformat(),
-        "metadata": payload
+    db_lead = LeadModel(
+        id=lead_id,
+        tenant_id=auth["tenant_id"],
+        profile_id=payload.get("profile_id"),
+        score=payload.get("score", 50.0),
+        status=payload.get("status", "new"),
+        source=payload.get("source", "web"),
+        lead_metadata=payload.get("metadata", {}),
+        created_at=datetime.utcnow()
+    )
+    db.add(db_lead)
+    await db.commit()
+
+    return {
+        "lead": {
+            "id": lead_id,
+            "tenant_id": auth["tenant_id"],
+            "score": db_lead.score,
+            "status": db_lead.status
+        },
+        "trace_id": get_current_trace_id()
     }
-    LEADS_DB.append(lead_data)
-    return {"lead": lead_data, "trace_id": get_current_trace_id()}
 
 
-# 3. Analytics
+# 4. Analytics
 @router.get("/analytics/{metric}")
 async def get_analytics(metric: str, auth: Dict[str, Any] = Depends(verify_jwt_token)):
     return {
@@ -98,14 +211,14 @@ async def get_analytics(metric: str, auth: Dict[str, Any] = Depends(verify_jwt_t
     }
 
 
-# 4. Intelligence Requests
+# 5. Intelligence Requests
 @router.post("/intelligence/requests")
 async def create_intelligence_request(req: IntelligenceRequest, auth: Dict[str, Any] = Depends(verify_jwt_token)):
     res = await ai_client.evaluate(req)
     return {"response": res.model_dump(mode="json"), "trace_id": get_current_trace_id()}
 
 
-# 5. Agents
+# 6. Agents
 @router.get("/agents")
 async def list_agents(auth: Dict[str, Any] = Depends(verify_jwt_token)):
     return {
@@ -128,7 +241,7 @@ async def run_agent(agent_id: str, input_data: AgentInput, auth: Dict[str, Any] 
     return {"output": output.model_dump(mode="json"), "trace_id": get_current_trace_id()}
 
 
-# 6. Workflows
+# 7. Workflows
 @router.get("/workflows")
 async def list_workflows(auth: Dict[str, Any] = Depends(verify_jwt_token)):
     return {
@@ -150,7 +263,7 @@ async def list_workflows(auth: Dict[str, Any] = Depends(verify_jwt_token)):
     }
 
 
-# 7. Action Approvals (Governance)
+# 8. Action Approvals (Governance)
 @router.post("/actions/{action_id}/approve")
 async def approve_action(action_id: str, payload: Dict[str, Any] = {}, auth: Dict[str, Any] = Depends(verify_jwt_token)):
     action = ACTIONS_DB.get(action_id)
@@ -162,7 +275,7 @@ async def approve_action(action_id: str, payload: Dict[str, Any] = {}, auth: Dic
     return {"status": "approved", "action": action, "trace_id": get_current_trace_id()}
 
 
-# 8. Audit Logs
+# 9. Audit Logs
 @router.get("/audit/{resource_type}")
 async def get_audit_logs(resource_type: str, auth: Dict[str, Any] = Depends(verify_jwt_token)):
     return {
@@ -179,7 +292,7 @@ async def get_audit_logs(resource_type: str, auth: Dict[str, Any] = Depends(veri
     }
 
 
-# 9. Friday Command Bridge
+# 10. Friday Command Bridge
 @router.post("/friday/command")
 async def execute_friday_command(payload: Dict[str, Any], auth: Dict[str, Any] = Depends(verify_jwt_token)):
     command = payload.get("command", "")
