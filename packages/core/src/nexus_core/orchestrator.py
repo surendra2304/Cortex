@@ -4,8 +4,11 @@ import uuid
 import logging
 import sys
 import os
+import contextvars
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
-# Add local packages
+# Add local packages to sys.path
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
 sys.path.insert(0, os.path.abspath("packages/agents/src"))
@@ -14,6 +17,7 @@ sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
+sys.path.insert(0, os.path.abspath("apps/api/src"))
 
 from nexus_core.models import AuditRecord
 from nexus_event_schema import EventSchema
@@ -27,8 +31,10 @@ from nexus_integrations import (
 )
 from nexus_policy_engine import PolicyEngine
 from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
+from nexus_api.db_models import VisitorModel, ProfileModel, AuditRecordModel
 
 logger = logging.getLogger("nexus-orchestrator")
+trace_id_ctx = contextvars.ContextVar("trace_id_ctx", default=None)
 
 
 def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
@@ -62,7 +68,7 @@ def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
 
 
 class Orchestrator:
-    """10-Phase NEXUS Cognitive Loop Orchestrator with Trust-Labeled Evidence & Dissent Auditing."""
+    """10-Phase NEXUS Autonomous Cognitive Loop Orchestrator."""
 
     def __init__(
         self,
@@ -77,143 +83,228 @@ class Orchestrator:
         self.tool_bus = tool_bus or build_default_tool_bus()
         self.audit_records: List[AuditRecord] = []
 
-    async def run_cognitive_loop(self, event: EventSchema) -> Dict[str, Any]:
+    async def run_cognitive_loop(
+        self,
+        event: EventSchema,
+        db_session: Optional[AsyncSession] = None
+    ) -> Dict[str, Any]:
         loop_id = f"loop_{uuid.uuid4().hex[:8]}"
-        trace_id = event.trace_id or f"trc_{uuid.uuid4().hex[:8]}"
-        trace = []
+        trace_id = event.trace_id or f"trc_{uuid.uuid4().hex[:10]}"
+        token = trace_id_ctx.set(trace_id)
 
-        # 1. OBSERVE: Receive and parse incoming trigger event
-        trace.append({"phase": "1.Observe", "event_id": event.event_id, "type": event.type})
+        try:
+            trace = []
 
-        # 2. CONTEXTUALIZE: Assemble state with explicit trust classifications
-        context = {
-            "tenant_id": event.tenant_id,
-            "site_id": event.site_id,
-            "actor": event.actor.model_dump(),
-            "session_id": event.session_id,
-            "event_data": event.data
-        }
-        trust_labels = {
-            "tenant_id": "system_fact",
-            "site_id": "system_fact",
-            "actor": "verified_telemetry",
-            "event_data": "untrusted_user_input" if "input" in event.type else "verified_telemetry"
-        }
-        provenance = {
-            "origin_site": event.site_id,
-            "tenant_id": event.tenant_id,
-            "trace_id": trace_id,
-            "occurred_at": event.occurred_at.isoformat()
-        }
-        trace.append({"phase": "2.Contextualize", "context": context, "trust_labels": trust_labels})
-
-        # 3. UNDERSTAND: Select specialist agent and route to AI Universe Adapter
-        agent = self.agent_registry.route_for_event(event.type)
-        ai_req = IntelligenceRequest(
-            request_id=f"req_{loop_id}",
-            task_type="intent_scoring",
-            goal=f"Determine optimal intervention for {event.type}",
-            context=context,
-            evidence=[{"event_type": event.type, "actor_id": event.actor.id, "trust_label": "verified_telemetry"}],
-            trust_labels=trust_labels,
-            provenance=provenance
-        )
-        ai_res = await self.ai_client.evaluate(ai_req)
-        trace.append({
-            "phase": "3.Understand",
-            "agent_id": agent.agent_id,
-            "ai_decision": ai_res.decision,
-            "confidence": ai_res.confidence,
-            "fallback_applied": ai_res.fallback_applied,
-            "unresolved_disagreements": ai_res.unresolved_disagreements
-        })
-
-        # 4. PLAN: Agent formulates action proposal
-        agent_input = AgentInput(
-            goal=f"Optimize response for {event.type}",
-            context=context,
-            events=[event.model_dump(mode="json")],
-            allowed_capabilities=agent.capabilities
-        )
-        agent_output: AgentOutput = await agent.process(agent_input)
-        trace.append({"phase": "4.Plan", "decision": agent_output.decision, "proposed_actions": len(agent_output.proposed_actions)})
-
-        # 5. AUTHORIZE: Evaluate proposed actions against Policy Engine
-        authorized_actions = []
-        for prop in agent_output.proposed_actions:
-            tool = self.tool_bus.get_tool(prop.action_type) or Tool(name=prop.action_type, side_effect_level=SideEffectLevel.READ)
-            execution = Execution(
-                request_id=f"exec_{uuid.uuid4().hex[:8]}",
-                tool_name=tool.name,
-                actor={"type": "agent", "id": agent.agent_id},
-                reason=prop.rationale,
-                params=prop.params,
-                idempotency_key=f"idemp_{loop_id}_{prop.action_type}"
-            )
-            decision = self.policy_engine.evaluate(execution, tool)
-            execution.policy_decision = decision
-            if decision.approved:
-                authorized_actions.append((execution, tool))
+            # ----------------------------------------------------
+            # 1. OBSERVE: Parse incoming event trigger
+            # ----------------------------------------------------
             trace.append({
-                "phase": "5.Authorize",
-                "tool": tool.name,
-                "approved": decision.approved,
-                "requires_human": decision.requires_human_approval,
-                "reason": decision.reason
+                "phase": "1.Observe",
+                "event_id": event.event_id,
+                "type": event.type,
+                "occurred_at": event.occurred_at.isoformat(),
+                "trace_id": trace_id
             })
 
-        # 6. EXECUTE: Dispatch approved actions via Tool Bus
-        execution_results = []
-        if authorized_actions:
-            for exec_item, tool in authorized_actions:
-                res = await self.tool_bus.execute(tool.name, exec_item.params, exec_item)
-                execution_results.append(res)
-                trace.append({"phase": "6.Execute", "tool": tool.name, "result": res})
-        else:
-            trace.append({"phase": "6.Execute", "status": "no_auto_approved_actions_executed", "count": 0})
+            # ----------------------------------------------------
+            # 2. CONTEXTUALIZE: Fetch visitor and profile data from DB
+            # ----------------------------------------------------
+            visitor_attributes = {}
+            profile_traits = {}
+            profile_email = None
 
-        # 7. VERIFY: Verify execution outputs and state invariants
-        verification_passed = all(
-            exec_item.verification.get("status") == "verified"
-            for exec_item, _ in authorized_actions
-            if exec_item.verification
-        ) if authorized_actions else True
+            if db_session:
+                try:
+                    stmt = select(VisitorModel).where(VisitorModel.id == event.actor.id)
+                    res = await db_session.execute(stmt)
+                    v_record = res.scalar_one_or_none()
+                    if v_record:
+                        visitor_attributes = dict(v_record.attributes or {})
+                        if v_record.profile_id:
+                            p_stmt = select(ProfileModel).where(ProfileModel.id == v_record.profile_id)
+                            p_res = await db_session.execute(p_stmt)
+                            p_record = p_res.scalar_one_or_none()
+                            if p_record:
+                                profile_traits = dict(p_record.traits or {})
+                                profile_email = p_record.primary_email
+                except Exception as exc:
+                    logger.warning(f"Error fetching visitor/profile context from DB: {exc}")
 
-        trace.append({"phase": "7.Verify", "status": "verified" if verification_passed else "failed"})
-
-        # 8. MEASURE: Calculate outcome metrics and expected impact
-        measured_impact = agent_output.expected_outcomes
-        trace.append({"phase": "8.Measure", "outcomes": measured_impact})
-
-        # 9. LEARN: Record immutable AuditRecord with trust labels, dissent, and provenance
-        audit = AuditRecord(
-            id=f"aud_{loop_id}",
-            tenant_id=event.tenant_id,
-            actor_id=agent.agent_id,
-            action=f"cognitive_loop:{agent_output.decision}",
-            target_resource=f"site/{event.site_id}",
-            changes={
-                "agent_output": agent_output.model_dump(mode="json"),
-                "executions": execution_results,
-                "verification": "passed" if verification_passed else "failed",
-                "ai_decision": ai_res.decision,
-                "ai_confidence": ai_res.confidence,
-                "ai_dissent": ai_res.unresolved_disagreements,
-                "ai_provenance": ai_res.provenance,
-                "trust_labels": trust_labels
+            context = {
+                "tenant_id": event.tenant_id,
+                "site_id": event.site_id,
+                "actor": event.actor.model_dump(),
+                "session_id": event.session_id,
+                "event_data": event.data,
+                "visitor_attributes": visitor_attributes,
+                "profile_traits": profile_traits,
+                "profile_email": profile_email
             }
-        )
-        self.audit_records.append(audit)
-        trace.append({"phase": "9.Learn", "audit_id": audit.id, "dissent_logged": bool(ai_res.unresolved_disagreements)})
+            trust_labels = {
+                "tenant_id": "system_fact",
+                "site_id": "system_fact",
+                "actor": "verified_telemetry",
+                "event_data": "untrusted_user_input" if "input" in event.type else "verified_telemetry",
+                "visitor_attributes": "verified_telemetry",
+                "profile_traits": "inferred_profile"
+            }
+            provenance = {
+                "origin_site": event.site_id,
+                "tenant_id": event.tenant_id,
+                "trace_id": trace_id,
+                "occurred_at": event.occurred_at.isoformat()
+            }
+            trace.append({"phase": "2.Contextualize", "context_keys": list(context.keys())})
 
-        # 10. CONTINUE: Return loop result state and schedule next cycle
-        trace.append({"phase": "10.Continue", "status": "cycle_complete"})
+            # ----------------------------------------------------
+            # 3. UNDERSTAND: Select specialist agent
+            # ----------------------------------------------------
+            agent = self.agent_registry.route_for_event(event.type)
+            trace.append({"phase": "3.Understand", "selected_agent": agent.agent_id, "domain": agent.domain})
 
-        return {
-            "loop_id": loop_id,
-            "status": "success",
-            "agent_id": agent.agent_id,
-            "decision": agent_output.decision,
-            "executed_actions": len(execution_results),
-            "trace": trace
-        }
+            # ----------------------------------------------------
+            # 4. PLAN: Invoke agent and consult AI Universe Adapter
+            # ----------------------------------------------------
+            ai_req = IntelligenceRequest(
+                request_id=f"req_{loop_id}",
+                task_type="intervention_planning",
+                goal=f"Optimize outcome for {event.type}",
+                context=context,
+                evidence=[{"event_type": event.type, "actor_id": event.actor.id}],
+                trust_labels=trust_labels,
+                provenance=provenance
+            )
+            ai_res = await self.ai_client.evaluate(ai_req)
+
+            agent_input = AgentInput(
+                goal=f"Determine optimal intervention for {event.type}",
+                context=context,
+                events=[event.model_dump(mode="json")],
+                allowed_capabilities=agent.capabilities,
+                policy_constraints=["no_unauthorized_high_impact_actions"]
+            )
+            agent_output: AgentOutput = await agent.process(agent_input)
+            trace.append({
+                "phase": "4.Plan",
+                "decision": agent_output.decision,
+                "confidence": agent_output.confidence,
+                "proposed_actions_count": len(agent_output.proposed_actions),
+                "ai_decision": ai_res.decision
+            })
+
+            # ----------------------------------------------------
+            # 5. AUTHORIZE: Evaluate proposed actions with Policy Engine
+            # ----------------------------------------------------
+            authorized_actions = []
+            for prop in agent_output.proposed_actions:
+                tool = self.tool_bus.get_tool(prop.action_type) or Tool(name=prop.action_type, side_effect_level=SideEffectLevel.READ)
+                execution = Execution(
+                    request_id=f"exec_{uuid.uuid4().hex[:8]}",
+                    tool_name=tool.name,
+                    actor={"type": "agent", "id": agent.agent_id},
+                    reason=prop.rationale,
+                    params=prop.params,
+                    idempotency_key=f"idemp_{loop_id}_{prop.action_type}"
+                )
+                decision = self.policy_engine.evaluate(execution, tool)
+                execution.policy_decision = decision
+                if decision.approved:
+                    authorized_actions.append((execution, tool))
+                trace.append({
+                    "phase": "5.Authorize",
+                    "tool": tool.name,
+                    "approved": decision.approved,
+                    "requires_human": decision.requires_human_approval,
+                    "reason": decision.reason
+                })
+
+            # ----------------------------------------------------
+            # 6. EXECUTE: Dispatch approved actions via Tool Bus
+            # ----------------------------------------------------
+            execution_results = []
+            if authorized_actions:
+                for exec_item, tool in authorized_actions:
+                    res = await self.tool_bus.execute(tool.name, exec_item.params, exec_item)
+                    execution_results.append(res)
+                    trace.append({"phase": "6.Execute", "tool": tool.name, "result": res})
+            else:
+                trace.append({"phase": "6.Execute", "status": "no_auto_approved_actions_executed", "count": 0})
+
+            # ----------------------------------------------------
+            # 7. VERIFY: Check ToolBus execution results and verification
+            # ----------------------------------------------------
+            verification_passed = all(
+                exec_item.verification.get("status") == "verified"
+                for exec_item, _ in authorized_actions
+                if exec_item.verification
+            ) if authorized_actions else True
+            trace.append({"phase": "7.Verify", "status": "verified" if verification_passed else "failed"})
+
+            # ----------------------------------------------------
+            # 8. MEASURE: Record outcome in DB
+            # ----------------------------------------------------
+            measured_impact = agent_output.expected_outcomes
+            trace.append({"phase": "8.Measure", "outcomes": measured_impact})
+
+            # ----------------------------------------------------
+            # 9. LEARN: Record immutable AuditRecord
+            # ----------------------------------------------------
+            audit = AuditRecord(
+                id=f"aud_{loop_id}",
+                tenant_id=event.tenant_id,
+                actor_id=agent.agent_id,
+                action=f"cognitive_loop:{agent_output.decision}",
+                target_resource=f"site/{event.site_id}",
+                changes={
+                    "agent_output": agent_output.model_dump(mode="json"),
+                    "executions": execution_results,
+                    "verification": "passed" if verification_passed else "failed",
+                    "ai_decision": ai_res.decision,
+                    "ai_confidence": ai_res.confidence,
+                    "ai_dissent": ai_res.unresolved_disagreements,
+                    "ai_provenance": ai_res.provenance,
+                    "trust_labels": trust_labels,
+                    "measured_impact": measured_impact,
+                    "trace_id": trace_id
+                }
+            )
+            self.audit_records.append(audit)
+
+            if db_session:
+                try:
+                    db_audit = AuditRecordModel(
+                        id=audit.id,
+                        tenant_id=audit.tenant_id,
+                        actor_id=audit.actor_id,
+                        action=audit.action,
+                        target_resource=audit.target_resource,
+                        changes=audit.changes,
+                        verification_status="verified" if verification_passed else "failed",
+                        trace_id=trace_id,
+                        timestamp=datetime.utcnow()
+                    )
+                    db_session.add(db_audit)
+                    await db_session.commit()
+                except Exception as exc:
+                    logger.warning(f"Error persisting AuditRecordModel to DB: {exc}")
+                    await db_session.rollback()
+
+            trace.append({"phase": "9.Learn", "audit_id": audit.id, "strategy_logged": True})
+
+            # ----------------------------------------------------
+            # 10. CONTINUE: Return loop execution summary
+            # ----------------------------------------------------
+            trace.append({"phase": "10.Continue", "status": "cycle_complete"})
+
+            return {
+                "loop_id": loop_id,
+                "status": "success",
+                "trace_id": trace_id,
+                "agent_id": agent.agent_id,
+                "decision": agent_output.decision,
+                "executed_actions": len(execution_results),
+                "trace": trace
+            }
+
+        finally:
+            trace_id_ctx.reset(token)

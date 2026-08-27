@@ -1,6 +1,7 @@
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable, Callable, Awaitable
 from enum import Enum
 from datetime import datetime
+import inspect
 import json
 import logging
 from pydantic import BaseModel, Field
@@ -81,18 +82,13 @@ class ToolBus:
 
     def __init__(self, redis_client: Optional[aioredis.Redis] = None):
         self._tools: Dict[str, Tool] = {}
-        self._executors: Dict[str, Callable[[Dict[str, Any], Optional[Execution]], Awaitable[Dict[str, Any]]]] = {}
+        self._executors: Dict[str, Any] = {}
         self.redis_client = redis_client
         self.execution_history: List[Dict[str, Any]] = []
 
     def register_tool(self, tool: Tool, executor: Any) -> None:
         self._tools[tool.name] = tool
-        if hasattr(executor, "execute") and callable(executor.execute):
-            self._executors[tool.name] = executor.execute
-        elif callable(executor):
-            self._executors[tool.name] = executor
-        else:
-            raise ValueError(f"Executor for tool {tool.name} must be callable or implement BaseToolExecutor.")
+        self._executors[tool.name] = executor
         logger.info(f"Registered tool '{tool.name}' (side_effect_level={tool.side_effect_level}).")
 
     def get_tool(self, name: str) -> Optional[Tool]:
@@ -102,11 +98,9 @@ class ToolBus:
         return list(self._tools.values())
 
     async def _check_and_set_idempotency(self, idempotency_key: str, ttl_seconds: int = 86400) -> bool:
-        """Returns True if key was successfully acquired (first execution), False if duplicate."""
         if not self.redis_client:
-            return True  # Bypass if Redis not provided
+            return True
         try:
-            # Set key with NX (only set if not exists)
             was_set = await self.redis_client.set(f"idempotency:{idempotency_key}", "locked", nx=True, ex=ttl_seconds)
             return bool(was_set)
         except Exception as exc:
@@ -141,7 +135,20 @@ class ToolBus:
 
         try:
             start_time = datetime.utcnow()
-            result = await executor(params, execution)
+
+            # Handle both async and sync executors / methods
+            if hasattr(executor, "execute") and callable(executor.execute):
+                if inspect.iscoroutinefunction(executor.execute):
+                    result = await executor.execute(params, execution)
+                else:
+                    result = executor.execute(params, execution)
+            elif inspect.iscoroutinefunction(executor):
+                result = await executor(params, execution)
+            elif callable(executor):
+                result = executor(params, execution)
+            else:
+                raise TypeError(f"Executor for tool '{tool_name}' is not callable.")
+
             executed_at = datetime.utcnow()
 
             exec_record = {

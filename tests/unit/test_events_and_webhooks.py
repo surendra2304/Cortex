@@ -12,6 +12,7 @@ sys.path.insert(0, os.path.abspath("apps/worker/src"))
 from fastapi.testclient import TestClient
 from nexus_api.main import app
 from nexus_api.config import get_db_session, get_redis_client
+from nexus_core.orchestrator import Orchestrator
 from nexus_worker.main import process_event
 
 
@@ -53,20 +54,18 @@ def test_events_gateway_with_db_and_redis_mocks():
     assert res.json()["status"] == "accepted"
     assert res.json()["event_id"] == "evt_stream_test_1"
 
-    # Verify DB insertion call
     assert mock_db.add.called
     assert mock_db.commit.called
-
-    # Verify Redis rate limit & stream push call
     assert mock_redis.incr.called
     assert mock_redis.xadd.called
 
-    # Clean up overrides
     app.dependency_overrides.clear()
 
 
 @pytest.mark.asyncio
 async def test_worker_process_event():
-    sample_payload = '{"type": "pricing_view", "tenant_id": "tenant_1", "site_id": "site_1"}'
-    # Test worker parser execution without exception
-    await process_event("1724770000000-0", sample_payload)
+    orchestrator = Orchestrator()
+    sample_payload = '{"event_id": "evt_sample_99", "tenant_id": "tenant_1", "site_id": "site_1", "type": "pricing_view", "occurred_at": "2026-08-27T10:00:00Z", "actor": {"type": "visitor", "id": "vis_99"}, "source": "web", "data": {}}'
+    result = await process_event("1724770000000-0", sample_payload, orchestrator)
+    assert result is not None
+    assert result["status"] == "success"
