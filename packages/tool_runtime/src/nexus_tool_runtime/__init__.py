@@ -35,6 +35,7 @@ class ToolCapability(str, Enum):
     OUTBOUND_WEBHOOK = "outbound_webhook"
     PAYMENT_INITIATE = "payment_initiate"
     TICKETING_CREATE = "ticketing_create"
+    CALENDAR_BOOK = "calendar_book"
 
 
 class Tool(BaseModel):

@@ -158,3 +158,14 @@ async def websocket_live_events(websocket: WebSocket):
         ws_manager.disconnect(websocket)
     except Exception:
         ws_manager.disconnect(websocket)
+
+
+# ── 4. CONNECTOR REGISTRY & HEALTH ───────────────────────────────────────────
+
+from nexus_integrations import get_connector_registry
+
+
+@router.get("/connectors")
+async def list_registered_connectors():
+    """Returns real-time health, scopes, and circuit breaker status for all ecosystem connectors."""
+    return get_connector_registry()

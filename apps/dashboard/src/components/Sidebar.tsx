@@ -15,6 +15,7 @@ export const NAV_ITEMS = [
   { name: "Experiments", href: "/experiments" },
   { name: "Incidents", href: "/incidents" },
   { name: "Integrations", href: "/integrations" },
+  { name: "Connectors", href: "/connectors" },
   { name: "Governance", href: "/governance" }
 ];
 
