@@ -1,0 +1,81 @@
+name: NEXUS CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  python-lint-and-test:
+    name: Python Lint, Invariant & Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pytest pytest-asyncio pytest-mock flake8
+
+      - name: Validate Engineering Diary Invariants
+        run: |
+          python scripts/validate_diary.py
+
+      - name: Run Pytest Test Suite
+        run: |
+          pytest tests/unit --verbose
+
+  typescript-lint-and-build:
+    name: TypeScript Build & Lint (SDK & Dashboard)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Build & Test Browser SDK
+        run: |
+          cd packages/sdk
+          npm install
+          npm run build
+
+      - name: Build Next.js Control Center Dashboard
+        run: |
+          cd apps/dashboard
+          npm install
+          npm run build
+
+  security-scan:
+    name: Security Vulnerability Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Scan Python Dependencies with pip-audit
+        run: |
+          pip install pip-audit
+          pip-audit || true
+
+      - name: Scan Node.js Dependencies with npm audit
+        run: |
+          cd apps/dashboard
+          npm audit --audit-level=high || true

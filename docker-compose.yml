@@ -33,6 +33,60 @@ services:
       timeout: 5s
       retries: 5
 
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: nexus-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db
+      POSTGRES_DSN: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db
+      REDIS_URL: redis://redis:6379/0
+      MOCK_MODE: "true"
+      AI_UNIVERSE_BASE_URL: https://api.ai-universe.dev
+      JWT_SECRET: super_secret_jwt_signing_key_replace_in_production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: nexus-worker
+    restart: unless-stopped
+    command: ["python", "apps/worker/src/nexus_worker/main.py"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db
+      POSTGRES_DSN: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db
+      REDIS_URL: redis://redis:6379/0
+      MOCK_MODE: "true"
+      AI_UNIVERSE_BASE_URL: https://api.ai-universe.dev
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    container_name: nexus-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_NEXUS_API_URL: http://localhost:8000
+      NEXT_PUBLIC_OPERATOR_TOKEN: mock_operator_jwt_token_123
+    depends_on:
+      - api
+
 volumes:
   postgres_data:
     driver: local
