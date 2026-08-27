@@ -14,19 +14,14 @@ This document serves as the master record of engineering progress, architecture 
 
 ---
 
-### [Course Correction: Specification Realignment & Foundation Rebuild](diary/2026-08-27.md)
-- **Focus**: Diagnosing static-agent anti-patterns and rebuilding the platform strictly per specification (Phases 0 through 9).
-- **What Was Salvaged**:
-  - Canonical `EventSchema` with actor attribution, consent metadata, and distributed tracing headers.
-  - Core `PolicyEngine` and `ToolBus` execution contracts (`READ`, `SENSITIVE`, `HIGH_IMPACT`, `DANGEROUS`).
-  - Containerization infrastructure, multi-stage Dockerfiles, and GitHub Actions CI/CD pipelines.
+### [Day 2 — 2026-08-28: Spec Realignment, Live Streaming, Analytics, Governance & SaaS Foundation](diary/2026-08-28.md)
+- **Focus**: Complete specification realignment, bidirectional FRIDAY bridge, real-time WebSocket streaming, natural language analytics, GDPR privacy suite, and multi-tenant SaaS foundation.
 - **What Was Rebuilt & Completed**:
   - **Dynamic Input-Driven Agents**: Rewrote all agents to mathematically reason over real events, visitor attributes, lead scores, and latency thresholds. Added `QualificationAgent` and `ChurnRiskAgent`.
-  - **RequestClassifier & AI Deliberation Modes**: Implemented deterministic-first routing (`TRIVIAL`, `ROUTINE`, `AMBIGUOUS`, `STRATEGIC`) and modes (`FAST`, `REVIEW`, `DEBATE`).
-  - **Understand Layer**: Implemented `IdentityResolver` (resolution graph & consent gating), `ScoringEngine` (explainable 4-factor scoring), `FunnelEngine` (2-sigma drop-off anomalies), `ContextBuilder`, and `MemoryStore`.
-  - **Act & Learn Layers**: Implemented `WorkflowStateMachine` (5 first-class operational workflows), Human-in-the-Loop `ApprovalQueue`, `OutcomeTracker` (48h attribution window), and Strategy Learning (`PROVEN` >60% / `DEMOTED` <30%).
-  - **Connector Ecosystem**: Integrated SendGrid, Twilio, HubSpot, Stripe, Zendesk, and Calendly behind the Universal Tool Contract with live health monitors and circuit breakers.
   - **A/B Experimentation & Personalization**: Implemented two-proportion z-test statistical significance (p < 0.05 / z >= 1.96), sticky variant hashing, and dynamic experience rule matching.
   - **FRIDAY Integration Bridge**: Implemented inbound command gateway and outbound `FridayClient` capability delegator with strict policy boundary enforcement.
-  - **Production Hardening**: Added Prometheus `/metrics`, `/health` (liveness), `/health/ready` (readiness), composite indexing for sub-100ms queries, and WebSocket live event streaming.
-- **Current Test Results**: **85 passed / 0 failed** (100% green pass rate under pytest).
+  - **Real-Time WebSocket Streaming**: Built `ChannelSubscriptionManager` supporting multiplexed channel subscriptions (`events`, `visitors`, `leads`, `incidents`, `agent_activity`) with ring buffering and live dashboard modes.
+  - **Advanced Analytics & NL Querying**: Built conversational NL parser translating questions into structured filters and generated SQL with multi-touch revenue attribution (First-Touch, Last-Touch, Linear, Time-Decay 7d).
+  - **Compliance, Privacy & Governance**: Created `SecretScrubber` and `PrivacyComplianceService` for GDPR Art. 15 (JSON Export), Art. 17 (Hard Erasure), and 7-year tamper-evident audit logs.
+  - **Multi-Tenant SaaS Foundation**: Built tenant onboarding flow (`POST /v1/tenants`), usage metering quotas (`GET /v1/tenant/usage`), and white-label settings (`GET /v1/tenant/settings`).
+- **Current Test Results**: **95 passed / 0 failed** (100% green pass rate under pytest).
