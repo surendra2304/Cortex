@@ -532,3 +532,74 @@ async def friday_incidents(
         incidents = []  # explicit: FRIDAY should interpret [] as "all clear"
 
     return incidents
+
+
+# ==============================================================================
+# Outbound FridayClient (NEXUS -> FRIDAY Capability Delegator)
+# ==============================================================================
+
+class FridayCapabilityRequest(BaseModel):
+    """NEXUS request to FRIDAY for capabilities outside NEXUS's website scope."""
+    goal: str
+    context: Dict[str, Any] = Field(default_factory=dict)
+    required_capability: str  # desktop, file, voice, device
+    risk_level: str = "LOW"
+    evidence: List[str] = Field(default_factory=list)
+    requested_action: str
+    expected_result: str
+
+
+class FridayCapabilityResponse(BaseModel):
+    accepted: bool
+    action_result: Dict[str, Any] = Field(default_factory=dict)
+    evidence: List[str] = Field(default_factory=list)
+    trace_id: str
+
+
+class FridayClient:
+    """Outbound client used by NEXUS when requesting desktop/device actions from FRIDAY."""
+
+    def __init__(self, endpoint: Optional[str] = None, api_key: Optional[str] = None):
+        self.endpoint = endpoint or os.getenv("FRIDAY_API_URL", "http://localhost:9000")
+        self.api_key = api_key or os.getenv("FRIDAY_API_KEY", "friday_dev_key")
+
+    async def request_capability(self, req: FridayCapabilityRequest) -> FridayCapabilityResponse:
+        trace_id = f"fri_out_{uuid.uuid4().hex[:12]}"
+        is_mock = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
+
+        if is_mock:
+            logger.info(f"[MOCK FRIDAY CLIENT] Delegating capability='{req.required_capability}' action='{req.requested_action}'")
+            return FridayCapabilityResponse(
+                accepted=True,
+                action_result={"status": "executed_by_friday", "output": f"FRIDAY fulfilled action {req.requested_action}"},
+                evidence=[f"capability={req.required_capability}", f"action={req.requested_action}"],
+                trace_id=trace_id
+            )
+
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                res = await client.post(
+                    f"{self.endpoint}/v1/capabilities/execute",
+                    headers={"X-Friday-Api-Key": self.api_key, "Content-Type": "application/json"},
+                    json=req.model_dump()
+                )
+                if res.status_code == 200:
+                    data = res.json()
+                    return FridayCapabilityResponse(**data)
+                return FridayCapabilityResponse(accepted=False, action_result={"error": res.text}, trace_id=trace_id)
+        except Exception as exc:
+            logger.error(f"FRIDAY client outbound call failed: {exc}")
+            return FridayCapabilityResponse(accepted=False, action_result={"error": str(exc)}, trace_id=trace_id)
+
+
+friday_client = FridayClient()
+
+
+@router.post("/outbound/request", response_model=FridayCapabilityResponse)
+async def delegate_to_friday(
+    req: FridayCapabilityRequest,
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
+):
+    """NEXUS delegates desktop/voice/device actions to FRIDAY OS."""
+    return await friday_client.request_capability(req)
