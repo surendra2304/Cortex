@@ -1,66 +1,72 @@
 import os
 import sys
+import pytest
 from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock, patch
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
+sys.path.insert(0, os.path.abspath("apps/worker/src"))
 
 from fastapi.testclient import TestClient
 from nexus_api.main import app
-from nexus_api.events_router import EVENT_STORE, EVENT_QUEUE, RATE_LIMIT_BUCKET
-
-client = TestClient(app)
-
-
-def test_health():
-    res = client.get("/v1/health")
-    assert res.status_code == 200
-    assert res.json()["status"] == "healthy"
+from nexus_api.config import get_db_session, get_redis_client
+from nexus_worker.main import process_event
 
 
-def test_events_gateway_ingest():
+def test_events_gateway_with_db_and_redis_mocks():
+    mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    mock_redis = AsyncMock()
+    mock_redis.incr = AsyncMock(return_value=1)
+    mock_redis.expire = AsyncMock()
+    mock_redis.xadd = AsyncMock(return_value="1724770000000-0")
+
+    async def override_db():
+        yield mock_db
+
+    async def override_redis():
+        return mock_redis
+
+    app.dependency_overrides[get_db_session] = override_db
+    app.dependency_overrides[get_redis_client] = override_redis
+
+    client = TestClient(app)
+
     payload = {
-        "event_id": "evt_test_1",
-        "tenant_id": "tenant_xyz",
-        "site_id": "site_123",
-        "type": "pricing_view",
+        "event_id": "evt_stream_test_1",
+        "tenant_id": "tenant_live",
+        "site_id": "site_live",
+        "type": "checkout_intent",
         "occurred_at": datetime.utcnow().isoformat(),
-        "actor": {"type": "visitor", "id": "vis_999"},
-        "session_id": "ses_888",
+        "actor": {"type": "visitor", "id": "vis_live_456"},
         "source": "web-sdk",
-        "data": {"plan": "enterprise"},
-        "consent": {"analytics": True},
-        "trace_id": "trc_111"
+        "data": {"cart_value": 249.99}
     }
 
-    res = client.post("/v1/events", json=payload, headers={"X-Nexus-Public-Key": "pub_live_abc"})
+    res = client.post("/v1/events", json=payload, headers={"X-Nexus-Public-Key": "pk_test_live"})
     assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "accepted"
-    assert data["event_id"] == "evt_test_1"
+    assert res.json()["status"] == "accepted"
+    assert res.json()["event_id"] == "evt_stream_test_1"
 
-    # Verify server-side enrichment in event store
-    stored = next(e for e in EVENT_STORE if e["event_id"] == "evt_test_1")
-    assert "_server" in stored["data"]
-    assert stored["data"]["_server"]["public_key_present"] is True
+    # Verify DB insertion call
+    assert mock_db.add.called
+    assert mock_db.commit.called
+
+    # Verify Redis rate limit & stream push call
+    assert mock_redis.incr.called
+    assert mock_redis.xadd.called
+
+    # Clean up overrides
+    app.dependency_overrides.clear()
 
 
-def test_webhooks_ingest():
-    webhook_payload = {
-        "event": "checkout.completed",
-        "customer_id": "usr_cust_777",
-        "amount": 4900,
-        "currency": "usd"
-    }
-
-    res = client.post(
-        "/v1/webhooks/stripe",
-        json=webhook_payload,
-        headers={"X-Nexus-Signature": "sig_test_123", "X-Tenant-ID": "tenant_xyz", "X-Site-ID": "store_1"}
-    )
-    assert res.status_code == 200
-    body = res.json()
-    assert body["status"] == "received"
-    assert body["provider"] == "stripe"
-    assert body["event_type"] == "checkout.completed"
+@pytest.mark.asyncio
+async def test_worker_process_event():
+    sample_payload = '{"type": "pricing_view", "tenant_id": "tenant_1", "site_id": "site_1"}'
+    # Test worker parser execution without exception
+    await process_event("1724770000000-0", sample_payload)

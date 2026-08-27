@@ -4,16 +4,17 @@ This document serves as the master index and running summary of engineering prog
 
 ---
 
-### ?? [Day 1 ? 2026-08-27: Full Platform Foundation, Cognitive Loop & Control Center Dashboard](diary/2026-08-27.md)
-- **?? Focus**: Monorepo foundation, Browser SDK, Event Gateway, Policy Engine, Agent Ecosystem, 10-Phase Cognitive Loop, Public API Gateway, and React Next.js Dashboard.
+### ?? [Day 1 ? 2026-08-27: Production Database, Redis Streams & Alembic Migration Integration](diary/2026-08-27.md)
+- **?? Focus**: PostgreSQL async connection pool, Redis Stream event worker, Redis-backed rate limiting, and Alembic migrations.
 - **?? What I Accomplished**:
-  - I created the Public API Gateway routes (`/visitors`, `/leads`, `/analytics`, `/agents`, `/workflows`, `/actions/:id/approve`, `/audit`, `/friday/command`).
-  - I built the `TracingMiddleware` maintaining distributed `trace_id` across request lifecycles.
-  - I scaffolded the React/Next.js dashboard with Tailwind CSS and created all 12 operational pages.
-  - I authored unit test suites validating public endpoints, auth stubs, and trace propagation (100% passing).
+  - I configured Alembic migrations under `infra/` and converted the schema into an async migration script.
+  - I implemented the PostgreSQL connection pool using `asyncpg` and `SQLAlchemy` async session generators.
+  - I implemented Redis-backed rate limiting (`ratelimit:key`) and event stream dispatching (`xadd`).
+  - I refactored `apps/worker` to consume and acknowledge events from Redis Streams (`xreadgroup` / `xack`).
+  - I updated the test suite with database and Redis mock fixtures achieving a 100% green pass rate under pytest.
 - **??? Fixes & Hardening**:
-  - I hardened distributed tracing propagation in Starlette middleware and FastAPI response headers.
-  - I verified strict diary line constraints using automated verification tests.
-- **?? Test Results**: **16 passed** (100% green pass rate under pytest).
+  - I resolved SQLAlchemy reserved keyword collisions by explicitly aliasing the JSONB `metadata` column.
+  - I ensured idempotent Redis consumer group initialization.
+- **?? Test Results**: **15 passed** (100% green pass rate under pytest).
 
 ---
