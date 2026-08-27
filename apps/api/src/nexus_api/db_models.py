@@ -114,3 +114,48 @@ class ApiKeyModel(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class IdentityLinkModel(Base):
+    __tablename__ = "identity_links"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    source_type = Column(String(32), nullable=False)  # anonymous_id, email, user_id, device_fingerprint
+    source_value = Column(String(255), nullable=False, index=True)
+    target_type = Column(String(32), nullable=False)  # profile_id, lead_id, customer_id
+    target_id = Column(String(64), nullable=False, index=True)
+    confidence = Column(Float, default=1.0, nullable=False)
+    link_metadata = Column("metadata", JSONB, default=dict, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class LeadScoreHistoryModel(Base):
+    __tablename__ = "lead_scores"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    lead_id = Column(String(64), ForeignKey("leads.id", ondelete="CASCADE"), nullable=False, index=True)
+    total_score = Column(Float, nullable=False)
+    behavior_score = Column(Float, default=0.0, nullable=False)
+    firmographic_score = Column(Float, default=0.0, nullable=False)
+    engagement_score = Column(Float, default=0.0, nullable=False)
+    source_score = Column(Float, default=0.0, nullable=False)
+    score_breakdown = Column(JSONB, default=dict, nullable=False)
+    triggered_by = Column(String(64), default="event", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class MemoryEntryModel(Base):
+    __tablename__ = "memory_entries"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    scope = Column(String(32), nullable=False, index=True)  # visitor, lead, customer, site, strategy
+    scope_id = Column(String(64), nullable=False, index=True)
+    key = Column(String(128), nullable=False, index=True)
+    content = Column(JSONB, default=dict, nullable=False)
+    trust_label = Column(String(32), default="verified_telemetry", nullable=False)
+    source = Column(String(64), default="cognitive_loop", nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=True)

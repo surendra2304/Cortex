@@ -5,6 +5,8 @@ export const NAV_ITEMS = [
   { name: "Overview", href: "/" },
   { name: "Visitors", href: "/visitors" },
   { name: "Leads", href: "/leads" },
+  { name: "Funnels", href: "/funnels" },
+  { name: "Memory", href: "/memory" },
   { name: "Customers", href: "/customers" },
   { name: "Conversations", href: "/conversations" },
   { name: "Agents", href: "/agents" },

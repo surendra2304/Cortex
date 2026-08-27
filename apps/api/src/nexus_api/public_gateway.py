@@ -49,14 +49,20 @@ async def identify_visitor(
     if not visitor_id:
         raise HTTPException(status_code=400, detail="visitor_id is required")
 
+    traits = payload.get("traits", {})
+    email = payload.get("email") or traits.get("email")
+
     result = await identity_service.resolve_identity(
         db=db,
         visitor_id=visitor_id,
         user_id=payload.get("user_id"),
+        email=email,
         tenant_id=auth.get("tenant_id", "default"),
         site_id=payload.get("site_id", "default"),
-        traits=payload.get("traits", {})
+        consent_granted=payload.get("consent_granted", True),
+        traits=traits
     )
+    result["attributes"] = result.get("traits", {})
     return {"status": "success", "result": result, "trace_id": get_current_trace_id()}
 
 

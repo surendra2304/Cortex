@@ -20,6 +20,7 @@ from nexus_api.webhooks_router import router as webhooks_router
 from nexus_api.stripe_webhook_router import router as stripe_webhook_router
 from nexus_api.friday_router import router as friday_router
 from nexus_api.public_gateway import router as public_gateway_router
+from nexus_api.understand_router import router as understand_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -43,6 +44,7 @@ app.include_router(events_router)
 app.include_router(webhooks_router)
 app.include_router(stripe_webhook_router)
 app.include_router(friday_router)
+app.include_router(understand_router)
 
 
 @app.get("/v1/health", tags=["System"])

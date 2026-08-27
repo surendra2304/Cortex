@@ -17,6 +17,10 @@ sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
+sys.path.insert(0, os.path.abspath("packages/identity/src"))
+sys.path.insert(0, os.path.abspath("packages/analytics/src"))
+sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
+sys.path.insert(0, os.path.abspath("packages/memory/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
 from nexus_core.models import AuditRecord
@@ -37,7 +41,11 @@ from nexus_integrations import (
 )
 from nexus_policy_engine import PolicyEngine
 from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
-from nexus_api.db_models import VisitorModel, ProfileModel, AuditRecordModel, EventModel
+from nexus_identity import IdentityResolver
+from nexus_analytics import ScoringEngine
+from nexus_intelligence import ContextBuilder, ContextPackage
+from nexus_memory import MemoryStore, MemoryScope, TrustLabel
+from nexus_api.db_models import VisitorModel, ProfileModel, AuditRecordModel, EventModel, LeadModel
 
 logger = logging.getLogger("nexus-orchestrator")
 trace_id_ctx = contextvars.ContextVar("trace_id_ctx", default=None)
@@ -79,7 +87,7 @@ def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
 
 
 class Orchestrator:
-    """10-Phase NEXUS Autonomous Cognitive Loop Orchestrator with Intelligent Context & Request Classification."""
+    """10-Phase NEXUS Autonomous Cognitive Loop Orchestrator with ContextBuilder, ScoringEngine, and MemoryStore."""
 
     def __init__(
         self,
@@ -87,13 +95,21 @@ class Orchestrator:
         ai_client: Optional[AIUniverseClient] = None,
         policy_engine: Optional[PolicyEngine] = None,
         tool_bus: Optional[ToolBus] = None,
-        classifier: Optional[RequestClassifier] = None
+        classifier: Optional[RequestClassifier] = None,
+        identity_resolver: Optional[IdentityResolver] = None,
+        scoring_engine: Optional[ScoringEngine] = None,
+        context_builder: Optional[ContextBuilder] = None,
+        memory_store: Optional[MemoryStore] = None
     ):
         self.agent_registry = agent_registry or AgentRegistry()
         self.ai_client = ai_client or AIUniverseClient()
         self.policy_engine = policy_engine or PolicyEngine(human_in_the_loop_enabled=True)
         self.tool_bus = tool_bus or build_default_tool_bus()
         self.classifier = classifier or RequestClassifier()
+        self.identity_resolver = identity_resolver or IdentityResolver()
+        self.scoring_engine = scoring_engine or ScoringEngine()
+        self.context_builder = context_builder or ContextBuilder()
+        self.memory_store = memory_store or MemoryStore()
         self.audit_records: List[AuditRecord] = []
 
     async def run_cognitive_loop(
@@ -117,12 +133,14 @@ class Orchestrator:
                 "trace_id": trace_id
             })
 
-            # 2. CONTEXTUALIZE (Deep session & historical actor queries)
+            # 2. CONTEXTUALIZE (ContextBuilder + Identity + Historical Memory)
             visitor_attributes = {}
             profile_traits = {}
             profile_email = None
+            lead_info: Dict[str, Any] = {}
             session_events: List[Dict[str, Any]] = []
             actor_history_events: List[Dict[str, Any]] = []
+            relevant_memories: List[Dict[str, Any]] = []
 
             if db_session:
                 try:
@@ -140,7 +158,19 @@ class Orchestrator:
                                 profile_traits = dict(p_record.traits or {})
                                 profile_email = p_record.primary_email
 
-                    # Query last 20 events in this session
+                            # Query Lead if linked
+                            l_stmt = select(LeadModel).where(LeadModel.profile_id == v_record.profile_id)
+                            l_res = await db_session.execute(l_stmt)
+                            l_record = l_res.scalar_one_or_none()
+                            if l_record:
+                                lead_info = {
+                                    "lead_id": l_record.id,
+                                    "score": l_record.score,
+                                    "status": l_record.status,
+                                    "lifecycle_stage": "customer" if l_record.status == "customer" else "lead"
+                                }
+
+                    # Query last 20 events in session
                     if event.session_id:
                         s_stmt = select(EventModel).where(
                             EventModel.session_id == event.session_id
@@ -151,7 +181,7 @@ class Orchestrator:
                             for r in s_res.scalars().all()
                         ]
 
-                    # Query last 50 events for this actor (cross-session behavior)
+                    # Query last 50 events for actor
                     a_stmt = select(EventModel).where(
                         EventModel.actor_id == event.actor.id
                     ).order_by(desc(EventModel.occurred_at)).limit(50)
@@ -160,30 +190,29 @@ class Orchestrator:
                         {"type": r.type, "data": r.data, "occurred_at": r.occurred_at.isoformat()}
                         for r in a_res.scalars().all()
                     ]
+
+                    # Query strategy/visitor memory
+                    mem_entries = await self.memory_store.get(
+                        db=db_session,
+                        scope=MemoryScope.VISITOR.value,
+                        scope_id=event.actor.id
+                    )
+                    relevant_memories = [m.model_dump(mode="json") for m in mem_entries]
+
                 except Exception as exc:
                     logger.warning(f"DB contextualize lookup warning: {exc}")
 
-            # Include current event in session analysis
+            # Assemble typed ContextPackage using ContextBuilder
+            context_package = self.context_builder.build_context(
+                event=event.model_dump(mode="json"),
+                session_events=session_events,
+                actor_events=actor_history_events,
+                visitor_attributes=visitor_attributes,
+                profile_traits=profile_traits,
+                lead_info=lead_info
+            )
+
             all_recent_events = [event.model_dump(mode="json")] + session_events
-
-            # Compute rich session metrics for agents
-            pages_viewed = len([e for e in all_recent_events if "page_view" in e.get("type", "").lower()])
-            pricing_views = sum(1 for e in all_recent_events if "pricing" in e.get("type", "").lower())
-            demo_views = sum(1 for e in all_recent_events if "demo" in e.get("type", "").lower())
-            enterprise_views = sum(1 for e in all_recent_events if any(k in e.get("type", "").lower() for k in ["enterprise", "security"]))
-            error_count = sum(1 for e in all_recent_events if "error" in e.get("type", "").lower())
-            exit_intent = any("exit" in e.get("type", "").lower() for e in all_recent_events)
-
-            session_summary = {
-                "pages_viewed": pages_viewed,
-                "pricing_view_count": pricing_views,
-                "demo_view_count": demo_views,
-                "enterprise_view_count": enterprise_views,
-                "error_count": error_count,
-                "exit_intent_detected": exit_intent,
-                "total_session_events": len(all_recent_events),
-                "actor_cross_session_event_count": len(actor_history_events)
-            }
 
             context = {
                 "tenant_id": event.tenant_id,
@@ -194,8 +223,11 @@ class Orchestrator:
                 "visitor_attributes": visitor_attributes,
                 "profile_traits": profile_traits,
                 "profile_email": profile_email,
-                "session_summary": session_summary,
-                "recent_session_events_count": len(session_events)
+                "session_summary": context_package.session_context,
+                "intent_level": context_package.intent_level,
+                "intent_score": context_package.intent_score,
+                "anomaly_flags": context_package.anomaly_flags,
+                "memories": relevant_memories
             }
 
             trust_labels = {
@@ -215,13 +247,20 @@ class Orchestrator:
             }
             trace.append({
                 "phase": "2.Contextualize",
-                "session_summary": session_summary,
-                "context_keys": list(context.keys())
+                "intent_level": context_package.intent_level,
+                "intent_score": context_package.intent_score,
+                "anomaly_flags": context_package.anomaly_flags,
+                "session_summary": context_package.session_context
             })
 
             # 3. UNDERSTAND
             agent = self.agent_registry.route_for_event(event.type)
-            trace.append({"phase": "3.Understand", "selected_agent": agent.agent_id, "domain": agent.domain})
+            trace.append({
+                "phase": "3.Understand",
+                "selected_agent": agent.agent_id,
+                "domain": agent.domain,
+                "intent_level": context_package.intent_level
+            })
 
             # 4. PLAN (Deterministic First -> Intelligence Classification -> Conditional AI Universe)
             agent_input = AgentInput(
@@ -250,7 +289,8 @@ class Orchestrator:
                     evidence=[
                         {"key": "agent_decision", "value": agent_output.decision},
                         {"key": "evidence_refs", "value": agent_output.evidence_refs},
-                        {"key": "session_summary", "value": session_summary}
+                        {"key": "intent_score", "value": context_package.intent_score},
+                        {"key": "anomaly_flags", "value": context_package.anomaly_flags}
                     ],
                     trust_labels=trust_labels,
                     provenance=provenance
@@ -325,7 +365,7 @@ class Orchestrator:
             measured_impact = agent_output.expected_outcomes
             trace.append({"phase": "8.Measure", "outcomes": measured_impact})
 
-            # 9. LEARN
+            # 9. LEARN (Update Memory + Refresh Lead Score)
             audit = AuditRecord(
                 id=f"aud_{loop_id}",
                 tenant_id=event.tenant_id,
@@ -343,12 +383,23 @@ class Orchestrator:
                     "ai_dissent": ai_unresolved_disagreements,
                     "ai_provenance": ai_provenance,
                     "trust_labels": trust_labels,
-                    "session_summary": session_summary,
+                    "session_summary": context_package.session_context,
                     "measured_impact": measured_impact,
                     "trace_id": trace_id
                 }
             )
             self.audit_records.append(audit)
+
+            # Record outcome learning in Strategy Memory
+            if authorized_actions:
+                for exec_item, tool in authorized_actions:
+                    await self.memory_store.record_strategy_outcome(
+                        db=db_session,
+                        strategy_name=f"{agent.agent_id}:{tool.name}",
+                        context_features={"intent_score": context_package.intent_score, "decision": agent_output.decision},
+                        action_taken=tool.name,
+                        outcome_lift_pct=measured_impact.get("conversion_lift_pct", 10.0)
+                    )
 
             if db_session:
                 try:
