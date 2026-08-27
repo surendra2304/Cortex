@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -100,3 +100,17 @@ class AuditRecordModel(Base):
     verification_status = Column(String(32), default="verified", nullable=False)
     trace_id = Column(String(64), nullable=True, index=True)
     timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+
+class ApiKeyModel(Base):
+    __tablename__ = "api_keys"
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    site_id = Column(String(64), nullable=False, index=True)
+    key_hash = Column(String(128), unique=True, nullable=False, index=True)
+    key_prefix = Column(String(16), nullable=False)
+    name = Column(String(128), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    last_used_at = Column(DateTime(timezone=True), nullable=True)

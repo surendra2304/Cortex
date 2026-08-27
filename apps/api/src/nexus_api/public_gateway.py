@@ -19,6 +19,7 @@ from nexus_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse,
 from nexus_api.config import get_db_session
 from nexus_api.db_models import VisitorModel, ProfileModel, LeadModel, SessionModel
 from nexus_api.tracing import get_current_trace_id
+from nexus_api.auth import verify_jwt_token, require_role, Role
 
 router = APIRouter(prefix="/v1", tags=["Public API Gateway"])
 
@@ -37,22 +38,12 @@ ACTIONS_DB: Dict[str, Dict[str, Any]] = {
 }
 
 
-# Auth Stub
-async def verify_jwt_token(authorization: Optional[str] = Header(None)) -> Dict[str, Any]:
-    if not authorization:
-        return {"sub": "usr_dev_123", "role": "admin", "tenant_id": "tenant_default"}
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token format")
-    token = authorization.split(" ")[1]
-    return {"sub": f"usr_{token[:8]}", "role": "operator", "tenant_id": "tenant_default"}
-
-
-# 1. Identity Resolution (POST /v1/identify)
+# 1. Identity Resolution (POST /v1/identify) - Requires at least VIEWER role
 @router.post("/identify")
 async def identify_visitor(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(verify_jwt_token)
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
 ):
     visitor_id = payload.get("visitor_id")
     if not visitor_id:
@@ -62,19 +53,19 @@ async def identify_visitor(
         db=db,
         visitor_id=visitor_id,
         user_id=payload.get("user_id"),
-        tenant_id=auth["tenant_id"],
+        tenant_id=auth.get("tenant_id", "default"),
         site_id=payload.get("site_id", "default"),
         traits=payload.get("traits", {})
     )
     return {"status": "success", "result": result, "trace_id": get_current_trace_id()}
 
 
-# 2. Visitors (GET /v1/visitors/:id)
+# 2. Visitors (GET /v1/visitors/:id) - Requires VIEWER role
 @router.get("/visitors/{visitor_id}")
 async def get_visitor(
     visitor_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(verify_jwt_token)
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
 ):
     stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
     res = await db.execute(stmt)
@@ -83,7 +74,6 @@ async def get_visitor(
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
 
-    # Fetch associated profile if resolved
     profile_data = None
     if visitor.profile_id:
         prof_stmt = select(ProfileModel).where(ProfileModel.id == visitor.profile_id)
@@ -112,12 +102,12 @@ async def get_visitor(
     }
 
 
-# 3. Leads (GET /v1/leads/:id & POST/GET /v1/leads)
+# 3. Leads (GET /v1/leads/:id & POST/GET /v1/leads) - Requires VIEWER for read, OPERATOR for write
 @router.get("/leads/{lead_id}")
 async def get_lead(
     lead_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(verify_jwt_token)
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
 ):
     stmt = select(LeadModel).where(LeadModel.id == lead_id)
     res = await db.execute(stmt)
@@ -144,9 +134,10 @@ async def get_lead(
 @router.get("/leads")
 async def list_leads(
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(verify_jwt_token)
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
 ):
-    stmt = select(LeadModel).where(LeadModel.tenant_id == auth["tenant_id"])
+    tenant_id = auth.get("tenant_id", "default")
+    stmt = select(LeadModel).where(LeadModel.tenant_id == tenant_id)
     res = await db.execute(stmt)
     leads = res.scalars().all()
     return {
@@ -169,12 +160,12 @@ async def list_leads(
 async def create_lead(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(verify_jwt_token)
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
 ):
     lead_id = f"lead_{uuid.uuid4().hex[:8]}"
     db_lead = LeadModel(
         id=lead_id,
-        tenant_id=auth["tenant_id"],
+        tenant_id=auth.get("tenant_id", "default"),
         profile_id=payload.get("profile_id"),
         score=payload.get("score", 50.0),
         status=payload.get("status", "new"),
@@ -188,7 +179,7 @@ async def create_lead(
     return {
         "lead": {
             "id": lead_id,
-            "tenant_id": auth["tenant_id"],
+            "tenant_id": db_lead.tenant_id,
             "score": db_lead.score,
             "status": db_lead.status
         },
@@ -196,12 +187,15 @@ async def create_lead(
     }
 
 
-# 4. Analytics
+# 4. Analytics - Requires VIEWER role
 @router.get("/analytics/{metric}")
-async def get_analytics(metric: str, auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def get_analytics(
+    metric: str,
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+):
     return {
         "metric": metric,
-        "tenant_id": auth["tenant_id"],
+        "tenant_id": auth.get("tenant_id", "default"),
         "values": [
             {"timestamp": "2026-08-27T10:00:00Z", "value": 142},
             {"timestamp": "2026-08-27T11:00:00Z", "value": 189},
@@ -211,16 +205,19 @@ async def get_analytics(metric: str, auth: Dict[str, Any] = Depends(verify_jwt_t
     }
 
 
-# 5. Intelligence Requests
+# 5. Intelligence Requests - Requires OPERATOR role
 @router.post("/intelligence/requests")
-async def create_intelligence_request(req: IntelligenceRequest, auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def create_intelligence_request(
+    req: IntelligenceRequest,
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+):
     res = await ai_client.evaluate(req)
     return {"response": res.model_dump(mode="json"), "trace_id": get_current_trace_id()}
 
 
-# 6. Agents
+# 6. Agents - List requires VIEWER, Run requires OPERATOR
 @router.get("/agents")
-async def list_agents(auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def list_agents(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))):
     return {
         "agents": [
             {"id": "agent_growth", "domain": "growth", "capabilities": ["experiment_mutate", "banner_injection"]},
@@ -233,7 +230,11 @@ async def list_agents(auth: Dict[str, Any] = Depends(verify_jwt_token)):
 
 
 @router.post("/agents/{agent_id}/run")
-async def run_agent(agent_id: str, input_data: AgentInput, auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def run_agent(
+    agent_id: str,
+    input_data: AgentInput,
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+):
     agent = agent_registry.get(agent_id)
     if not agent:
         raise HTTPException(status_code=404, detail="Agent not found in registry")
@@ -241,9 +242,9 @@ async def run_agent(agent_id: str, input_data: AgentInput, auth: Dict[str, Any] 
     return {"output": output.model_dump(mode="json"), "trace_id": get_current_trace_id()}
 
 
-# 7. Workflows
+# 7. Workflows - Requires VIEWER role
 @router.get("/workflows")
-async def list_workflows(auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))):
     return {
         "workflows": [
             {
@@ -263,9 +264,13 @@ async def list_workflows(auth: Dict[str, Any] = Depends(verify_jwt_token)):
     }
 
 
-# 8. Action Approvals (Governance)
+# 8. Action Approvals (Governance) - Requires OPERATOR role
 @router.post("/actions/{action_id}/approve")
-async def approve_action(action_id: str, payload: Dict[str, Any] = {}, auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def approve_action(
+    action_id: str,
+    payload: Dict[str, Any] = {},
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+):
     action = ACTIONS_DB.get(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
@@ -275,9 +280,12 @@ async def approve_action(action_id: str, payload: Dict[str, Any] = {}, auth: Dic
     return {"status": "approved", "action": action, "trace_id": get_current_trace_id()}
 
 
-# 9. Audit Logs
+# 9. Audit Logs - Requires ADMIN role for security inspection
 @router.get("/audit/{resource_type}")
-async def get_audit_logs(resource_type: str, auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def get_audit_logs(
+    resource_type: str,
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+):
     return {
         "resource_type": resource_type,
         "logs": [
@@ -292,14 +300,18 @@ async def get_audit_logs(resource_type: str, auth: Dict[str, Any] = Depends(veri
     }
 
 
-# 10. Friday Command Bridge
+# 10. Friday Command Bridge - Requires ADMIN role
 @router.post("/friday/command")
-async def execute_friday_command(payload: Dict[str, Any], auth: Dict[str, Any] = Depends(verify_jwt_token)):
+async def execute_friday_command(
+    payload: Dict[str, Any],
+    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_ADMIN))
+):
     command = payload.get("command", "")
     return {
         "status": "acknowledged",
         "command": command,
         "executed_by": "FRIDAY_SUPERVISOR_BRIDGE",
+        "caller": auth["sub"],
         "timestamp": datetime.utcnow().isoformat(),
         "trace_id": get_current_trace_id()
     }

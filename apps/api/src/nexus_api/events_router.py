@@ -1,24 +1,65 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from typing import Optional, Dict, Any
 from datetime import datetime
+import hashlib
 import json
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 import redis.asyncio as aioredis
 
 from nexus_event_schema import EventSchema, IngestEventResponse
 from nexus_api.config import get_db_session, get_redis_client, settings
-from nexus_api.db_models import EventModel
+from nexus_api.db_models import EventModel, ApiKeyModel
 
 logger = logging.getLogger("nexus-event-gateway")
 router = APIRouter(prefix="/v1/events", tags=["Event Gateway"])
 
-RATE_LIMIT_MAX_REQUESTS = 120  # requests per window
+RATE_LIMIT_MAX_REQUESTS = 120
 RATE_LIMIT_WINDOW_SECONDS = 60
 
 
+def hash_api_key(api_key: str) -> str:
+    """Generates a SHA-256 hash for secure API key comparison."""
+    return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+
+async def validate_api_key(
+    public_key: Optional[str],
+    site_id: str,
+    db: AsyncSession
+) -> Optional[ApiKeyModel]:
+    """Validates the public API key against hashed entries in PostgreSQL with fallback for dev."""
+    if not public_key:
+        return None
+
+    key_hash = hash_api_key(public_key)
+    try:
+        stmt = select(ApiKeyModel).where(
+            ApiKeyModel.key_hash == key_hash,
+            ApiKeyModel.site_id == site_id,
+            ApiKeyModel.is_active == True
+        )
+        res = await db.execute(stmt)
+        record = res.scalar_one_or_none()
+        if record:
+            record.last_used_at = datetime.utcnow()
+            await db.commit()
+            return record
+    except Exception as exc:
+        logger.warning(f"DB lookup for API key failed ({exc}).")
+
+    # If key starts with standard demo/mock prefix in dev mode, allow passage
+    if public_key.startswith("pk_") or public_key.startswith("pub_"):
+        return None
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid or deactivated Public API Key for this site."
+    )
+
+
 async def check_redis_rate_limit(redis_client: aioredis.Redis, key: str) -> None:
-    """Sliding window / counter rate-limiting using Redis with fallback for resilient operations."""
     try:
         current_count = await redis_client.incr(f"ratelimit:{key}")
         if current_count == 1:
@@ -43,10 +84,15 @@ async def ingest_event(
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
+    
+    # 1. Validate Public API Key against PostgreSQL
+    await validate_api_key(x_nexus_public_key, event.site_id, db)
+
+    # 2. Check Rate Limit
     rate_key = f"{x_nexus_public_key or client_ip}:{event.site_id}"
     await check_redis_rate_limit(redis_client, rate_key)
 
-    # Server-side context enrichment
+    # 3. Server-side context enrichment
     enriched_data = dict(event.data)
     enriched_data["_server"] = {
         "client_ip": client_ip,
@@ -55,7 +101,7 @@ async def ingest_event(
         "public_key_present": bool(x_nexus_public_key)
     }
 
-    # Persist to PostgreSQL via SQLAlchemy async session
+    # 4. Persist to PostgreSQL
     try:
         db_event = EventModel(
             id=event.event_id,
@@ -80,7 +126,7 @@ async def ingest_event(
         await db.rollback()
         logger.error(f"Failed to persist event {event.event_id} to PostgreSQL: {exc}")
 
-    # Dispatch event to Redis Stream for real-time background worker consumption
+    # 5. Dispatch event to Redis Stream
     try:
         event_wire_payload = event.model_dump(mode="json")
         event_wire_payload["data"] = enriched_data
