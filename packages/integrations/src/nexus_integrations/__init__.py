@@ -887,3 +887,6 @@ def get_connector_registry() -> List[Dict[str, Any]]:
 # Sentinel Security Findings Integration
 from .sentinel_listener import SentinelEventListener, SentinelPayload, SentinelFinding
 from .deployment_gate import DeploymentSecurityGate, GateVerdict, DeploymentGateResult
+
+# IntelX Competitive & Market Intelligence Integration
+from .intelx_client import IntelXClient, CompetitorProfile, MarketSignal

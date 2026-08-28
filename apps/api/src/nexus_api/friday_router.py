@@ -603,3 +603,45 @@ async def delegate_to_friday(
 ):
     """NEXUS delegates desktop/voice/device actions to FRIDAY OS."""
     return await friday_client.request_capability(req)
+
+
+# ── Competitive & Market Intelligence for FRIDAY Voice Queries ──────────────
+
+from nexus_integrations.intelx_client import IntelXClient
+from nexus_intelligence.market_signals import MarketSignalDetector
+
+_intelx_client = IntelXClient()
+_market_detector = MarketSignalDetector(intelx_client=_intelx_client)
+
+
+@router.get("/competitive_summary")
+async def get_friday_competitive_summary(
+    competitor: str = "Datadog",
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
+):
+    """FRIDAY voice query: 'What's my competitive position?'"""
+    profile = await _intelx_client.fetch_competitor_intelligence(competitor)
+    return {
+        "competitor": profile.competitor_name,
+        "market_share_tier": profile.market_share_tier,
+        "voice_summary": f"Against {profile.competitor_name}, our key differentiator is sub-100 millisecond autonomous agentic operations without per-seat taxation. {len(profile.feature_gaps)} critical feature gaps identified.",
+        "battlecard": profile.battlecard_summary,
+        "feature_gaps": profile.feature_gaps,
+        "citations": profile.evidence_citations
+    }
+
+
+@router.get("/market_trends")
+async def get_friday_market_trends(
+    industry: str = "saas_devops",
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
+):
+    """FRIDAY voice query: 'Any market trends affecting my site?'"""
+    signals = await _market_detector.detect_market_signals(industry)
+    top_signal = signals[0] if signals else None
+    return {
+        "industry": industry,
+        "voice_summary": f"Market intelligence indicates a major shift: {top_signal.trend_title if top_signal else 'Autonomous agent adoption'}. Recommended positioning: {top_signal.recommended_positioning if top_signal else 'Lead with closed-loop cognitive operations'}.",
+        "active_signals": [s.model_dump() for s in signals],
+        "total_signals": len(signals)
+    }

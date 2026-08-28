@@ -139,6 +139,65 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {/* IntelX Competitive & Market Intelligence Section */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200">IntelX Competitive Intelligence &amp; Market Position</h2>
+            <p className="text-xs text-slate-400">Real-time competitor battlecards, feature gap analysis, and market signal tracking.</p>
+          </div>
+          <span className="text-xs font-mono bg-purple-950 text-purple-400 px-3 py-1 rounded border border-purple-800 font-bold">
+            IntelX Research Active
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          {/* Competitor Battlecards */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Competitor Battlecard: Datadog / Dynatrace</span>
+            <div className="space-y-2">
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded space-y-1">
+                <span className="font-bold text-slate-200 block">Identified Feature Gaps:</span>
+                <ul className="list-disc list-inside text-[11px] text-slate-400 space-y-0.5">
+                  <li>No autonomous real-time website personalization</li>
+                  <li>Lacks 10-phase closed-loop agentic deliberation</li>
+                  <li>Steep per-host and per-seat overage pricing model</li>
+                </ul>
+              </div>
+              <div className="p-3 bg-sky-950/30 border border-sky-800/60 rounded space-y-1">
+                <span className="font-bold text-sky-400 block text-[11px]">Recommended Sales Battlecard:</span>
+                <p className="text-slate-300 text-[11px]">
+                  Position Nexus's sub-100ms real-time autonomous cognitive loops and zero per-seat tax as a 60% TCO savings over legacy APM.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Market Signals Timeline */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Market Signals &amp; Regulatory Shifts</span>
+            <div className="space-y-2">
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-slate-200">Surge in Autonomous Agentic Operations</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-950 text-purple-400 border border-purple-800">STRATEGIC</span>
+                </div>
+                <p className="text-slate-400 text-[11px]">Enterprises rapidly moving from passive APM dashboards to active closed-loop intervention.</p>
+                <span className="text-[10px] text-sky-400 block font-mono mt-1">Trending: Agentic Workflows, Real-Time DevSecOps</span>
+              </div>
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded space-y-1">
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-slate-200">Heightened Data Privacy &amp; Erasure Audits</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">HIGH</span>
+                </div>
+                <p className="text-slate-400 text-[11px]">EU &amp; US compliance teams mandating verified client-side PII masking and automated GDPR Art. 17 erasure.</p>
+                <span className="text-[10px] text-sky-400 block font-mono mt-1">Trending: Client PII Redaction, Tamper-Evident Audit</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

@@ -492,16 +492,24 @@ class AgentRegistry:
         self.register(ReliabilityAgent())
         self.register(QualificationAgent())
         self.register(ChurnRiskAgent())
+        try:
+            from .competitive_agent import CompetitiveIntelligenceAgent
+            self.register(CompetitiveIntelligenceAgent())
+        except Exception:
+            pass
 
     def register(self, agent: SpecialistAgent) -> None:
         self._agents[agent.agent_id] = agent
-        self._agents[agent.domain] = agent
+        if hasattr(agent, "domain") and agent.domain:
+            self._agents[agent.domain] = agent
 
     def get(self, identifier: str) -> Optional[SpecialistAgent]:
         return self._agents.get(identifier)
 
     def route_for_event(self, event_type: str) -> SpecialistAgent:
         e = event_type.lower()
+        if "competitor" in e or "intelx" in e or "battlecard" in e or "vs_" in e:
+            return self._agents.get("agent_competitive", self._agents["growth"])
         if "qualify" in e or "score" in e:
             return self._agents["qualification"]
         if "churn" in e or "engage" in e or "retention" in e:
@@ -513,3 +521,6 @@ class AgentRegistry:
         if "error" in e or "issue" in e or "help" in e or "ticket" in e:
             return self._agents["support"]
         return self._agents["reliability"]
+
+
+from .competitive_agent import CompetitiveIntelligenceAgent
