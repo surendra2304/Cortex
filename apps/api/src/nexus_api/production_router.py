@@ -24,7 +24,10 @@ METRICS = {
     "ai_universe_fallback_total": 0,
     "workflow_runs_total": 0,
     "approval_queue_depth": 0,
-    "strategy_performance_gauge": 0.85
+    "strategy_performance_gauge": 0.85,
+    "security_findings_received_total": 0,
+    "security_incidents_created_total": 0,
+    "deployment_gates_evaluated_total": 0
 }
 
 
@@ -71,7 +74,19 @@ async def prometheus_metrics():
         "# TYPE workflow_runs_total counter",
         f"workflow_runs_total {METRICS['workflow_runs_total']}",
         "",
-        "# HELP approval_queue_depth Current pending human-in-the-loop approval actions",
+        "# HELP security_findings_received_total Total security findings ingested from Sentinel",
+        "# TYPE security_findings_received_total counter",
+        f"security_findings_received_total {METRICS['security_findings_received_total']}",
+        "",
+        "# HELP security_incidents_created_total Total security incidents triaged and created",
+        "# TYPE security_incidents_created_total counter",
+        f"security_incidents_created_total {METRICS['security_incidents_created_total']}",
+        "",
+        "# HELP deployment_gates_evaluated_total Total deployment gates evaluated",
+        "# TYPE deployment_gates_evaluated_total counter",
+        f"deployment_gates_evaluated_total {METRICS['deployment_gates_evaluated_total']}",
+        "",
+        "# HELP approval_queue_depth Pending human-in-the-loop approvals gauge",
         "# TYPE approval_queue_depth gauge",
         f"approval_queue_depth {METRICS['approval_queue_depth']}",
         "",
@@ -96,8 +111,8 @@ async def readiness_probe(
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
-    """Readiness probe: validates PostgreSQL, Redis, and internal dependencies."""
-    checks = {"postgres": "UNKNOWN", "redis": "UNKNOWN", "ai_universe": "READY"}
+    """Readiness probe: validates PostgreSQL, Redis, AI Universe, and Sentinel dependencies."""
+    checks = {"postgres": "UNKNOWN", "redis": "UNKNOWN", "ai_universe": "READY", "sentinel": "READY"}
 
     # 1. PostgreSQL check
     try:
