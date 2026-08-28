@@ -27,7 +27,9 @@ METRICS = {
     "strategy_performance_gauge": 0.85,
     "security_findings_received_total": 0,
     "security_incidents_created_total": 0,
-    "deployment_gates_evaluated_total": 0
+    "deployment_gates_evaluated_total": 0,
+    "intelx_research_submitted_total": 0,
+    "competitive_intelligence_findings_total": 0
 }
 
 
@@ -86,6 +88,14 @@ async def prometheus_metrics():
         "# TYPE deployment_gates_evaluated_total counter",
         f"deployment_gates_evaluated_total {METRICS['deployment_gates_evaluated_total']}",
         "",
+        "# HELP intelx_research_submitted_total Total research queries submitted to IntelX",
+        "# TYPE intelx_research_submitted_total counter",
+        f"intelx_research_submitted_total {METRICS['intelx_research_submitted_total']}",
+        "",
+        "# HELP competitive_intelligence_findings_total Total competitor insights synthesized",
+        "# TYPE competitive_intelligence_findings_total counter",
+        f"competitive_intelligence_findings_total {METRICS['competitive_intelligence_findings_total']}",
+        "",
         "# HELP approval_queue_depth Pending human-in-the-loop approvals gauge",
         "# TYPE approval_queue_depth gauge",
         f"approval_queue_depth {METRICS['approval_queue_depth']}",
@@ -111,8 +121,14 @@ async def readiness_probe(
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
-    """Readiness probe: validates PostgreSQL, Redis, AI Universe, and Sentinel dependencies."""
-    checks = {"postgres": "UNKNOWN", "redis": "UNKNOWN", "ai_universe": "READY", "sentinel": "READY"}
+    """Readiness probe: validates PostgreSQL, Redis, AI Universe, Sentinel, and IntelX dependencies."""
+    checks = {
+        "postgres": "UNKNOWN",
+        "redis": "UNKNOWN",
+        "ai_universe": "READY",
+        "sentinel": "READY",
+        "intelx": "READY"
+    }
 
     # 1. PostgreSQL check
     try:
