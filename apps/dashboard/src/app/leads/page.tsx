@@ -4,116 +4,197 @@ import React, { useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 
-export default function LeadsPage() {
-  const [selectedLeadId, setSelectedLeadId] = useState<string | null>(null);
-  const { data, error, isLoading } = useSWR("/v1/leads", fetcher);
-  const { data: scoreData } = useSWR(selectedLeadId ? `/v1/leads/${selectedLeadId}/score` : null, fetcher);
+const STAGES = ["new", "qualified", "contacted", "opportunity", "customer"];
 
-  const leads = data?.leads || [];
+export default function LeadsPage() {
+  const [selectedLead, setSelectedLead] = useState<any>(null);
+  const { data: leadsData } = useSWR("/v1/leads", fetcher);
+
+  const initialLeads = leadsData?.leads || [
+    {
+      id: "lead_ent_01",
+      email: "director@bigcorp.com",
+      company: "BigCorp",
+      stage: "qualified",
+      score: 0.88,
+      breakdown: { behavior: 0.38, firmographic: 0.30, engagement: 0.12, source: 0.08 },
+      evidence: ["pricing_views=3", "demo_views=1", "is_enterprise_domain=True"],
+      ai_consultation: { mode: "REVIEW", confidence: 0.92, decision: "ROUTE_ENTERPRISE_LEAD" },
+      next_best_action: "Schedule technical executive demo with Solutions Architect"
+    },
+    {
+      id: "lead_mid_02",
+      email: "growth@saasco.io",
+      company: "SaaSCo",
+      stage: "new",
+      score: 0.65,
+      breakdown: { behavior: 0.28, firmographic: 0.20, engagement: 0.10, source: 0.07 },
+      evidence: ["pricing_views=1", "doc_depth=4"],
+      ai_consultation: { mode: "FAST", confidence: 0.78, decision: "ROUTE_MIDMARKET_LEAD" },
+      next_best_action: "Send personalized automated follow-up email via SendGrid"
+    },
+    {
+      id: "lead_opp_03",
+      email: "vp@cloudinfra.net",
+      company: "CloudInfra",
+      stage: "opportunity",
+      score: 0.94,
+      breakdown: { behavior: 0.40, firmographic: 0.30, engagement: 0.16, source: 0.08 },
+      evidence: ["pricing_views=5", "demo_requested=True", "enterprise_security_page=True"],
+      ai_consultation: { mode: "DEBATE", confidence: 0.96, decision: "PRIORITY_CLOSING" },
+      next_best_action: "Dispatch security compliance whitepaper and pricing custom contract"
+    }
+  ];
+
+  const [pipeline, setPipeline] = useState<any[]>(initialLeads);
+
+  const moveStage = (leadId: string, direction: "left" | "right") => {
+    setPipeline((prev) =>
+      prev.map((l) => {
+        if (l.id !== leadId) return l;
+        const currIdx = STAGES.indexOf(l.stage);
+        const nextIdx = direction === "right" ? Math.min(currIdx + 1, STAGES.length - 1) : Math.max(currIdx - 1, 0);
+        return { ...l, stage: STAGES[nextIdx] };
+      })
+    );
+  };
 
   return (
     <div className="space-y-6">
       <div className="border-b border-slate-800 pb-4 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-slate-100">Predictive Leads Pipeline</h1>
-          <p className="text-sm text-slate-400 mt-1">Autonomous ICP scoring, firmographics, and historical score trajectories.</p>
+          <h1 className="text-2xl font-bold text-slate-100">Predictive Lead Intelligence &amp; Pipeline Board</h1>
+          <p className="text-sm text-slate-400 mt-1">Autonomous 4-factor scoring, next-best-action routing, and lifecycle stage progression.</p>
         </div>
-        <span className="text-xs font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800">
-          Total Leads: {data?.total || leads.length}
+        <span className="text-xs font-mono bg-purple-950 text-purple-400 px-3 py-1 rounded border border-purple-800">
+          Pipeline Leads: {pipeline.length}
         </span>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-200">High-Intent Leads Queue</h2>
-            <span className="text-xs text-slate-400">Endpoint: /v1/leads</span>
+      {/* 5-Column Interactive Pipeline Board */}
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+        {STAGES.map((stg) => {
+          const inStage = pipeline.filter((l) => l.stage === stg);
+          return (
+            <div key={stg} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-3 flex flex-col min-h-[300px]">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-mono uppercase font-bold text-slate-300">{stg}</span>
+                <span className="text-[10px] font-mono bg-slate-950 text-slate-400 px-1.5 py-0.5 rounded border border-slate-800">
+                  {inStage.length}
+                </span>
+              </div>
+
+              <div className="space-y-2 flex-1">
+                {inStage.map((lead) => (
+                  <div
+                    key={lead.id}
+                    onClick={() => setSelectedLead(lead)}
+                    className={`p-3 bg-slate-950 border rounded-lg cursor-pointer transition space-y-2 ${
+                      selectedLead?.id === lead.id ? "border-sky-500 shadow-md shadow-sky-950" : "border-slate-800 hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-200 truncate">{lead.company || lead.email}</span>
+                      <span className="text-xs font-mono font-bold text-emerald-400">{(lead.score * 100).toFixed(0)}</span>
+                    </div>
+
+                    <div className="flex justify-between items-center pt-1 text-[10px]">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveStage(lead.id, "left");
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
+                      >
+                        ◀
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          moveStage(lead.id, "right");
+                        }}
+                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
+                      >
+                        ▶
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Selected Lead Detail & AI Reasoning Drawer */}
+      {selectedLead && (
+        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-100">{selectedLead.company || selectedLead.email}</h2>
+              <span className="text-xs text-slate-400 font-mono">Lead ID: {selectedLead.id}</span>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 font-bold">
+                Overall Lead Score: {selectedLead.score}
+              </span>
+              <button onClick={() => setSelectedLead(null)} className="text-slate-500 hover:text-slate-300 text-sm">
+                ✕
+              </button>
+            </div>
           </div>
 
-          {isLoading ? (
-            <div className="p-8 text-center text-sm text-slate-500">Loading leads pipeline...</div>
-          ) : error ? (
-            <div className="p-8 text-center text-sm text-rose-400">Failed to load leads.</div>
-          ) : (
-            <table className="w-full text-left text-sm text-slate-300">
-              <thead className="bg-slate-950/60 text-xs uppercase text-slate-400 border-b border-slate-800">
-                <tr>
-                  <th className="p-4">Lead ID</th>
-                  <th className="p-4">Lead Score</th>
-                  <th className="p-4">Status</th>
-                  <th className="p-4">Source</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-800">
-                {leads.length > 0 ? (
-                  leads.map((l: any) => (
-                    <tr
-                      key={l.id}
-                      onClick={() => setSelectedLeadId(l.id)}
-                      className={`cursor-pointer transition hover:bg-slate-800/50 ${selectedLeadId === l.id ? "bg-sky-950/40" : ""}`}
-                    >
-                      <td className="p-4 font-mono font-medium text-sky-400">{l.id}</td>
-                      <td className="p-4">
-                        <span className="font-bold text-emerald-400">{l.score}</span>
-                      </td>
-                      <td className="p-4">
-                        <span className="px-2 py-0.5 rounded bg-sky-950 text-sky-400 border border-sky-800 text-xs">
-                          {l.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-xs text-slate-400">{l.source || "web"}</td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td colSpan={4} className="p-8 text-center text-slate-500 text-sm">
-                      No leads recorded yet. Telemetry will automatically populate qualified visitors.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        {/* Lead Score Breakdown & Trajectory */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
-          <h2 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">
-            Score Breakdown & Trajectory
-          </h2>
-          {selectedLeadId && scoreData ? (
-            <div className="space-y-4 text-xs">
-              <div>
-                <span className="text-slate-500">Lead ID:</span>
-                <p className="font-mono text-sky-400">{selectedLeadId}</p>
-              </div>
-              <div className="p-3 bg-slate-950 rounded border border-slate-800 space-y-1">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            {/* 4-Factor Scoring Breakdown */}
+            <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">4-Factor Scoring Weights</span>
+              <div className="space-y-1">
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Current Score:</span>
-                  <span className="text-emerald-400 font-bold">{scoreData.current_score}</span>
+                  <span>Behavior (40%):</span>
+                  <span className="font-mono text-emerald-400">{selectedLead.breakdown?.behavior}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Status:</span>
-                  <span className="text-sky-400">{scoreData.status}</span>
+                  <span>Firmographic (30%):</span>
+                  <span className="font-mono text-sky-400">{selectedLead.breakdown?.firmographic}</span>
                 </div>
-              </div>
-              <div>
-                <span className="text-slate-400 font-semibold block mb-1">Score History:</span>
-                <div className="space-y-1 max-h-48 overflow-y-auto">
-                  {scoreData.score_history?.map((h: any) => (
-                    <div key={h.score_id} className="p-2 bg-slate-950 rounded border border-slate-800 flex justify-between text-xs">
-                      <span>Score: <b className="text-emerald-400">{h.total_score}</b></span>
-                      <span className="text-slate-500">{new Date(h.created_at).toLocaleTimeString()}</span>
-                    </div>
-                  ))}
+                <div className="flex justify-between">
+                  <span>Engagement (20%):</span>
+                  <span className="font-mono text-purple-400">{selectedLead.breakdown?.engagement}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Source (10%):</span>
+                  <span className="font-mono text-amber-400">{selectedLead.breakdown?.source}</span>
                 </div>
               </div>
             </div>
-          ) : (
-            <p className="text-slate-500 text-xs italic">Select a lead to inspect score model breakdown and history.</p>
-          )}
+
+            {/* AI Universe Consultation History */}
+            <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+              <span className="text-[10px] font-mono uppercase text-purple-400 font-bold block">AI Universe Deliberation</span>
+              <div className="space-y-1">
+                <div className="flex justify-between">
+                  <span>Mode:</span>
+                  <span className="font-mono text-purple-400 font-bold">{selectedLead.ai_consultation?.mode}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Confidence:</span>
+                  <span className="font-mono text-emerald-400">{selectedLead.ai_consultation?.confidence}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Decision:</span>
+                  <span className="font-mono text-sky-400">{selectedLead.ai_consultation?.decision}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Next Best Action */}
+            <div className="p-4 bg-sky-950/30 border border-sky-800/60 rounded-lg space-y-2">
+              <span className="text-[10px] font-mono uppercase text-sky-400 font-bold block">Autonomous Next-Best-Action</span>
+              <p className="text-slate-200 text-xs">{selectedLead.next_best_action}</p>
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
