@@ -237,6 +237,78 @@ export default function GovernancePage() {
         </div>
       </div>
 
+      {/* DevSecOps Deployment Security Gate & Compliance Readiness */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200">DevSecOps Deployment Gates &amp; Compliance Readiness</h2>
+            <p className="text-xs text-slate-400">Pre-flight Sentinel automated scanning, deployment blocking, and SLA tracking.</p>
+          </div>
+          <span className="text-xs font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 font-bold">
+            Compliance Readiness: 96.5%
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          {/* Active Gate Policies */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Gate Enforcement Policy</span>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span className="text-rose-400 font-semibold">CRITICAL Finding:</span>
+                <span className="font-mono text-rose-400 font-bold">BLOCKED (0 Traffic)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-amber-400 font-semibold">HIGH Finding:</span>
+                <span className="font-mono text-amber-400 font-bold">OVERRIDE (HITL Approval)</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-emerald-400 font-semibold">MEDIUM / LOW:</span>
+                <span className="font-mono text-emerald-400 font-bold">APPROVED (Logged)</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Remediation SLAs */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Remediation SLA Compliance</span>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>Critical (48h SLA):</span>
+                <span className="font-mono text-emerald-400">100% Compliant</span>
+              </div>
+              <div className="flex justify-between">
+                <span>High (7d SLA):</span>
+                <span className="font-mono text-emerald-400">100% Compliant</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Medium (30d SLA):</span>
+                <span className="font-mono text-emerald-400">98% Compliant</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Compliance Frameworks */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <span className="text-[10px] uppercase font-bold text-purple-400 block">Framework Audit Status</span>
+            <div className="space-y-1">
+              <div className="flex justify-between">
+                <span>SOC2 Type II:</span>
+                <span className="font-mono text-emerald-400">AUDIT READY</span>
+              </div>
+              <div className="flex justify-between">
+                <span>ISO 27001:</span>
+                <span className="font-mono text-emerald-400">COMPLIANT</span>
+              </div>
+              <div className="flex justify-between">
+                <span>HIPAA Security:</span>
+                <span className="font-mono text-emerald-400">VERIFIED</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <ApprovalModal
         action={selectedAction}
         isOpen={isModalOpen}

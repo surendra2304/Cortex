@@ -886,3 +886,4 @@ def get_connector_registry() -> List[Dict[str, Any]]:
 
 # Sentinel Security Findings Integration
 from .sentinel_listener import SentinelEventListener, SentinelPayload, SentinelFinding
+from .deployment_gate import DeploymentSecurityGate, GateVerdict, DeploymentGateResult

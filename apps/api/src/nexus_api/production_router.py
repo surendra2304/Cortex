@@ -410,3 +410,37 @@ async def get_sentinel_findings():
         "total": len(_sentinel_listener.received_findings),
         "posture_score": _sentinel_listener.received_findings[0]["posture_score"] if _sentinel_listener.received_findings else 95.0
     }
+
+
+# ── 7. DEVSECOPS DEPLOYMENT SECURITY GATES & COMPLIANCE ───────────────────────
+
+from nexus_integrations.deployment_gate import DeploymentSecurityGate
+from nexus_analytics.security_baseline import SecurityBaselineTracker
+
+_deployment_gate = DeploymentSecurityGate(sentinel_listener=_sentinel_listener)
+_baseline_tracker = SecurityBaselineTracker()
+
+
+class DeploymentEvaluateRequest(BaseModel):
+    deployment_id: str
+    asset_id: str
+    endpoints: List[str]
+    simulated_findings: Optional[List[Dict[str, Any]]] = None
+
+
+@router.post("/v1/security/deployment-gate/evaluate")
+async def evaluate_deployment_gate(req: DeploymentEvaluateRequest):
+    """Evaluates candidate deployment against Sentinel security gates."""
+    result = await _deployment_gate.evaluate_deployment(
+        deployment_id=req.deployment_id,
+        asset_id=req.asset_id,
+        endpoints=req.endpoints,
+        simulated_findings=req.simulated_findings
+    )
+    return result.model_dump()
+
+
+@router.get("/v1/security/compliance-report")
+async def get_security_compliance_report():
+    """Generates weekly compliance report (SOC2 Type II, ISO 27001, SLA compliance)."""
+    return _baseline_tracker.generate_compliance_report()

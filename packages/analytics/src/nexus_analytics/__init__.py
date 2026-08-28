@@ -316,5 +316,9 @@ __all__ = [
     "ExperimentStatus",
     "AdvancedAnalyticsEngine",
     "NLQueryRequest",
-    "NLQueryResponse"
+    "NLQueryResponse",
+    "SecurityBaselineTracker",
+    "PostureSnapshot"
 ]
+
+from .security_baseline import SecurityBaselineTracker, PostureSnapshot
