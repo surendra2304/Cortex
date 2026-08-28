@@ -76,6 +76,10 @@ For self-hosted or cloud-native Kubernetes clusters:
   - `cognitive_loop_duration_seconds` (histogram & p99 summary)
   - `ai_universe_calls_total` & `ai_universe_fallback_total`
   - `workflow_runs_total` & `approval_queue_depth`
+  - `security_findings_received_total` & `security_incidents_created_total`
+  - `deployment_gates_evaluated_total` (DevSecOps gates)
+  - `intelx_research_submitted_total` & `competitive_intelligence_findings_total`
+  - `futuris_forecasts_requested_total`, `predictive_personalization_adjustments_total`, & `capacity_preparation_triggered_total`
 
 ### AlertManager Rules
 - **Service Down**: Fires when `up{job="nexus-api"} == 0` for > 1m (Severity: Critical).
@@ -84,7 +88,20 @@ For self-hosted or cloud-native Kubernetes clusters:
 
 ---
 
-## 5. Automated Backup & Disaster Recovery Procedure
+## 5. Eight-System Integration Ecosystem
+
+1. **Sentinel Security Integration**: Real-time vulnerability finding intake (`POST /v1/sentinel/findings`), live attack surface exposure mapping (`GET /v1/sentinel/exposure`), and automated incident triage.
+2. **Forge DevSecOps Deployment Gates**: Pre-flight API security scan on candidate build endpoints; enforces `CRITICAL -> BLOCKED`, `HIGH -> HITL OVERRIDE`, and `LOW -> APPROVED`.
+3. **IntelX Competitive & Market Intelligence**: Automated feature gap extraction, competitive sales battlecards, and market trend tracking.
+4. **Futuris Predictive Web Operations**: 24h traffic forecasting with 95% CI, automated capacity scaling recommendations, and proactive conversion drop mitigation.
+5. **AI Universe Multi-Agent Deliberation**: `FAST`, `REVIEW`, and `DEBATE` modes with deterministic fallback.
+6. **Universal Tool Runtime**: Connectors for SendGrid, HubSpot, Stripe, Zendesk, Calendly, Twilio, and outbound HMAC signed webhooks.
+7. **Reinforcement Strategy Learning**: Closed-loop outcome measurement with automated strategy promotion/demotion.
+8. **FRIDAY Orchestration Bridge**: Executive voice summaries, priority leads stream, and bi-directional desktop/device action delegation.
+
+---
+
+## 6. Automated Backup & Disaster Recovery Procedure
 
 ### Automated Schedules
 1. **PostgreSQL Automated Snapshots**: Continuous Write-Ahead Logging (WAL) archiving with daily automated snapshots stored across 7-day retention windows.
@@ -107,9 +124,9 @@ aws ecs update-service --cluster nexus-cluster-production \
 
 ---
 
-## 6. Continuous Deployment Workflow (.github/workflows/deploy.yml)
+## 7. Continuous Deployment Workflow (.github/workflows/deploy.yml)
 
-1. **Automated Testing**: Runs 103 tests in pytest and validates strict diary structural constraints.
+1. **Automated Testing**: Runs 128 tests in pytest and validates strict diary structural constraints.
 2. **Container Build**: Multi-stage Docker builds push signed immutable images to GitHub Container Registry (`ghcr.io`).
 3. **Staging Rollout & Smoke Tests**: Automatic rollout to Staging environment verifying `/v1/health` and `/health/ready` connectivity.
 4. **Production Rolling Update**: Zero-downtime deployment replacing ECS Fargate tasks sequentially.

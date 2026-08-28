@@ -29,7 +29,10 @@ METRICS = {
     "security_incidents_created_total": 0,
     "deployment_gates_evaluated_total": 0,
     "intelx_research_submitted_total": 0,
-    "competitive_intelligence_findings_total": 0
+    "competitive_intelligence_findings_total": 0,
+    "futuris_forecasts_requested_total": 0,
+    "predictive_personalization_adjustments_total": 0,
+    "capacity_preparation_triggered_total": 0
 }
 
 
@@ -96,6 +99,18 @@ async def prometheus_metrics():
         "# TYPE competitive_intelligence_findings_total counter",
         f"competitive_intelligence_findings_total {METRICS['competitive_intelligence_findings_total']}",
         "",
+        "# HELP futuris_forecasts_requested_total Total forecasting requests to Futuris",
+        "# TYPE futuris_forecasts_requested_total counter",
+        f"futuris_forecasts_requested_total {METRICS['futuris_forecasts_requested_total']}",
+        "",
+        "# HELP predictive_personalization_adjustments_total Total proactive predictive adjustments",
+        "# TYPE predictive_personalization_adjustments_total counter",
+        f"predictive_personalization_adjustments_total {METRICS['predictive_personalization_adjustments_total']}",
+        "",
+        "# HELP capacity_preparation_triggered_total Total auto-scaling & cache preparations",
+        "# TYPE capacity_preparation_triggered_total counter",
+        f"capacity_preparation_triggered_total {METRICS['capacity_preparation_triggered_total']}",
+        "",
         "# HELP approval_queue_depth Pending human-in-the-loop approvals gauge",
         "# TYPE approval_queue_depth gauge",
         f"approval_queue_depth {METRICS['approval_queue_depth']}",
@@ -121,13 +136,14 @@ async def readiness_probe(
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
-    """Readiness probe: validates PostgreSQL, Redis, AI Universe, Sentinel, and IntelX dependencies."""
+    """Readiness probe: validates PostgreSQL, Redis, AI Universe, Sentinel, IntelX, and Futuris dependencies."""
     checks = {
         "postgres": "UNKNOWN",
         "redis": "UNKNOWN",
         "ai_universe": "READY",
         "sentinel": "READY",
-        "intelx": "READY"
+        "intelx": "READY",
+        "futuris": "READY"
     }
 
     # 1. PostgreSQL check
