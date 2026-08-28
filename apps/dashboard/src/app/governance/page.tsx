@@ -170,6 +170,73 @@ export default function GovernancePage() {
         </div>
       </div>
 
+      {/* Sentinel Security Findings & Attack Surface Exposure */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200">Sentinel Security Findings &amp; Exposure Coordination</h2>
+            <p className="text-xs text-slate-400">Continuous vulnerability intake, automated triage, and asset exposure mapping.</p>
+          </div>
+          <span className="text-xs font-mono bg-purple-950 text-purple-400 px-3 py-1 rounded border border-purple-800 font-bold">
+            Security Posture: 95/100
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+          {/* Findings Feed */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Recent Sentinel Vulnerability Findings</span>
+            <div className="space-y-2">
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded flex justify-between items-start">
+                <div>
+                  <span className="font-bold text-slate-200 block">SQLi Probe Detected on /api/v1/search</span>
+                  <span className="text-[11px] text-slate-400">Vector: Union-based payload in query param</span>
+                  <span className="text-[10px] text-emerald-400 block mt-1">Status: Mitigated by WAF &amp; Escaped Queries</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                  HIGH
+                </span>
+              </div>
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded flex justify-between items-start">
+                <div>
+                  <span className="font-bold text-slate-200 block">Missing Content-Security-Policy Header</span>
+                  <span className="text-[11px] text-slate-400">Endpoint: /checkout (Public)</span>
+                  <span className="text-[10px] text-sky-400 block mt-1">Status: Remediation In-Progress</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-sky-950 text-sky-400 border border-sky-800">
+                  MEDIUM
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Asset Exposure Map */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-3">
+            <span className="text-[10px] uppercase font-bold text-slate-400 block">Monitored Asset Exposure Map</span>
+            <div className="space-y-2">
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded flex justify-between items-center">
+                <div>
+                  <span className="font-mono text-slate-200 font-bold block">site_main:/checkout</span>
+                  <span className="text-[11px] text-slate-400">Public: True | Auth: False | Data: Sensitive</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">
+                  CRITICAL EXP
+                </span>
+              </div>
+              <div className="p-3 bg-slate-900 border border-slate-800 rounded flex justify-between items-center">
+                <div>
+                  <span className="font-mono text-slate-200 font-bold block">site_main:/v1/events</span>
+                  <span className="text-[11px] text-slate-400">Public: True | Auth: True | Data: Telemetry</span>
+                </div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-400 border border-amber-800">
+                  HIGH EXP
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <ApprovalModal
         action={selectedAction}
         isOpen={isModalOpen}

@@ -173,3 +173,6 @@ class WorkflowStateMachine:
         await self.transition(ctx, WorkflowState.VERIFYING, "VERIFY_TOP_HYPOTHESIS", {"selected": "checkout_api_latency"})
         await self.transition(ctx, WorkflowState.COMPLETED, "RESOLVE_INCIDENT", {"alert_dispatched": True})
         return ctx
+
+
+from .security_incident import SecurityIncidentWorkflow

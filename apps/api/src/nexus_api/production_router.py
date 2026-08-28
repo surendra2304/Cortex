@@ -353,3 +353,60 @@ async def get_tenant_usage():
         "ai_universe_calls": 1240,
         "workflow_runs": 850
     }
+
+
+# ── 6. SENTINEL INTEGRATION & SECURITY INCIDENT COORDINATION ──────────────────
+
+from nexus_integrations.sentinel_listener import SentinelEventListener, SentinelPayload
+from nexus_intelligence.exposure_monitor import AssetExposureMonitor
+from nexus_workflow_engine.security_incident import SecurityIncidentWorkflow
+
+_exposure_monitor = AssetExposureMonitor()
+_sentinel_listener = SentinelEventListener(exposure_monitor=_exposure_monitor)
+_sec_workflow = SecurityIncidentWorkflow()
+
+
+@router.post("/v1/sentinel/findings", status_code=status.HTTP_202_ACCEPTED)
+async def receive_sentinel_findings(payload: SentinelPayload):
+    """
+    Receives automated vulnerability and posture findings from Sentinel scanner.
+    Ingests into cognitive loop and automatically initiates SecurityIncidentWorkflow for critical/high findings.
+    """
+    ingest_result = await _sentinel_listener.handle_findings(payload)
+
+    triaged_incidents = []
+    for finding in payload.findings:
+        if finding.severity.lower() in ("critical", "high"):
+            exposure = _exposure_monitor.evaluate_exposure(
+                payload.asset_id,
+                finding.affected_endpoint or f"/api/{payload.asset_id}"
+            )
+            incident = await _sec_workflow.execute_security_incident_triage(
+                finding=finding.model_dump(),
+                asset_exposure=exposure
+            )
+            triaged_incidents.append(incident)
+
+    return {
+        **ingest_result,
+        "security_incidents_triaged": triaged_incidents
+    }
+
+
+@router.get("/v1/sentinel/exposure")
+async def get_asset_exposure():
+    """Returns live asset exposure and attack surface mappings."""
+    return {
+        "assets": _exposure_monitor.list_monitored_assets(),
+        "total_monitored": len(_exposure_monitor.asset_registry)
+    }
+
+
+@router.get("/v1/sentinel/findings")
+async def get_sentinel_findings():
+    """Returns list of received Sentinel findings and posture evaluation."""
+    return {
+        "findings": _sentinel_listener.received_findings,
+        "total": len(_sentinel_listener.received_findings),
+        "posture_score": _sentinel_listener.received_findings[0]["posture_score"] if _sentinel_listener.received_findings else 95.0
+    }

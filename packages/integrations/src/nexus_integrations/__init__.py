@@ -882,3 +882,7 @@ CONNECTOR_HEALTH: Dict[str, Dict[str, Any]] = {
 
 def get_connector_registry() -> List[Dict[str, Any]]:
     return [{"id": k, **v} for k, v in CONNECTOR_HEALTH.items()]
+
+
+# Sentinel Security Findings Integration
+from .sentinel_listener import SentinelEventListener, SentinelPayload, SentinelFinding

@@ -99,3 +99,6 @@ class ContextBuilder:
             intent_score=intent_score,
             anomaly_flags=anomalies
         )
+
+
+from .exposure_monitor import AssetExposureMonitor, AssetExposure
