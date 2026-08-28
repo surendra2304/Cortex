@@ -198,6 +198,78 @@ export default function AnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {/* Futuris Predictive Web Operations Section */}
+      <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
+        <div className="flex justify-between items-center border-b border-slate-800 pb-2">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-200">Futuris Predictive Web Operations &amp; Capacity Forecasting</h2>
+            <p className="text-xs text-slate-400">24-hour traffic volume predictions, capacity breach alerts, and conversion bottleneck forecasting.</p>
+          </div>
+          <span className="text-xs font-mono bg-amber-950 text-amber-400 px-3 py-1 rounded border border-amber-800 font-bold">
+            Predictive AI Active (95% CI)
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+          {/* Traffic Forecast & Capacity */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Traffic Horizon (24h)</span>
+              <span className="text-rose-400 font-mono font-bold text-[10px]">PEAK: 504 RPS</span>
+            </div>
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded space-y-1">
+              <div className="flex justify-between">
+                <span>Threshold:</span>
+                <span className="font-mono text-slate-300">400 RPS</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Capacity Status:</span>
+                <span className="font-mono text-rose-400 font-bold">EXCEEDS CAPACITY</span>
+              </div>
+              <span className="text-[10px] text-amber-400 block font-mono mt-1">Action: Auto-scale replicas 3 &rarr; 7</span>
+            </div>
+          </div>
+
+          {/* Conversion Trend Forecast */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] uppercase font-bold text-slate-400">Conversion Trajectory</span>
+              <span className="text-amber-400 font-mono font-bold text-[10px]">78% DROP RISK</span>
+            </div>
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded space-y-1">
+              <div className="flex justify-between">
+                <span>Current CVR:</span>
+                <span className="font-mono text-slate-300">3.8%</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Predicted CVR:</span>
+                <span className="font-mono text-rose-400">2.1% (Dropping)</span>
+              </div>
+              <span className="text-[10px] text-sky-400 block font-mono mt-1">Bottleneck: /checkout/payment</span>
+            </div>
+          </div>
+
+          {/* Predictive Churn Risk */}
+          <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] uppercase font-bold text-slate-400">At-Risk Segment Forecast</span>
+              <span className="text-rose-400 font-mono font-bold text-[10px]">18 ACCOUNTS</span>
+            </div>
+            <div className="p-2.5 bg-slate-900 border border-slate-800 rounded space-y-1">
+              <div className="flex justify-between">
+                <span>Segment:</span>
+                <span className="text-slate-300 font-bold">Mid-Market Expiring</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Churn Rate:</span>
+                <span className="font-mono text-rose-400">42.5%</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 block font-mono mt-1">Preemptive: Retention Workflow</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

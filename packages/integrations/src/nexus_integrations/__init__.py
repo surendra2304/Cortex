@@ -890,3 +890,6 @@ from .deployment_gate import DeploymentSecurityGate, GateVerdict, DeploymentGate
 
 # IntelX Competitive & Market Intelligence Integration
 from .intelx_client import IntelXClient, CompetitorProfile, MarketSignal
+
+# Futuris Predictive Operations Integration
+from .futuris_client import FuturisClient, TrafficForecast, ConversionTrendForecast, ChurnSegmentForecast

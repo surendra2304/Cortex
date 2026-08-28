@@ -103,3 +103,4 @@ class ContextBuilder:
 
 from .exposure_monitor import AssetExposureMonitor, AssetExposure
 from .market_signals import MarketSignalDetector
+from .predictive_personalization import PredictionInformedPersonalization, PredictivePersonalizationAction

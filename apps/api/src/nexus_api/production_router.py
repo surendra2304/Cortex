@@ -475,3 +475,42 @@ async def evaluate_deployment_gate(req: DeploymentEvaluateRequest):
 async def get_security_compliance_report():
     """Generates weekly compliance report (SOC2 Type II, ISO 27001, SLA compliance)."""
     return _baseline_tracker.generate_compliance_report()
+
+
+# ── 8. FUTURIS PREDICTIVE OPERATIONS & CAPACITY PLANNING ──────────────────────
+
+from nexus_integrations.futuris_client import FuturisClient
+from nexus_workflow_engine.capacity_planning import CapacityPlanningWorkflow
+from nexus_intelligence.predictive_personalization import PredictionInformedPersonalization
+
+_futuris_client = FuturisClient()
+_capacity_workflow = CapacityPlanningWorkflow(futuris_client=_futuris_client)
+_pred_personalization = PredictionInformedPersonalization(futuris_client=_futuris_client)
+
+
+@router.get("/v1/predictive/traffic-forecast")
+async def get_traffic_forecast(site_id: str = "site_main", horizon_hours: int = 24):
+    """Returns 24h/7d traffic forecast with 95% confidence intervals."""
+    forecast = await _futuris_client.predict_traffic(site_id=site_id, horizon_hours=horizon_hours)
+    return forecast.model_dump()
+
+
+@router.get("/v1/predictive/capacity-plan")
+async def evaluate_capacity_plan(site_id: str = "site_main"):
+    """Evaluates upcoming traffic against provisioned infrastructure thresholds."""
+    plan = await _capacity_workflow.evaluate_capacity(site_id=site_id)
+    return plan.model_dump()
+
+
+@router.get("/v1/predictive/conversion-trends")
+async def get_conversion_trends(segment_id: str = "enterprise_leads"):
+    """Forecasts conversion rate trajectory and bottleneck steps."""
+    trend = await _futuris_client.predict_conversion_trends(segment_id=segment_id)
+    return trend.model_dump()
+
+
+@router.get("/v1/predictive/churn-risk")
+async def get_churn_risk_forecast(tenant_id: str = "default"):
+    """Predicts high-risk customer segments and primary churn drivers."""
+    segments = await _futuris_client.predict_churn_risk(tenant_id=tenant_id)
+    return [s.model_dump() for s in segments]
