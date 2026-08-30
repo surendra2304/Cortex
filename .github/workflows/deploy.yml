@@ -46,13 +46,18 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set Lowercase Image Names
+        id: repo-names
+        run: |
+          echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
       - name: Build and Push API Image
         uses: docker/build-push-action@v5
         with:
           context: .
           file: apps/api/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}-api:latest
+          tags: ghcr.io/${{ env.REPO_LOWER }}-api:latest
 
       - name: Build and Push Worker Image
         uses: docker/build-push-action@v5
@@ -60,7 +65,7 @@ jobs:
           context: .
           file: apps/worker/Dockerfile
           push: true
-          tags: ghcr.io/${{ github.repository }}-worker:latest
+          tags: ghcr.io/${{ env.REPO_LOWER }}-worker:latest
 
   deploy-staging:
     name: Deploy to Staging & Run Smoke Tests
