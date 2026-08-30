@@ -19,10 +19,13 @@ class Settings(BaseSettings):
     port: int = 8000
     allowed_origins: List[str] = ["*"]
     
-    # Storage and queues
-    postgres_dsn: str = "postgresql+asyncpg://nexus:nexus@localhost:5432/nexus_db"
+    # Master API Key
+    cortex_api_key: str = "cortex_api"
+    
+    # Storage and queues (Defaults to local SQLite if no external DB provided)
+    postgres_dsn: str = "sqlite+aiosqlite:///./data/cortex.db"
     redis_url: str = "redis://localhost:6379/0"
-    redis_event_stream: str = "nexus:events:stream"
+    redis_event_stream: str = "cortex:events:stream"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
