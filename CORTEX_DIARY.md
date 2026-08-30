@@ -27,4 +27,27 @@ This document serves as the master record of engineering progress, architecture 
   - **Compliance, Privacy & Governance**: Created `SecretScrubber` and `PrivacyComplianceService` for GDPR Art. 15 (JSON Export), Art. 17 (Hard Erasure), and 7-year tamper-evident audit logs.
   - **Multi-Tenant SaaS Foundation**: Built tenant onboarding flow (`POST /v1/tenants`), usage metering quotas (`GET /v1/tenant/usage`), and white-label settings (`GET /v1/tenant/settings`).
   - **Production Observability & Probes**: Prometheus `/metrics` endpoint tracking full platform telemetry and deep `/health/ready` dependency checks (PostgreSQL, Redis, AI Universe, Sentinel, IntelX, Futuris).
-- **Current Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest).
+- **Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest).
+
+---
+
+### [Day 3 — 2026-08-30: Cloud Containerization, Zero-Config SQLite & Render Deployment](diary/2026-08-30.md)
+- **Focus**: Cloud platform readiness on Render, root multi-stage Dockerfile, SQLite zero-configuration default, and master API key standardization.
+- **What Was Completed**:
+  - **Root Multi-Stage Dockerfile**: Configured Python 3.11-slim container with `tini` signal handling, virtual environment isolation, and health checks.
+  - **Dynamic PORT Resolution**: Supported dynamic `${PORT:-8000}` environment variable binding for cloud web service hosting.
+  - **SQLite Database Topology**: Defaulted `postgres_dsn` to `sqlite+aiosqlite:///./data/cortex.db` with automated directory provisioning.
+  - **API Authentication Standard**: Standardized master API authentication around `CORTEX_API_KEY=cortex_api`.
+  - **Ecosystem Network Mapping**: Aligned environment variables and communication protocols with the master 9-subsystem blueprint.
+- **Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest).
+
+---
+
+### [Day 4 — 2026-08-31: Official CORTEX Renaming, CI/CD Pipeline Green & System Manifest](diary/2026-08-31.md)
+- **Focus**: Formal platform and GitHub repository renaming to Cortex, GitHub Actions CI/CD pipeline stabilization, GHCR container image publishing, and system manifest documentation.
+- **What Was Completed**:
+  - **Platform & GitHub Renaming**: Renamed repository from `surendra2304/Nexus` to `surendra2304/Cortex`, updated `origin` remotes, pyproject.toml, package.json files, and README.md.
+  - **CI/CD Pipeline Stabilization**: Resolved Hatchling wheel package discovery, added `aiosqlite` dependency, fixed npm cache in monorepos, and added `packages: write` permissions.
+  - **GHCR Image Publishing**: Fixed lowercase container repository tagging (`ghcr.io/surendra2304/cortex-api:latest`), verified green checks on both CI and Production pipelines.
+  - **System Manifest Documentation**: Authored `SYSTEM_MANIFEST.md` detailing live cloud URL (`https://cortex-qifr.onrender.com`), authentication, and full 9-agent ecosystem connectivity.
+- **Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest).
