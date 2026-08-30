@@ -29,14 +29,16 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
-# Async PostgreSQL Engine & Session Pool
-engine = create_async_engine(
-    settings.postgres_dsn,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    echo=False
-)
+# Async Engine & Session Pool
+engine_kwargs = {"echo": False}
+if "sqlite" in settings.postgres_dsn:
+    engine_kwargs["connect_args"] = {"check_same_thread": False}
+else:
+    engine_kwargs["pool_size"] = 20
+    engine_kwargs["max_overflow"] = 10
+    engine_kwargs["pool_pre_ping"] = True
+
+engine = create_async_engine(settings.postgres_dsn, **engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

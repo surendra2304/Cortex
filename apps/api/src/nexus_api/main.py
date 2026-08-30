@@ -51,7 +51,18 @@ app.include_router(production_router)
 app.include_router(streaming_router)
 
 
-@app.get("/v1/health", tags=["System"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["System"])
+async def root():
+    return {
+        "status": "healthy",
+        "service": settings.app_name,
+        "environment": settings.app_env,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["System"])
+@app.api_route("/v1/health", methods=["GET", "HEAD"], tags=["System"])
 async def health_check():
     return {
         "status": "healthy",
