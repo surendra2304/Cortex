@@ -11,9 +11,9 @@ Base = declarative_base()
 
 
 class Settings(BaseSettings):
-    app_name: str = "NEXUS API"
-    app_env: str = "development"
-    debug: bool = True
+    app_name: str = "CORTEX API"
+    app_env: str = "production"
+    debug: bool = False
     api_v1_prefix: str = "/v1"
     host: str = "0.0.0.0"
     port: int = 8000
