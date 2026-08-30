@@ -1,4 +1,4 @@
-name: NEXUS CI/CD Pipeline
+name: CORTEX CI/CD Pipeline
 
 on:
   push:
@@ -18,12 +18,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-          cache: "pip"
 
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install . pytest pytest-asyncio pytest-mock flake8
+          python -m pip install . pytest pytest-asyncio pytest-mock flake8 respx httpx
 
       - name: Validate Engineering Diary Invariants
         run: |
@@ -44,7 +43,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "20"
-          cache: "npm"
 
       - name: Build & Test Browser SDK
         run: |

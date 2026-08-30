@@ -33,3 +33,20 @@ dev = [
     "black>=24.0.0",
     "ruff>=0.3.0"
 ]
+
+[tool.hatch.build.targets.wheel]
+packages = [
+    "packages/core/src/nexus_core",
+    "packages/event_schema/src/nexus_event_schema",
+    "packages/agents/src/nexus_agents",
+    "packages/ai_universe_adapter/src/nexus_ai_universe_adapter",
+    "packages/tool_runtime/src/nexus_tool_runtime",
+    "packages/integrations/src/nexus_integrations",
+    "packages/policy_engine/src/nexus_policy_engine",
+    "packages/workflow_engine/src/nexus_workflow_engine",
+    "packages/identity/src/nexus_identity",
+    "packages/analytics/src/nexus_analytics",
+    "packages/intelligence/src/nexus_intelligence",
+    "packages/memory/src/nexus_memory",
+    "apps/api/src/nexus_api"
+]
