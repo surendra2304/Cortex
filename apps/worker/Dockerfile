@@ -28,6 +28,4 @@ COPY packages/ ./packages/
 COPY apps/ ./apps/
 COPY infra/ ./infra/
 
-EXPOSE 8000
-
-CMD ["uvicorn", "nexus_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "nexus_worker.main"]
