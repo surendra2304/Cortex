@@ -1,7 +1,7 @@
 {
-  "name": "@nexus/sdk",
+  "name": "@cortex/sdk",
   "version": "0.1.0",
-  "description": "NEXUS JavaScript and TypeScript Browser Telemetry SDK",
+  "description": "CORTEX JavaScript and TypeScript Browser Telemetry SDK",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",

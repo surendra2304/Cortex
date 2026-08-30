@@ -1,32 +1,32 @@
-# NEXUS — Autonomous Website & Web App Operations Intelligence
+# CORTEX — Autonomous Website & Web App Operations Intelligence
 
 ## 1. Definition
-NEXUS is a standalone autonomous operations platform for an existing website or web application. It is not a website builder or deployment platform. After integration, NEXUS observes digital activity, understands what is happening, reasons over the state of the property, executes approved actions, measures outcomes, and continuously improves operations.
+CORTEX is a standalone autonomous operations platform for an existing website or web application. It is not a website builder or deployment platform. After integration, CORTEX observes digital activity, understands what is happening, reasons over the state of the property, executes approved actions, measures outcomes, and continuously improves operations.
 
 ---
 
-## 2. What NEXUS IS / IS NOT
+## 2. What CORTEX IS / IS NOT
 
-| What NEXUS IS | What NEXUS IS NOT |
+| What CORTEX IS | What CORTEX IS NOT |
 | :--- | :--- |
 | **Autonomous Operations Platform** for live digital properties | **Not a website builder** (Wix, Webflow, WordPress) |
 | **Unified Intelligence Layer** (events, visitors, leads, telemetry) | **Not a hosting or deployment provider** (Vercel, AWS) |
 | **Agent Runtime with Governed Tools** (human-in-the-loop policies) | **Not a simple passive analytics dashboard** (GA4, Mixpanel) |
-| **Multi-Agent Orchestrator** (Growth, Sales, Support, Reliability) | **Not a fixed three-agent demo script** |
+| **Multi-Agent Orchestrator** (Growth, Sales, Support, Reliability, Competitive) | **Not a fixed three-agent demo script** |
 | **AI Universe Intelligence Consumer** (structured cognitive engine) | **Not an AI Universe replacement** |
 | **Specialist Operator Capability** consumable by FRIDAY OS | **Not a FRIDAY OS duplicate or clone** |
 
 ---
 
 ## 3. Core Product Promise
-> *"Connect NEXUS to an existing website or web app once, give it the required permissions and integrations, and it becomes an intelligent operations layer that monitors health, captures and qualifies intent, coordinates support, orchestrates growth experiments, routes high-value opportunities, and continuously optimizes digital operations under strict policy controls."*
+> *"Connect CORTEX to an existing website or web app once, give it the required permissions and integrations, and it becomes an intelligent operations layer that monitors health, captures and qualifies intent, coordinates support, orchestrates growth experiments, routes high-value opportunities, and continuously optimizes digital operations under strict policy controls."*
 
 ---
 
 ## 4. Design Principles
 1. **Autonomy with Boundaries**: Agents can act autonomously within strictly defined policy constraints; high-impact mutations require operator approval.
 2. **AI-First, Not AI-Only**: Deterministic logic handles standard routing; AI Universe deliberation is reserved for ambiguous or strategic goals.
-3. **Provider Independence**: Pluggable integrations (SendGrid, Twilio, HubSpot, Stripe, Zendesk, Calendly) behind the Universal Tool Contract.
+3. **Provider Independence**: Pluggable integrations (SendGrid, Twilio, HubSpot, Stripe, Zendesk, Calendly, Sentinel, IntelX, Futuris) behind the Universal Tool Contract.
 4. **Everything is an Event**: All telemetry, user actions, system signals, and agent decisions flow through canonical event schemas.
 5. **Everything is Auditable**: Immutable audit records for every action, decision, approval, and state mutation.
 6. **Composability**: Modular architecture allowing independent scaling of API, background workers, and dashboard.
@@ -47,13 +47,13 @@ NEXUS is a standalone autonomous operations platform for an existing website or 
                |                                     |
                v                                     v
 +-----------------------------+       +-----------------------------+
-|           NEXUS             |       |           FRIDAY            |
+|           CORTEX            |       |           FRIDAY            |
 | (Web Operations Specialist) |<=====>|   (General OS Operator)     |
 +-----------------------------+       +-----------------------------+
 ```
 
 ### Critical Separation Rule
-> **"NEXUS should not become a hidden FRIDAY module. AI Universe should not become a hidden NEXUS module. Each repository must be independently runnable, testable, and deployable."**
+> **"CORTEX should not become a hidden FRIDAY module. AI Universe should not become a hidden CORTEX module. Each repository must be independently runnable, testable, and deployable."**
 
 ---
 
@@ -83,6 +83,9 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 - **Support & Ticketing**: Automated triage and ticket escalation (Zendesk / Intercom).
 - **Website Health & Reliability**: P99 latency tracking, error spike detection, and incident root-cause hypotheses.
 - **A/B Experimentation**: Two-proportion z-test statistical significance (p < 0.05 / z >= 1.96) with sticky variant hashing.
+- **Sentinel Security & DevSecOps**: Continuous vulnerability ingestion, attack surface exposure mapping, and pre-flight deployment gates.
+- **IntelX Competitive & Market Intelligence**: Automated feature gap extraction, competitive sales battlecards, and market trend tracking.
+- **Futuris Predictive Web Operations**: 24h traffic forecasting with 95% CI, capacity auto-scaling, and conversion drop mitigation.
 - **Governance & Security**: OIDC RS256 JWT RBAC, Prometheus metrics (`/metrics`), and distributed `trace_id` correlation.
 
 ---
@@ -108,10 +111,10 @@ Every ingested event is processed through a strict closed-loop cognitive state m
                                                                     |
                                                                     v
 +-------------------------------------------------------------------+-------------------+
-|                                     NEXUS CORE WORKER                                 |
+|                                     CORTEX CORE WORKER                                |
 |                                                                                       |
 |   +-------------------+     +---------------------+     +-------------------------+   |
-|   |  Context Engine   | --> | Dynamic Agents (4+) | --> |      Policy Engine      |   |
+|   |  Context Engine   | --> | Dynamic Agents (7+) | --> |      Policy Engine      |   |
 |   +-------------------+     +----------+----------+     +------------+------------+   |
 |                                        |                             |                |
 |                                        v                             v                |
@@ -167,16 +170,18 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 | :--- | :--- | :--- |
 | **Ingestion Gateway & Event Store** | TypeScript SDK, Webhooks, Partitioned Postgres, Redis Streams | ✅ Operational |
 | **Understand Intelligence Layer** | Identity Resolution Graph, 4-Factor Lead Scoring, Funnel Anomalies | ✅ Operational |
-| **Specialist Agent Ecosystem** | 6 Input-Driven Specialist Agents (Growth, Sales, Support, Reliability...) | ✅ Operational |
+| **Specialist Agent Ecosystem** | 7 Input-Driven Specialist Agents (Growth, Sales, Support, Reliability, Competitive...) | ✅ Operational |
 | **AI Universe Deliberation Engine** | FAST, REVIEW, DEBATE Deliberation Modes & Deterministic Fallbacks | ✅ Operational |
-| **Action & Workflow Engine** | 5 Operational Workflows, Human-in-the-Loop Approvals | ✅ Operational |
-| **Universal Tool & Connector Bus** | 7 Connectors (SendGrid, Twilio, HubSpot, Calendly, Stripe, Zendesk...) | ✅ Operational |
+| **Action & Workflow Engine** | Operational Workflows, Human-in-the-Loop Approvals | ✅ Operational |
+| **Universal Tool & Connector Bus** | Connectors (SendGrid, Twilio, HubSpot, Calendly, Stripe, Zendesk...) | ✅ Operational |
 | **Closed-Loop Learning Layer** | 48h Outcome Attribution, Strategy Promotion (>60%) & Demotion (<30%) | ✅ Operational |
 | **A/B Testing & Personalization** | Two-Proportion Z-Test Significance, Sticky Hashing, Dynamic Rules | ✅ Operational |
 | **FRIDAY Integration Bridge** | Bidirectional Gateway, Inbound Commands, Outbound FridayClient | ✅ Operational |
 | **Real-Time Streaming Hub** | Multiplexed WebSocket Hub (`/ws/v1/live`), Sub-100ms Push, Ring Buffers | ✅ Operational |
 | **Advanced Analytics & NL Query** | Conversational SQL Parser, Multi-Touch Attribution (Time-Decay 7d) | ✅ Operational |
-| **Privacy, Governance & SaaS** | GDPR/CCPA Exports & Deletions, PII Scrubber, Multi-Tenant Isolation | ✅ Operational (95/95 tests green) |
+| **Privacy, Governance & SaaS** | GDPR/CCPA Exports & Deletions, PII Scrubber, Multi-Tenant Isolation | ✅ Operational |
+| **Sentinel & Forge DevSecOps** | Vulnerability Intake, Live Exposure Map, Pre-Flight Deployment Gates | ✅ Operational |
+| **IntelX & Futuris Operations** | Competitive Intelligence Battlecards, 24h Traffic Capacity Forecasting | ✅ Operational (128/128 tests green) |
 
 ---
 
@@ -195,5 +200,5 @@ docker-compose up -d
 
 ### 3. Run Test Suite
 ```bash
-pytest tests/unit -v
+pytest -v
 ```

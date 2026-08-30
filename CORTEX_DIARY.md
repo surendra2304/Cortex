@@ -1,6 +1,6 @@
-# Nexus Engineering Master Diary & Progress Index
+# Cortex Engineering Master Diary & Progress Index
 
-This document serves as the master record of engineering progress, architecture evolutions, and milestone achievements for the **NEXUS** autonomous operations intelligence platform.
+This document serves as the master record of engineering progress, architecture evolutions, and milestone achievements for the **CORTEX** autonomous operations intelligence platform.
 
 ---
 
