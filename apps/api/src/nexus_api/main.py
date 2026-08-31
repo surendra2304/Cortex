@@ -26,8 +26,8 @@ from nexus_api.streaming_router import router as streaming_router
 
 app = FastAPI(
     title=settings.app_name,
-    description="Autonomous Website & Web App Operations Intelligence Platform API",
-    version="0.1.0",
+    description="CORTEX Autonomous Web Operations Intelligence Platform API",
+    version="2.0.0",
     docs_url="/docs",
     redoc_url="/redoc"
 )
