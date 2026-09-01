@@ -41,11 +41,12 @@ async def validate_api_key(
             ApiKeyModel.is_active == True
         )
         res = await db.execute(stmt)
-        record = res.scalar_one_or_none()
-        if record:
-            record.last_used_at = datetime.utcnow()
-            await db.commit()
-            return record
+        if hasattr(res, "scalar_one_or_none"):
+            record = res.scalar_one_or_none()
+            if record:
+                record.last_used_at = datetime.utcnow()
+                await db.commit()
+                return record
     except Exception as exc:
         logger.warning(f"DB lookup for API key failed ({exc}).")
 

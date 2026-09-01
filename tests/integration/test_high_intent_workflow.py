@@ -2,7 +2,7 @@ import pytest
 import os
 import sys
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 for p in [
     "packages/core/src",
@@ -28,6 +28,9 @@ async def test_high_intent_followup_workflow_e2e():
     High Intent Event -> Planning -> Consent Verification -> Email Dispatch -> Outcome Measurement.
     """
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock(return_value=None)
+    mock_db.execute = AsyncMock(return_value=None)
     sm = WorkflowStateMachine(db=mock_db)
 
     # 1. Trigger High-Intent Follow-up Workflow

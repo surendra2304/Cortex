@@ -44,6 +44,7 @@ async def test_full_cognitive_loop_end_to_end():
     """
     # 1. Setup mock database and orchestrator components
     mock_db = AsyncMock()
+    mock_db.add = lambda x: None
     mock_db.execute.return_value = MagicMock(scalars=MagicMock(return_value=MagicMock(all=MagicMock(return_value=[]))))
 
     orchestrator = Orchestrator()

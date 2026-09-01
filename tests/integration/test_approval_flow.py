@@ -2,7 +2,7 @@ import pytest
 import os
 import sys
 from datetime import datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 for p in [
     "packages/core/src",
@@ -28,6 +28,9 @@ async def test_human_in_the_loop_approval_flow_e2e():
     """
     policy_engine = PolicyEngine(human_in_the_loop_enabled=True)
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock(return_value=None)
+    mock_db.execute = AsyncMock(return_value=None)
     sm = WorkflowStateMachine(db=mock_db)
 
     # 1. Define High Impact Tool

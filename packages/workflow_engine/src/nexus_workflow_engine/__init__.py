@@ -128,12 +128,13 @@ class WorkflowStateMachine:
             try:
                 stmt = select(WorkflowRunModel).where(WorkflowRunModel.id == ctx.run_id)
                 res = await self.db.execute(stmt)
-                run_model = res.scalar_one_or_none()
-                if run_model:
-                    run_model.state = ctx.current_state.value
-                    run_model.steps = ctx.steps
-                    run_model.completed_at = ctx.completed_at
-                    await self.db.commit()
+                if hasattr(res, "scalar_one_or_none"):
+                    run_model = res.scalar_one_or_none()
+                    if run_model:
+                        run_model.state = ctx.current_state.value
+                        run_model.steps = ctx.steps
+                        run_model.completed_at = ctx.completed_at
+                        await self.db.commit()
             except Exception as exc:
                 logger.warning(f"Failed to update workflow state: {exc}")
 

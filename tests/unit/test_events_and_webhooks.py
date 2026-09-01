@@ -19,12 +19,13 @@ from nexus_worker.main import process_event
 def test_events_gateway_with_db_and_redis_mocks():
     mock_db = AsyncMock()
     mock_db.add = MagicMock()
-    mock_db.commit = AsyncMock()
-    mock_db.rollback = AsyncMock()
+    mock_db.commit = AsyncMock(return_value=None)
+    mock_db.rollback = AsyncMock(return_value=None)
+    mock_db.execute = AsyncMock(return_value=None)
 
     mock_redis = AsyncMock()
     mock_redis.incr = AsyncMock(return_value=1)
-    mock_redis.expire = AsyncMock()
+    mock_redis.expire = AsyncMock(return_value=True)
     mock_redis.xadd = AsyncMock(return_value="1724770000000-0")
 
     async def override_db():

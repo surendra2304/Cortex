@@ -1,7 +1,7 @@
 import pytest
 import os
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 for p in [
     "packages/core/src",
@@ -24,6 +24,9 @@ async def test_conversion_drop_diagnosis_workflow_e2e():
     Funnel Anomaly Detected -> Trigger Diagnosis -> Form Hypotheses -> AI Universe DEBATE -> Resolve.
     """
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock(return_value=None)
+    mock_db.execute = AsyncMock(return_value=None)
     sm = WorkflowStateMachine(db=mock_db)
     classifier = RequestClassifier()
 

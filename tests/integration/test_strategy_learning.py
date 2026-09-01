@@ -1,7 +1,7 @@
 import pytest
 import os
 import sys
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 for p in [
     "packages/core/src",
@@ -22,6 +22,9 @@ async def test_strategy_learning_and_performance_feedback_e2e():
     """
     memory_store = MemoryStore()
     mock_db = AsyncMock()
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock(return_value=None)
+    mock_db.rollback = AsyncMock(return_value=None)
 
     # 1. Simulate 20 high-performing interventions (>60% success rate)
     for i in range(20):
