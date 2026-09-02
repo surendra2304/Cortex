@@ -7,9 +7,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
-from nexus_api.db_models import MemoryEntryModel
+from cortex_api.db_models import MemoryEntryModel
 
-logger = logging.getLogger("nexus-memory")
+logger = logging.getLogger("cortex-memory")
 
 
 class TrustLabel(str, Enum):
@@ -42,7 +42,7 @@ class MemoryEntry(BaseModel):
 
 class MemoryStore:
     """
-    Memory Service per NEXUS spec:
+    Memory Service per CORTEX spec:
     - Scoped storage: visitor, lead, customer, site, strategy
     - Trust classification defense against prompt injection
     - Outcome memory: records strategy performance (e.g. banner lift)

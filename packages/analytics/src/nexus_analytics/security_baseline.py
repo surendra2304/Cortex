@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("nexus-security-baseline")
+logger = logging.getLogger("cortex-security-baseline")
 
 
 class PostureSnapshot(BaseModel):

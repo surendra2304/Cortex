@@ -15,11 +15,11 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_agents import (
+from cortex_agents import (
     GrowthAgent, SalesAgent, SupportAgent, ReliabilityAgent, QualificationAgent, ChurnRiskAgent,
     AgentInput, AgentRegistry
 )
-from nexus_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
+from cortex_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
 
 
 @pytest.mark.asyncio

@@ -5,8 +5,8 @@ import pytest
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 
-from nexus_tool_runtime import ToolBus
-from nexus_integrations import (
+from cortex_tool_runtime import ToolBus
+from cortex_integrations import (
     EmailToolExecutor, create_email_tool,
     SMSToolExecutor, create_sms_tool,
     VoiceToolExecutor, create_voice_tool,

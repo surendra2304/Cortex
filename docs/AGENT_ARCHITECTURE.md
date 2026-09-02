@@ -1,7 +1,7 @@
-# NEXUS Agent Architecture & Registry
+# CORTEX Agent Architecture & Registry
 
 ## 1. Overview
-The defining principle of NEXUS specialist agents is the **closed operational loop**:
+The defining principle of CORTEX specialist agents is the **closed operational loop**:
 `Observe -> Understand -> Decide -> Act -> Measure -> Learn`.
 
 Agents are **input-driven cognitive engines** that reason over real telemetry events, visitor profile traits, historical lead scores, and system metrics. They never return hardcoded canned responses.
@@ -50,7 +50,7 @@ class AgentOutput(BaseModel):
 ---
 
 ## 4. Agent Registry & Event Routing
-The [`AgentRegistry`](file:///d:/Nexus/packages/agents/src/nexus_agents/__init__.py) inspects incoming event types and dispatches them to the appropriate specialist agent:
+The [`AgentRegistry`](file:///d:/Cortex/packages/agents/src/cortex_agents/__init__.py) inspects incoming event types and dispatches them to the appropriate specialist agent:
 - `pricing`, `banner`, `funnel` -> `GrowthAgent`
 - `checkout`, `lead`, `sale` -> `SalesAgent`
 - `error`, `support`, `ticket` -> `SupportAgent`

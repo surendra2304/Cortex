@@ -13,8 +13,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowState
-from nexus_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
+from cortex_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
 
 
 @pytest.mark.asyncio

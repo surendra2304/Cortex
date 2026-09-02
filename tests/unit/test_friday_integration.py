@@ -45,10 +45,10 @@ os.environ.setdefault("MOCK_MODE", "true")
 os.environ.pop("FRIDAY_API_KEY", None)
 
 from fastapi.testclient import TestClient
-from nexus_api.main import app
-from nexus_api.config import get_db_session
-from nexus_api.auth import verify_friday_token
-from nexus_api.db_models import LeadModel, AuditRecordModel, EventModel
+from cortex_api.main import app
+from cortex_api.config import get_db_session
+from cortex_api.auth import verify_friday_token
+from cortex_api.db_models import LeadModel, AuditRecordModel, EventModel
 
 
 # ===========================================================================
@@ -109,7 +109,7 @@ def _client_with_auth_and_db(mock_db):
 @pytest.mark.asyncio
 async def test_friday_token_mock_bypass():
     """MOCK_MODE=true + no FRIDAY_API_KEY → bypass returns friday_system identity."""
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -138,7 +138,7 @@ async def test_friday_token_mock_bypass():
 @pytest.mark.asyncio
 async def test_friday_token_valid_key():
     """Correct X-Friday-Api-Key → returns friday_system identity."""
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -167,7 +167,7 @@ async def test_friday_token_valid_key():
 async def test_friday_token_invalid_key_raises():
     """Wrong X-Friday-Api-Key → HTTP 403."""
     from fastapi import HTTPException
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -197,7 +197,7 @@ async def test_friday_token_invalid_key_raises():
 async def test_friday_token_missing_key_raises():
     """Missing X-Friday-Api-Key when a key IS configured → HTTP 401."""
     from fastapi import HTTPException
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -249,7 +249,7 @@ def test_friday_command_routes_to_cognitive_loop():
     try:
         client = _client_with_auth_and_db(mock_db)
 
-        with patch("nexus_api.friday_router._get_orchestrator") as mock_get_orch:
+        with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
             mock_orch.run_cognitive_loop = AsyncMock(return_value=mock_loop_result)
             mock_get_orch.return_value = mock_orch
@@ -259,7 +259,7 @@ def test_friday_command_routes_to_cognitive_loop():
                 "context": {"visitor_id": "vis_ent_001", "company": "BigCorp Inc"},
                 "required_capability": "sales",
                 "requested_action": "high_intent.detected",
-                "site_id": "nexus_main",
+                "site_id": "cortex_main",
                 "tenant_id": "tenant_bigcorp",
             }
             res = client.post("/v1/friday/command", json=payload)
@@ -268,7 +268,7 @@ def test_friday_command_routes_to_cognitive_loop():
         body = res.json()
 
         assert body["status"] == "success"
-        assert body["nexus_loop_id"] == "loop_test_abc123"
+        assert body["cortex_loop_id"] == "loop_test_abc123"
         assert body["agent_id"] == "agent_sales"
         assert body["decision"] == "send_demo_invite"
         assert body["executed_actions"] == 1
@@ -305,7 +305,7 @@ def test_friday_command_with_idempotency_key():
     try:
         client = _client_with_auth_and_db(mock_db)
 
-        with patch("nexus_api.friday_router._get_orchestrator") as mock_get_orch:
+        with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
             mock_orch.run_cognitive_loop = AsyncMock(return_value=mock_result)
             mock_get_orch.return_value = mock_orch
@@ -332,7 +332,7 @@ def test_friday_command_orchestrator_error_returns_500():
     try:
         client = _client_with_auth_and_db(mock_db)
 
-        with patch("nexus_api.friday_router._get_orchestrator") as mock_get_orch:
+        with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
             mock_orch.run_cognitive_loop = AsyncMock(
                 side_effect=RuntimeError("AI Universe timeout")
@@ -429,7 +429,7 @@ def test_friday_health_summary_requires_friday_auth():
     # No dependency override → real verify_friday_token fires
     # With MOCK_MODE=true and no key configured, mock bypass returns 200.
     # This test verifies the endpoint is wired to the dependency at all.
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     original = _auth.FRIDAY_API_KEY
     original_env = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -603,7 +603,7 @@ def test_friday_incidents_returns_hypothesis():
 
 def test_friday_command_model_defaults_and_validation():
     """FridayCommand defaults and required-field enforcement."""
-    from nexus_api.friday_router import FridayCommand
+    from cortex_api.friday_router import FridayCommand
     from pydantic import ValidationError
 
     # Valid with defaults
@@ -624,17 +624,17 @@ def test_friday_command_model_defaults_and_validation():
 
 def test_friday_actor_type_present_in_schema():
     """ActorType.FRIDAY_SYSTEM must be in the event schema enum."""
-    from nexus_event_schema import ActorType
+    from cortex_event_schema import ActorType
     assert ActorType.FRIDAY_SYSTEM.value == "friday_system"
     assert ActorType.FRIDAY_SYSTEM in list(ActorType)
 
 
 def test_friday_role_in_hierarchy():
     """Role.FRIDAY_SYSTEM must exist and include all lower roles in the hierarchy."""
-    from nexus_api.auth import Role, ROLE_HIERARCHY
+    from cortex_api.auth import Role, ROLE_HIERARCHY
     assert Role.FRIDAY_SYSTEM in ROLE_HIERARCHY
     hierarchy = ROLE_HIERARCHY[Role.FRIDAY_SYSTEM]
-    assert Role.NEXUS_VIEWER in hierarchy
-    assert Role.NEXUS_OPERATOR in hierarchy
-    assert Role.NEXUS_ADMIN in hierarchy
+    assert Role.CORTEX_VIEWER in hierarchy
+    assert Role.CORTEX_OPERATOR in hierarchy
+    assert Role.CORTEX_ADMIN in hierarchy
     assert Role.FRIDAY_SYSTEM in hierarchy

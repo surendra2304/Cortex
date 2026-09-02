@@ -20,17 +20,17 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
-from nexus_intelligence import AssetExposureMonitor
-from nexus_workflow_engine import SecurityIncidentWorkflow
+from cortex_api.main import app
+from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
+from cortex_intelligence import AssetExposureMonitor
+from cortex_workflow_engine import SecurityIncidentWorkflow
 
 
 @pytest.mark.asyncio
 async def test_full_security_finding_to_resolution_flow_e2e():
     """
     End-to-End Security Flow:
-    Sentinel finding -> Nexus incident creation -> Remediation tracking -> Verification -> Resolution.
+    Sentinel finding -> Cortex incident creation -> Remediation tracking -> Verification -> Resolution.
     """
     monitor = AssetExposureMonitor()
     listener = SentinelEventListener(exposure_monitor=monitor)

@@ -23,13 +23,13 @@ for _p in [
 ]:
     sys.path.insert(0, os.path.abspath(_p))
 
-from nexus_integrations import (
+from cortex_integrations import (
     PaymentsToolExecutor,
     create_payments_tool,
     TicketingToolExecutor,
     create_ticketing_tool,
 )
-from nexus_tool_runtime import ToolBus, ToolCapability, SideEffectLevel
+from cortex_tool_runtime import ToolBus, ToolCapability, SideEffectLevel
 
 
 # =============================================================================
@@ -216,7 +216,7 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
     os.environ["MOCK_MODE"] = "true"
     os.environ.pop("STRIPE_WEBHOOK_SECRET", None)
 
-    from nexus_api.stripe_webhook_router import router
+    from cortex_api.stripe_webhook_router import router
 
     mini_app = FastAPI()
 
@@ -226,7 +226,7 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
     async def _get_redis_override():
         return mock_redis
 
-    from nexus_api.config import get_redis_client
+    from cortex_api.config import get_redis_client
     mini_app.dependency_overrides[get_redis_client] = _get_redis_override
     mini_app.include_router(router)
 
@@ -256,20 +256,20 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "accepted"
-    assert body["nexus_event_type"] == "checkout.completed"
-    assert "stripe_evt_test_checkout_001" in body["nexus_event_id"] or "stripe_" in body["nexus_event_id"]
+    assert body["cortex_event_type"] == "checkout.completed"
+    assert "stripe_evt_test_checkout_001" in body["cortex_event_id"] or "stripe_" in body["cortex_event_id"]
 
-    # Verify Redis xadd was called with the mapped NEXUS event
+    # Verify Redis xadd was called with the mapped CORTEX event
     mock_redis.xadd.assert_called_once()
     call_args = mock_redis.xadd.call_args
     stream_name = call_args[0][0]
     stream_fields = call_args[0][1]
-    nexus_event = json.loads(stream_fields["payload"])
+    cortex_event = json.loads(stream_fields["payload"])
 
-    assert nexus_event["type"] == "checkout.completed"
-    assert nexus_event["data"]["customer_id"] == "cus_test_12345"
-    assert nexus_event["data"]["customer_email"] == "buyer@enterprise.com"
-    assert nexus_event["source"] == "stripe_webhook"
+    assert cortex_event["type"] == "checkout.completed"
+    assert cortex_event["data"]["customer_id"] == "cus_test_12345"
+    assert cortex_event["data"]["customer_email"] == "buyer@enterprise.com"
+    assert cortex_event["source"] == "stripe_webhook"
 
 
 @pytest.mark.asyncio
@@ -287,7 +287,7 @@ async def test_stripe_webhook_ignored_event_type():
 
     # Re-import to pick up fresh env
     import importlib
-    import nexus_api.stripe_webhook_router as _mod
+    import cortex_api.stripe_webhook_router as _mod
     importlib.reload(_mod)
 
     mini_app = FastAPI()
@@ -296,7 +296,7 @@ async def test_stripe_webhook_ignored_event_type():
     async def _get_redis_override():
         return mock_redis
 
-    from nexus_api.config import get_redis_client
+    from cortex_api.config import get_redis_client
     mini_app.dependency_overrides[get_redis_client] = _get_redis_override
     mini_app.include_router(_mod.router)
 

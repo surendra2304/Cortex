@@ -2,9 +2,9 @@ import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-from nexus_integrations.futuris_client import FuturisClient, ConversionTrendForecast, TrafficForecast
+from cortex_integrations.futuris_client import FuturisClient, ConversionTrendForecast, TrafficForecast
 
-logger = logging.getLogger("nexus-predictive-personalization")
+logger = logging.getLogger("cortex-predictive-personalization")
 
 
 class PredictivePersonalizationAction(BaseModel):

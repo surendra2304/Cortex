@@ -20,10 +20,10 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
-from nexus_intelligence import AssetExposureMonitor
-from nexus_workflow_engine import SecurityIncidentWorkflow
+from cortex_api.main import app
+from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
+from cortex_intelligence import AssetExposureMonitor
+from cortex_workflow_engine import SecurityIncidentWorkflow
 
 
 def test_asset_exposure_monitor():

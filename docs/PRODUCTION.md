@@ -1,12 +1,12 @@
-# NEXUS Production Architecture & Hardening Guide
+# CORTEX Production Architecture & Hardening Guide
 
 ## 1. Authentication & Security Tiers
 - **Public SDK Endpoint (`/v1/events`, `/v1/events/batch`)**:
-  - Authenticated via `X-Nexus-Public-Key` validated against hashed `api_keys` records in PostgreSQL.
+  - Authenticated via `X-Cortex-Public-Key` validated against hashed `api_keys` records in PostgreSQL.
   - Rate limited to **1,000 events/minute** per site key using Redis sliding-window buckets.
 - **Operator Dashboard Gateway (`/v1/*`)**:
   - Authenticated via OIDC RS256 JWT tokens.
-  - Strict Role-Based Access Control (RBAC): `nexus_viewer`, `nexus_operator`, `nexus_admin`.
+  - Strict Role-Based Access Control (RBAC): `cortex_viewer`, `cortex_operator`, `cortex_admin`.
 - **FRIDAY & Internal Services Gateway (`/v1/friday/*`, `/v1/identity/resolve`)**:
   - Authenticated via `X-Friday-Api-Key` using constant-time `hmac.compare_digest()`.
 
@@ -24,7 +24,7 @@
   - `GET /health`: Liveness probe for container orchestrators (Kubernetes/Docker).
   - `GET /health/ready`: Readiness probe actively verifying PostgreSQL, Redis, and AI Universe connectivity.
 - **Structured Tracing**:
-  - Distributed `trace_id` correlation across headers (`X-Nexus-Trace-Id`), database records, and logs.
+  - Distributed `trace_id` correlation across headers (`X-Cortex-Trace-Id`), database records, and logs.
 - **Live Event Stream**:
   - `ws://host:8000/v1/ws/events`: WebSocket live event broadcast for dashboard real-time view.
 

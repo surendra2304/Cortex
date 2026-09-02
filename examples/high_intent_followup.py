@@ -1,10 +1,10 @@
-"""NEXUS MVP Demonstration Scenario: High-Intent Visitor Detection & Follow-up.
+"""CORTEX MVP Demonstration Scenario: High-Intent Visitor Detection & Follow-up.
 
 This script simulates an end-to-end journey:
 1. Anonymous visitor visits Enterprise Pricing, Security, and Documentation pages.
 2. Visitor identifies via email on a contact / demo form.
 3. Identity resolution stitches the visitor into an identified Profile.
-4. NEXUS worker consumes stream telemetry, runs the 10-Phase Cognitive Loop.
+4. CORTEX worker consumes stream telemetry, runs the 10-Phase Cognitive Loop.
 5. Sales Specialist Agent scores intent, proposes an outbound intervention.
 6. Policy Engine gates the high-impact action requiring human approval in the Dashboard.
 """
@@ -21,13 +21,13 @@ OPERATOR_TOKEN = "mock_operator_jwt_token_123"
 HEADERS = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {OPERATOR_TOKEN}",
-    "X-Nexus-Public-Key": "pk_demo_live_999"
+    "X-Cortex-Public-Key": "pk_demo_live_999"
 }
 
 
 async def run_scenario():
     print("=" * 70)
-    print("  NEXUS: High-Intent Visitor Detection & Follow-up Demonstration")
+    print("  CORTEX: High-Intent Visitor Detection & Follow-up Demonstration")
     print("=" * 70)
 
     visitor_id = f"vis_demo_{uuid.uuid4().hex[:8]}"
@@ -96,7 +96,7 @@ async def run_scenario():
         )
 
         # D. Wait for asynchronous worker processing
-        print(f"\n[3] Waiting 5 seconds for NEXUS background worker stream processing & Cognitive Loop...")
+        print(f"\n[3] Waiting 5 seconds for CORTEX background worker stream processing & Cognitive Loop...")
         for i in range(5, 0, -1):
             print(f"     Processing in {i}s...", end="\r")
             await asyncio.sleep(1.0)
@@ -128,5 +128,5 @@ if __name__ == "__main__":
     try:
         asyncio.run(run_scenario())
     except httpx.ConnectError:
-        print("\n[ERROR] Could not connect to NEXUS API at http://localhost:8000.")
-        print("Please start the API server first using: uvicorn nexus_api.main:app --port 8000")
+        print("\n[ERROR] Could not connect to CORTEX API at http://localhost:8000.")
+        print("Please start the API server first using: uvicorn cortex_api.main:app --port 8000")

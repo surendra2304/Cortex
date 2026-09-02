@@ -7,9 +7,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
-from nexus_api.db_models import StrategyPerformanceModel
+from cortex_api.db_models import StrategyPerformanceModel
 
-logger = logging.getLogger("nexus-outcome-tracker")
+logger = logging.getLogger("cortex-outcome-tracker")
 
 
 class OutcomeVerdict(str, Enum):
@@ -41,7 +41,7 @@ class OutcomeRecord(BaseModel):
 
 class OutcomeTracker:
     """
-    Closed-Loop Outcome Measurement & Strategy Learning per NEXUS spec section 21:
+    Closed-Loop Outcome Measurement & Strategy Learning per CORTEX spec section 21:
     - Tracks downstream events attributable to actions
     - Promotes strategies with >60% success (PROVEN)
     - Demotes strategies with <30% success (DEMOTED)

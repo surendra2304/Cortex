@@ -6,7 +6,7 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        nexus: {
+        cortex: {
           dark: "#0a0d14",
           surface: "#121824",
           border: "#1e293b",

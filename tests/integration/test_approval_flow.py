@@ -15,9 +15,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowState
-from nexus_policy_engine import PolicyEngine
-from nexus_tool_runtime import Tool, ToolCapability, SideEffectLevel, Execution
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
+from cortex_policy_engine import PolicyEngine
+from cortex_tool_runtime import Tool, ToolCapability, SideEffectLevel, Execution
 
 
 @pytest.mark.asyncio

@@ -19,7 +19,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_policy_engine import (
+from cortex_policy_engine import (
     SecretScrubber,
     PrivacyComplianceService
 )

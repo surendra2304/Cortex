@@ -22,20 +22,20 @@ sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
 sys.path.insert(0, os.path.abspath("packages/memory/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from nexus_event_schema import EventSchema
-from nexus_core.orchestrator import Orchestrator, build_default_tool_bus
-from nexus_api.config import AsyncSessionLocal
-from nexus_api.db_models import ApprovalQueueModel
+from cortex_event_schema import EventSchema
+from cortex_core.orchestrator import Orchestrator, build_default_tool_bus
+from cortex_api.config import AsyncSessionLocal
+from cortex_api.db_models import ApprovalQueueModel
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 )
-logger = logging.getLogger("nexus-worker")
+logger = logging.getLogger("cortex-worker")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-STREAM_NAME = os.getenv("REDIS_EVENT_STREAM", "nexus:events:stream")
-CONSUMER_GROUP = os.getenv("REDIS_CONSUMER_GROUP", "nexus-worker-group")
+STREAM_NAME = os.getenv("REDIS_EVENT_STREAM", "cortex:events:stream")
+CONSUMER_GROUP = os.getenv("REDIS_CONSUMER_GROUP", "cortex-worker-group")
 CONSUMER_NAME = os.getenv("REDIS_CONSUMER_NAME", f"worker-{os.getpid()}")
 
 
@@ -85,7 +85,7 @@ async def process_event(
 
 async def run_scheduled_maintenance_tasks() -> None:
     """
-    Scheduled Background Worker Jobs per NEXUS spec section 45:
+    Scheduled Background Worker Jobs per CORTEX spec section 45:
     - Auto-expire pending approval queue items after 24h
     - Log periodic strategy health check
     """
@@ -117,7 +117,7 @@ async def run_scheduled_maintenance_tasks() -> None:
 
 
 async def run_worker() -> None:
-    logger.info(f"Connecting NEXUS autonomous worker to Redis stream at {REDIS_URL}...")
+    logger.info(f"Connecting CORTEX autonomous worker to Redis stream at {REDIS_URL}...")
     redis_client = aioredis.from_url(REDIS_URL, encoding="utf-8", decode_responses=True)
     await init_stream_group(redis_client)
 
@@ -127,7 +127,7 @@ async def run_worker() -> None:
     # Launch background maintenance scheduler
     maintenance_task = asyncio.create_task(run_scheduled_maintenance_tasks())
 
-    logger.info(f"NEXUS autonomous worker listening on '{STREAM_NAME}' as '{CONSUMER_NAME}'...")
+    logger.info(f"CORTEX autonomous worker listening on '{STREAM_NAME}' as '{CONSUMER_NAME}'...")
 
     try:
         while True:

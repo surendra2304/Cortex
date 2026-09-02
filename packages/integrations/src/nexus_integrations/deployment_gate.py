@@ -5,7 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 from enum import Enum
 
-logger = logging.getLogger("nexus-deployment-gate")
+logger = logging.getLogger("cortex-deployment-gate")
 
 
 class GateVerdict(str, Enum):

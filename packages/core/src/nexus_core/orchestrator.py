@@ -23,14 +23,14 @@ sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
 sys.path.insert(0, os.path.abspath("packages/memory/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from nexus_core.models import AuditRecord
-from nexus_event_schema import EventSchema
-from nexus_agents import AgentRegistry, AgentInput, AgentOutput
-from nexus_ai_universe_adapter import (
+from cortex_core.models import AuditRecord
+from cortex_event_schema import EventSchema
+from cortex_agents import AgentRegistry, AgentInput, AgentOutput
+from cortex_ai_universe_adapter import (
     AIUniverseClient, IntelligenceRequest, RequestClassifier, RequestClassification, AIMode
 )
-from nexus_tool_runtime import Tool, Execution, SideEffectLevel, ToolBus, ToolCapability
-from nexus_integrations import (
+from cortex_tool_runtime import Tool, Execution, SideEffectLevel, ToolBus, ToolCapability
+from cortex_integrations import (
     EmailToolExecutor, create_email_tool,
     CRMToolExecutor, create_crm_tool,
     SMSToolExecutor, create_sms_tool,
@@ -39,15 +39,15 @@ from nexus_integrations import (
     PaymentsToolExecutor, create_payments_tool,
     TicketingToolExecutor, create_ticketing_tool,
 )
-from nexus_policy_engine import PolicyEngine
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
-from nexus_identity import IdentityResolver
-from nexus_analytics import ScoringEngine
-from nexus_intelligence import ContextBuilder, ContextPackage
-from nexus_memory import MemoryStore, MemoryScope, TrustLabel
-from nexus_api.db_models import VisitorModel, ProfileModel, AuditRecordModel, EventModel, LeadModel
+from cortex_policy_engine import PolicyEngine
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
+from cortex_identity import IdentityResolver
+from cortex_analytics import ScoringEngine
+from cortex_intelligence import ContextBuilder, ContextPackage
+from cortex_memory import MemoryStore, MemoryScope, TrustLabel
+from cortex_api.db_models import VisitorModel, ProfileModel, AuditRecordModel, EventModel, LeadModel
 
-logger = logging.getLogger("nexus-orchestrator")
+logger = logging.getLogger("cortex-orchestrator")
 trace_id_ctx = contextvars.ContextVar("trace_id_ctx", default=None)
 
 
@@ -87,7 +87,7 @@ def build_default_tool_bus(redis_client: Optional[Any] = None) -> ToolBus:
 
 
 class Orchestrator:
-    """10-Phase NEXUS Autonomous Cognitive Loop Orchestrator with ContextBuilder, ScoringEngine, and MemoryStore."""
+    """10-Phase CORTEX Autonomous Cognitive Loop Orchestrator with ContextBuilder, ScoringEngine, and MemoryStore."""
 
     def __init__(
         self,

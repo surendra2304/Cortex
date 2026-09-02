@@ -17,8 +17,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowState
-from nexus_integrations import create_email_tool, EmailToolExecutor
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
+from cortex_integrations import create_email_tool, EmailToolExecutor
 
 
 @pytest.mark.asyncio

@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolea
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime
-from nexus_api.config import Base
+from cortex_api.config import Base
 
 
 class ProfileModel(Base):

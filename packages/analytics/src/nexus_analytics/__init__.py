@@ -6,9 +6,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
-from nexus_api.db_models import LeadModel, LeadScoreHistoryModel, EventModel
+from cortex_api.db_models import LeadModel, LeadScoreHistoryModel, EventModel
 
-logger = logging.getLogger("nexus-analytics")
+logger = logging.getLogger("cortex-analytics")
 
 
 class ScoreBreakdown(BaseModel):
@@ -22,7 +22,7 @@ class ScoreBreakdown(BaseModel):
 
 class ScoringEngine:
     """
-    Explainable Lead Scoring Model per NEXUS spec:
+    Explainable Lead Scoring Model per CORTEX spec:
     - BEHAVIOR (40%): pricing views, demo requests, doc depth, session recency, visit frequency
     - FIRMOGRAPHIC (30%): company domain classification, employee size hints, industry pages
     - ENGAGEMENT (20%): email opens, chat/form interactions, return visits
@@ -162,7 +162,7 @@ class ScoringEngine:
 
 class FunnelEngine:
     """
-    Funnel Analysis Engine per NEXUS spec:
+    Funnel Analysis Engine per CORTEX spec:
     - Analyzes multi-step conversions
     - Calculates drop-off and conversion rates
     - Detects 2-sigma conversion anomalies
@@ -247,7 +247,7 @@ class FunnelEngine:
 
 
 class CohortEngine:
-    """Cohort Analysis Engine per NEXUS spec."""
+    """Cohort Analysis Engine per CORTEX spec."""
 
     def compute_cohorts(self, events: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         # Group actors into week cohorts based on their earliest event
@@ -288,14 +288,14 @@ class CohortEngine:
         return results
 
 
-from nexus_analytics.outcomes import OutcomeTracker, OutcomeVerdict, StrategyStatus, OutcomeRecord
-from nexus_analytics.experiments import (
+from cortex_analytics.outcomes import OutcomeTracker, OutcomeVerdict, StrategyStatus, OutcomeRecord
+from cortex_analytics.experiments import (
     ExperimentationEngine,
     ExperimentDefinition,
     ExperimentVariant,
     ExperimentStatus
 )
-from nexus_analytics.nl_query import (
+from cortex_analytics.nl_query import (
     AdvancedAnalyticsEngine,
     NLQueryRequest,
     NLQueryResponse

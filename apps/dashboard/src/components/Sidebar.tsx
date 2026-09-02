@@ -25,7 +25,7 @@ export default function Sidebar() {
   return (
     <aside className="w-64 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col h-screen fixed left-0 top-0">
       <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-wider text-sky-400">NEXUS</h1>
+        <h1 className="text-xl font-bold tracking-wider text-sky-400">CORTEX</h1>
         <span className="text-xs bg-sky-950 text-sky-400 px-2 py-0.5 rounded border border-sky-800">Ops Intel</span>
       </div>
       <nav className="flex-1 overflow-y-auto p-4 space-y-1">
@@ -40,7 +40,7 @@ export default function Sidebar() {
         ))}
       </nav>
       <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
-        Connected to: <span className="text-emerald-400">api.nexus.dev</span>
+        Connected to: <span className="text-emerald-400">api.cortex.dev</span>
       </div>
     </aside>
   );

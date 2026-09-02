@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>NEXUS SDK Test Harness</title>
+  <title>CORTEX SDK Test Harness</title>
   <style>
     body { font-family: monospace; max-width: 900px; margin: 40px auto; padding: 0 20px; background: #0a0a0a; color: #e0e0e0; }
     h1 { color: #6ee7f7; }
@@ -29,8 +29,8 @@
 </head>
 <body>
 
-<h1>🧠 NEXUS SDK Test Harness</h1>
-<p style="color:#888">Interactive verification harness for the NEXUS Browser SDK. Connects to local NEXUS API (http://localhost:8000).</p>
+<h1>🧠 CORTEX SDK Test Harness</h1>
+<p style="color:#888">Interactive verification harness for the CORTEX Browser SDK. Connects to local CORTEX API (http://localhost:8000).</p>
 
 <div class="status-bar">
   <span>Visitor ID: <code id="vid">—</code></span>
@@ -93,11 +93,11 @@
   }
 
   function updateStatus() {
-    if (typeof Nexus !== 'undefined') {
-      document.getElementById('vid').textContent = Nexus.getVisitorId ? Nexus.getVisitorId() : '—';
-      document.getElementById('sid').textContent = Nexus.getSessionId ? Nexus.getSessionId() : '—';
-      document.getElementById('queue-size').textContent = Nexus.getQueueSize ? Nexus.getQueueSize() : 0;
-      const consent = Nexus.isConsentGranted ? Nexus.isConsentGranted() : true;
+    if (typeof Cortex !== 'undefined') {
+      document.getElementById('vid').textContent = Cortex.getVisitorId ? Cortex.getVisitorId() : '—';
+      document.getElementById('sid').textContent = Cortex.getSessionId ? Cortex.getSessionId() : '—';
+      document.getElementById('queue-size').textContent = Cortex.getQueueSize ? Cortex.getQueueSize() : 0;
+      const consent = Cortex.isConsentGranted ? Cortex.isConsentGranted() : true;
       const pill = document.getElementById('consent-status');
       pill.textContent = consent ? 'ON' : 'OFF';
       pill.className = `status-pill ${consent ? 'on' : 'off'}`;
@@ -108,11 +108,11 @@
   function clearLog() { document.getElementById('log').innerHTML = ''; }
 
   function getSDK() {
-    if (typeof Nexus === 'undefined') {
-      log('warn', 'Nexus global not found. Ensure SDK is built or loaded.');
+    if (typeof Cortex === 'undefined') {
+      log('warn', 'Cortex global not found. Ensure SDK is built or loaded.');
       return null;
     }
-    return Nexus;
+    return Cortex;
   }
 
   function initSDK() {
@@ -201,7 +201,7 @@
     log('info', 'Queued 25 events (batch trigger threshold is 20)');
   }
 
-  log('info', 'NEXUS Test Harness ready. Click init to begin.');
+  log('info', 'CORTEX Test Harness ready. Click init to begin.');
 </script>
 </body>
 </html>

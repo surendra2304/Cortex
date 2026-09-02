@@ -8,9 +8,9 @@ sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 
-from nexus_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient, RecommendedAction
-from nexus_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision, ToolCapability, IdempotencyStrategy
-from nexus_policy_engine import PolicyEngine
+from cortex_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient, RecommendedAction
+from cortex_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision, ToolCapability, IdempotencyStrategy
+from cortex_policy_engine import PolicyEngine
 
 
 @pytest.mark.asyncio

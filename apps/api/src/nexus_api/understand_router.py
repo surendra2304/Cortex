@@ -11,12 +11,12 @@ sys.path.insert(0, os.path.abspath("packages/analytics/src"))
 sys.path.insert(0, os.path.abspath("packages/memory/src"))
 sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
 
-from nexus_identity import IdentityResolver
-from nexus_analytics import ScoringEngine, FunnelEngine, CohortEngine
-from nexus_memory import MemoryStore, MemoryScope
-from nexus_intelligence import ContextBuilder
-from nexus_api.config import get_db_session
-from nexus_api.db_models import ProfileModel, VisitorModel, LeadModel, EventModel, IdentityLinkModel
+from cortex_identity import IdentityResolver
+from cortex_analytics import ScoringEngine, FunnelEngine, CohortEngine
+from cortex_memory import MemoryStore, MemoryScope
+from cortex_intelligence import ContextBuilder
+from cortex_api.config import get_db_session
+from cortex_api.db_models import ProfileModel, VisitorModel, LeadModel, EventModel, IdentityLinkModel
 
 router = APIRouter(prefix="/v1", tags=["Understand Layer"])
 
@@ -210,9 +210,9 @@ async def get_memory_entries(
 
 # ── 5. WORKFLOWS & AUTOMATION ────────────────────────────────────────────────
 
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowState
-from nexus_analytics import OutcomeTracker
-from nexus_api.db_models import WorkflowRunModel, ApprovalQueueModel
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
+from cortex_analytics import OutcomeTracker
+from cortex_api.db_models import WorkflowRunModel, ApprovalQueueModel
 
 outcome_tracker = OutcomeTracker()
 
@@ -318,7 +318,7 @@ async def approve_action(
         raise HTTPException(status_code=404, detail="Approval item not found")
 
     item.status = "approved"
-    item.decision_by = payload.get("operator_id", "nexus_operator") if payload else "nexus_operator"
+    item.decision_by = payload.get("operator_id", "cortex_operator") if payload else "cortex_operator"
     item.decided_at = datetime.utcnow()
     await db.commit()
     return {"status": "approved", "action_id": action_id}
@@ -338,7 +338,7 @@ async def reject_action(
         raise HTTPException(status_code=404, detail="Approval item not found")
 
     item.status = "rejected"
-    item.decision_by = payload.get("operator_id", "nexus_operator") if payload else "nexus_operator"
+    item.decision_by = payload.get("operator_id", "cortex_operator") if payload else "cortex_operator"
     item.decision_reason = payload.get("reason", "Operator rejected action") if payload else "Operator rejected action"
     item.decided_at = datetime.utcnow()
     await db.commit()

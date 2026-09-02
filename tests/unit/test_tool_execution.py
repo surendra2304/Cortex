@@ -9,13 +9,13 @@ sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 
-from nexus_tool_runtime import ToolBus, Execution, SideEffectLevel
-from nexus_integrations import (
+from cortex_tool_runtime import ToolBus, Execution, SideEffectLevel
+from cortex_integrations import (
     EmailToolExecutor, create_email_tool,
     CRMToolExecutor, create_crm_tool,
     WebhookToolExecutor, create_webhook_tool
 )
-from nexus_policy_engine import PolicyEngine
+from cortex_policy_engine import PolicyEngine
 
 
 @pytest.mark.asyncio

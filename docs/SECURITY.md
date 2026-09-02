@@ -1,4 +1,4 @@
-# NEXUS Security, Governance & Trust Model
+# CORTEX Security, Governance & Trust Model
 
 ## 1. Action Side-Effect Levels
 Every tool registered in the **Universal Tool Bus** declares a strict side-effect level:
@@ -26,4 +26,4 @@ Per specification section 32, cognitive memory entries are tagged with immutable
 ## 3. Privacy by Design & Consent Gating
 - **Pseudonymous Baseline**: Telemetry without explicit user consent remains strictly pseudonymous.
 - **Identity Merging**: Anonymous visitors are stitched into profiles and promoted to leads only when consent is granted (`consent.analytics = true`).
-- **Consent Revocation**: Calling `Nexus.consent(false)` in the browser SDK immediately flushes local queues and halts all auto-capture event tracking.
+- **Consent Revocation**: Calling `Cortex.consent(false)` in the browser SDK immediately flushes local queues and halts all auto-capture event tracking.

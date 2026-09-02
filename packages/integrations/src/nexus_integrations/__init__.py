@@ -29,9 +29,9 @@ try:
 except ImportError:
     HAVE_HUBSPOT = False
 
-from nexus_tool_runtime import Tool, SideEffectLevel, ToolCapability, IdempotencyStrategy
+from cortex_tool_runtime import Tool, SideEffectLevel, ToolCapability, IdempotencyStrategy
 
-logger = logging.getLogger("nexus-integrations")
+logger = logging.getLogger("cortex-integrations")
 
 
 def is_mock_mode_enabled() -> bool:
@@ -47,7 +47,7 @@ class EmailToolExecutor:
 
     def __init__(self, api_key: Optional[str] = None, from_email: Optional[str] = None, mock_mode: Optional[bool] = None):
         self.api_key = api_key or os.getenv("SENDGRID_API_KEY")
-        self.from_email = from_email or os.getenv("SENDGRID_FROM_EMAIL", "notifications@nexus.dev")
+        self.from_email = from_email or os.getenv("SENDGRID_FROM_EMAIL", "notifications@cortex.dev")
         self.mock_mode = mock_mode if mock_mode is not None else (is_mock_mode_enabled() or not self.api_key)
 
     async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
@@ -78,7 +78,7 @@ class EmailToolExecutor:
                 from_email=self.from_email,
                 to_emails=to_email,
                 subject=subject,
-                html_content=body or "<p>Notification from NEXUS</p>"
+                html_content=body or "<p>Notification from CORTEX</p>"
             )
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, sg.send, message)
@@ -212,7 +212,7 @@ class VoiceToolExecutor:
 
     async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
         to_phone = params.get("to")
-        twiml = params.get("twiml", "<Response><Say>NEXUS High-Priority System Alert</Say></Response>")
+        twiml = params.get("twiml", "<Response><Say>CORTEX High-Priority System Alert</Say></Response>")
 
         if not to_phone:
             raise ValueError("VoiceTool requires 'to' parameter.")
@@ -527,7 +527,7 @@ class PaymentsToolExecutor:
                     price = _stripe_sdk.Price.create(
                         unit_amount=int(price_data.get("unit_amount", 0)),
                         currency=price_data.get("currency", "usd"),
-                        product_data={"name": price_data.get("product_name", "NEXUS Service")},
+                        product_data={"name": price_data.get("product_name", "CORTEX Service")},
                     )
                     link = _stripe_sdk.PaymentLink.create(
                         line_items=[{"price": price.id, "quantity": 1}]
@@ -637,7 +637,7 @@ class TicketingToolExecutor:
         self.subdomain = subdomain or os.getenv("ZENDESK_SUBDOMAIN")
         self.api_token = api_token or os.getenv("ZENDESK_API_TOKEN")
         # Zendesk token auth requires "user_email/token" basic auth
-        self.zendesk_email = zendesk_email or os.getenv("ZENDESK_EMAIL", "admin@nexus.dev")
+        self.zendesk_email = zendesk_email or os.getenv("ZENDESK_EMAIL", "admin@cortex.dev")
         self.mock_mode = mock_mode if mock_mode is not None else (
             is_mock_mode_enabled() or not (self.subdomain and self.api_token)
         )
@@ -697,9 +697,9 @@ class TicketingToolExecutor:
                             "comment": {"body": payload.get("description", "")},
                             "priority": payload.get("priority", "normal"),
                             "type": payload.get("ticket_type", "question"),
-                            "tags": payload.get("tags", ["nexus-auto"]),
+                            "tags": payload.get("tags", ["cortex-auto"]),
                             "requester": {
-                                "name": payload.get("requester_name", "NEXUS System"),
+                                "name": payload.get("requester_name", "CORTEX System"),
                                 "email": payload.get("requester_email", self.zendesk_email),
                             },
                         }

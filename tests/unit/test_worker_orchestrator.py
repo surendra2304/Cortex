@@ -15,8 +15,8 @@ sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("apps/worker/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from nexus_core.orchestrator import Orchestrator
-from nexus_worker.main import process_event
+from cortex_core.orchestrator import Orchestrator
+from cortex_worker.main import process_event
 
 
 @pytest.mark.asyncio

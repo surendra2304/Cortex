@@ -16,7 +16,7 @@ class ContextPackage(BaseModel):
 
 class ContextBuilder:
     """
-    Context Engine per NEXUS spec section 11:
+    Context Engine per CORTEX spec section 11:
     - Builds decision-ready typed ContextPackage for agents
     - Computes deterministic intent score and intent level
     - Detects session anomaly flags (rage clicks, error spikes, high velocity)

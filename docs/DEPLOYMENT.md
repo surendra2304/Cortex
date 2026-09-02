@@ -1,6 +1,6 @@
-# NEXUS Production Infrastructure, Deployment & Operations Manual
+# CORTEX Production Infrastructure, Deployment & Operations Manual
 
-This document defines the deployment architecture, cloud infrastructure, Kubernetes manifests, CI/CD automation, monitoring stack, and disaster recovery procedures for **NEXUS — Autonomous Website & Web App Operations Intelligence**.
+This document defines the deployment architecture, cloud infrastructure, Kubernetes manifests, CI/CD automation, monitoring stack, and disaster recovery procedures for **CORTEX — Autonomous Website & Web App Operations Intelligence**.
 
 ---
 
@@ -60,9 +60,9 @@ The Terraform module provisions a secure, multi-AZ deployment on AWS:
 ## 3. Kubernetes Alternative: Manifests (`infra/k8s/`)
 
 For self-hosted or cloud-native Kubernetes clusters:
-- **`nexus-api` Deployment**: 3 initial replicas with CPU/Memory request limits.
-- **Horizontal Pod Autoscaler (HPA)**: Scales `nexus-api` dynamically from **3 to 10 replicas** based on **70% target CPU utilization**.
-- **`nexus-worker` Deployment**: 2 dedicated worker replicas processing Redis Streams.
+- **`cortex-api` Deployment**: 3 initial replicas with CPU/Memory request limits.
+- **Horizontal Pod Autoscaler (HPA)**: Scales `cortex-api` dynamically from **3 to 10 replicas** based on **70% target CPU utilization**.
+- **`cortex-worker` Deployment**: 2 dedicated worker replicas processing Redis Streams.
 - **cert-manager Ingress**: Automatic TLS certificate provisioning from Let's Encrypt.
 
 ---
@@ -70,7 +70,7 @@ For self-hosted or cloud-native Kubernetes clusters:
 ## 4. Monitoring, Prometheus & AlertManager Stack
 
 ### Prometheus Scrape Configurations & Metrics
-- Scrapes `http://nexus-api:8000/metrics` every 15s.
+- Scrapes `http://cortex-api:8000/metrics` every 15s.
 - **Core Tracked Metrics**:
   - `events_ingested_total` (counter)
   - `cognitive_loop_duration_seconds` (histogram & p99 summary)
@@ -82,7 +82,7 @@ For self-hosted or cloud-native Kubernetes clusters:
   - `futuris_forecasts_requested_total`, `predictive_personalization_adjustments_total`, & `capacity_preparation_triggered_total`
 
 ### AlertManager Rules
-- **Service Down**: Fires when `up{job="nexus-api"} == 0` for > 1m (Severity: Critical).
+- **Service Down**: Fires when `up{job="cortex-api"} == 0` for > 1m (Severity: Critical).
 - **High Ingestion Error Rate**: Fires when `rate(events_ingested_errors[5m]) / rate(events_ingested_total[5m]) > 0.05` (Severity: High).
 - **Cognitive Loop Latency Spike**: Fires when `histogram_quantile(0.99, rate(cognitive_loop_duration_seconds_bucket[5m])) > 2.0` (Severity: Warning).
 
@@ -112,14 +112,14 @@ For self-hosted or cloud-native Kubernetes clusters:
 ```bash
 # 1. Restore RDS database instance to specific timestamp
 aws rds restore-db-instance-to-point-in-time \
-  --source-db-instance-identifier nexus-db-production \
-  --target-db-instance-identifier nexus-db-restored \
+  --source-db-instance-identifier cortex-db-production \
+  --target-db-instance-identifier cortex-db-restored \
   --restore-time 2026-08-28T06:00:00Z \
-  --db-subnet-group-name nexus-db-subnet-group-production
+  --db-subnet-group-name cortex-db-subnet-group-production
 
 # 2. Update ECS task definition database endpoint to the restored instance
-aws ecs update-service --cluster nexus-cluster-production \
-  --service nexus-api --force-new-deployment
+aws ecs update-service --cluster cortex-cluster-production \
+  --service cortex-api --force-new-deployment
 ```
 
 ---

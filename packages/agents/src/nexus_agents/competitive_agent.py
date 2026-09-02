@@ -1,10 +1,10 @@
 import logging
 from typing import Dict, Any, List, Optional
 
-from nexus_agents import SpecialistAgent, AgentInput, AgentOutput, ProposedAction
-from nexus_integrations.intelx_client import IntelXClient, CompetitorProfile
+from cortex_agents import SpecialistAgent, AgentInput, AgentOutput, ProposedAction
+from cortex_integrations.intelx_client import IntelXClient, CompetitorProfile
 
-logger = logging.getLogger("nexus-competitive-agent")
+logger = logging.getLogger("cortex-competitive-agent")
 
 
 class CompetitiveIntelligenceAgent(SpecialistAgent):
@@ -70,7 +70,7 @@ class CompetitiveIntelligenceAgent(SpecialistAgent):
                 target="comparison_banner",
                 params={
                     "variant": f"vs_{competitor_name.lower()}_callout",
-                    "copy": f"Switch from {profile.competitor_name} to Nexus for zero-latency autonomous operations and 60% lower TCO."
+                    "copy": f"Switch from {profile.competitor_name} to Cortex for zero-latency autonomous operations and 60% lower TCO."
                 },
                 rationale=f"Surface competitor-aware comparison banner targeting {profile.competitor_name} feature gaps.",
                 side_effect_level="READ"

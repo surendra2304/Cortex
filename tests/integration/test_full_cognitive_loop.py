@@ -21,16 +21,16 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_core import Orchestrator
-from nexus_event_schema import EventSchema, Actor, ActorType
-from nexus_agents import AgentRegistry
-from nexus_ai_universe_adapter import AIUniverseClient
-from nexus_policy_engine import PolicyEngine
-from nexus_tool_runtime import ToolBus
-from nexus_identity import IdentityResolver
-from nexus_analytics import ScoringEngine
-from nexus_intelligence import ContextBuilder
-from nexus_memory import MemoryStore
+from cortex_core import Orchestrator
+from cortex_event_schema import EventSchema, Actor, ActorType
+from cortex_agents import AgentRegistry
+from cortex_ai_universe_adapter import AIUniverseClient
+from cortex_policy_engine import PolicyEngine
+from cortex_tool_runtime import ToolBus
+from cortex_identity import IdentityResolver
+from cortex_analytics import ScoringEngine
+from cortex_intelligence import ContextBuilder
+from cortex_memory import MemoryStore
 
 
 @pytest.mark.asyncio

@@ -6,8 +6,8 @@ from jose import jwt
 
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from nexus_api.main import app
-from nexus_api.auth import JWT_SECRET, Role
+from cortex_api.main import app
+from cortex_api.auth import JWT_SECRET, Role
 
 
 def generate_token(role: str, sub: str = "usr_test") -> str:
@@ -17,9 +17,9 @@ def generate_token(role: str, sub: str = "usr_test") -> str:
 def test_rbac_roles_enforcement():
     client = TestClient(app)
 
-    viewer_token = generate_token(Role.NEXUS_VIEWER.value)
-    operator_token = generate_token(Role.NEXUS_OPERATOR.value)
-    admin_token = generate_token(Role.NEXUS_ADMIN.value)
+    viewer_token = generate_token(Role.CORTEX_VIEWER.value)
+    operator_token = generate_token(Role.CORTEX_OPERATOR.value)
+    admin_token = generate_token(Role.CORTEX_ADMIN.value)
 
     # 1. Viewer can access GET /v1/agents
     res_viewer_agents = client.get("/v1/agents", headers={"Authorization": f"Bearer {viewer_token}"})
@@ -37,7 +37,7 @@ def test_rbac_roles_enforcement():
     # 4. POST /v1/friday/command uses X-Friday-Api-Key header auth (not JWT Bearer).
     #    With a key configured and MOCK_MODE=false, any JWT Bearer token (even admin)
     #    correctly returns 401 (missing X-Friday-Api-Key header).
-    import nexus_api.auth as _auth
+    import cortex_api.auth as _auth
     _saved_key = _auth.FRIDAY_API_KEY
     _saved_env_key = os.environ.get("FRIDAY_API_KEY")
     _saved_mock = os.environ.get("MOCK_MODE")

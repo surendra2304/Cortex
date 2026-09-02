@@ -11,10 +11,10 @@ sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
-from nexus_core import Orchestrator
-from nexus_event_schema import EventSchema, Actor, ActorType
-from nexus_agents import AgentRegistry, GrowthAgent, SalesAgent, SupportAgent, ReliabilityAgent
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
+from cortex_core import Orchestrator
+from cortex_event_schema import EventSchema, Actor, ActorType
+from cortex_agents import AgentRegistry, GrowthAgent, SalesAgent, SupportAgent, ReliabilityAgent
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
 
 
 @pytest.mark.asyncio

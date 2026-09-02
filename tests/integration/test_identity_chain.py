@@ -11,7 +11,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_identity import IdentityResolver
+from cortex_identity import IdentityResolver
 
 
 @pytest.mark.asyncio

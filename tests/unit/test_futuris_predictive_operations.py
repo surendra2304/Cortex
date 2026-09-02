@@ -20,10 +20,10 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_integrations import FuturisClient
-from nexus_intelligence import PredictionInformedPersonalization
-from nexus_workflow_engine import CapacityPlanningWorkflow
+from cortex_api.main import app
+from cortex_integrations import FuturisClient
+from cortex_intelligence import PredictionInformedPersonalization
+from cortex_workflow_engine import CapacityPlanningWorkflow
 
 
 @pytest.mark.asyncio

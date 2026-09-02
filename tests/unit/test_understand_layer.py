@@ -21,11 +21,11 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_identity import IdentityResolver
-from nexus_analytics import ScoringEngine, FunnelEngine, CohortEngine
-from nexus_intelligence import ContextBuilder
-from nexus_memory import MemoryStore, MemoryScope, TrustLabel
-from nexus_api.db_models import VisitorModel, ProfileModel, LeadModel, IdentityLinkModel, MemoryEntryModel
+from cortex_identity import IdentityResolver
+from cortex_analytics import ScoringEngine, FunnelEngine, CohortEngine
+from cortex_intelligence import ContextBuilder
+from cortex_memory import MemoryStore, MemoryScope, TrustLabel
+from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel, IdentityLinkModel, MemoryEntryModel
 
 
 @pytest.mark.asyncio

@@ -6,8 +6,8 @@
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm,iife --global-name Nexus --minify --dts --out-dir dist",
-    "bundle": "esbuild src/index.ts --bundle --minify --sourcemap --outfile=dist/nexus.js --global-name=Nexus --format=iife",
+    "build": "tsup src/index.ts --format cjs,esm,iife --global-name Cortex --minify --dts --out-dir dist",
+    "bundle": "esbuild src/index.ts --bundle --minify --sourcemap --outfile=dist/cortex.js --global-name=Cortex --format=iife",
     "test": "tsc --noEmit"
   },
   "devDependencies": {

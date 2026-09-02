@@ -7,7 +7,7 @@ import logging
 from pydantic import BaseModel, Field
 import redis.asyncio as aioredis
 
-logger = logging.getLogger("nexus-tool-runtime")
+logger = logging.getLogger("cortex-tool-runtime")
 
 
 class SideEffectLevel(str, Enum):

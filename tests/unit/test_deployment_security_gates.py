@@ -20,9 +20,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_integrations import DeploymentSecurityGate, GateVerdict
-from nexus_analytics import SecurityBaselineTracker
+from cortex_api.main import app
+from cortex_integrations import DeploymentSecurityGate, GateVerdict
+from cortex_analytics import SecurityBaselineTracker
 
 
 @pytest.mark.asyncio

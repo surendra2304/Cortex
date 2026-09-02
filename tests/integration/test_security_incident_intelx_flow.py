@@ -12,9 +12,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import SentinelEventListener, SentinelPayload, SentinelFinding, IntelXClient
-from nexus_intelligence import AssetExposureMonitor
-from nexus_workflow_engine import SecurityIncidentWorkflow
+from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding, IntelXClient
+from cortex_intelligence import AssetExposureMonitor
+from cortex_workflow_engine import SecurityIncidentWorkflow
 
 
 @pytest.mark.asyncio

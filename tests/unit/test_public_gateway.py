@@ -11,9 +11,9 @@ sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
 from fastapi.testclient import TestClient
-from nexus_api.main import app
-from nexus_api.config import get_db_session
-from nexus_api.db_models import VisitorModel, LeadModel
+from cortex_api.main import app
+from cortex_api.config import get_db_session
+from cortex_api.db_models import VisitorModel, LeadModel
 
 
 def test_tracing_header_propagation():

@@ -8,9 +8,9 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from nexus_api.db_models import WorkflowRunModel, ApprovalQueueModel
+from cortex_api.db_models import WorkflowRunModel, ApprovalQueueModel
 
-logger = logging.getLogger("nexus-workflow-engine")
+logger = logging.getLogger("cortex-workflow-engine")
 
 
 class WorkflowState(str, Enum):
@@ -50,7 +50,7 @@ class WorkflowDefinition(BaseModel):
 
 class WorkflowStateMachine:
     """
-    Workflow Engine per NEXUS spec section 45:
+    Workflow Engine per CORTEX spec section 45:
     - 5 First-class workflows:
       1. HIGH_INTENT_FOLLOWUP
       2. LEAD_QUALIFICATION_ROUTING

@@ -19,9 +19,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import FuturisClient
-from nexus_workflow_engine import CapacityPlanningWorkflow
-from nexus_intelligence import PredictionInformedPersonalization
+from cortex_integrations import FuturisClient
+from cortex_workflow_engine import CapacityPlanningWorkflow
+from cortex_intelligence import PredictionInformedPersonalization
 
 
 @pytest.mark.asyncio

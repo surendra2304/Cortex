@@ -11,7 +11,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_memory import MemoryStore, MemoryScope
+from cortex_memory import MemoryStore, MemoryScope
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
+from cortex_api.main import app
 
 
 def test_multi_tenant_security_isolation_e2e():

@@ -2,9 +2,9 @@ import logging
 import uuid
 from typing import Dict, Any, Optional
 from datetime import datetime
-from nexus_workflow_engine import WorkflowStateMachine, WorkflowState, WorkflowContext
+from cortex_workflow_engine import WorkflowStateMachine, WorkflowState, WorkflowContext
 
-logger = logging.getLogger("nexus-security-incident-workflow")
+logger = logging.getLogger("cortex-security-incident-workflow")
 
 
 class SecurityIncidentWorkflow:

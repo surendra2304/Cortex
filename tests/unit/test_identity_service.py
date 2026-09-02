@@ -9,9 +9,9 @@ sys.path.insert(0, os.path.abspath("packages/identity/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
 from fastapi.testclient import TestClient
-from nexus_api.main import app
-from nexus_api.config import get_db_session
-from nexus_api.db_models import VisitorModel, ProfileModel, LeadModel
+from cortex_api.main import app
+from cortex_api.config import get_db_session
+from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel
 
 
 def test_identify_pseudonymous_visitor():

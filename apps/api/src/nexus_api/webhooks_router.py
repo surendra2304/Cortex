@@ -7,11 +7,11 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 import redis.asyncio as aioredis
 
-from nexus_event_schema import EventSchema, Actor, ActorType
-from nexus_api.config import get_db_session, get_redis_client, settings
-from nexus_api.db_models import EventModel
+from cortex_event_schema import EventSchema, Actor, ActorType
+from cortex_api.config import get_db_session, get_redis_client, settings
+from cortex_api.db_models import EventModel
 
-logger = logging.getLogger("nexus-webhooks")
+logger = logging.getLogger("cortex-webhooks")
 router = APIRouter(prefix="/v1/webhooks", tags=["Webhooks"])
 
 
@@ -20,7 +20,7 @@ async def receive_webhook(
     provider: str,
     payload: Dict[str, Any],
     request: Request,
-    x_nexus_signature: Optional[str] = Header(None, alias="X-Nexus-Signature"),
+    x_cortex_signature: Optional[str] = Header(None, alias="X-Cortex-Signature"),
     x_tenant_id: Optional[str] = Header("default", alias="X-Tenant-ID"),
     x_site_id: Optional[str] = Header("backend", alias="X-Site-ID"),
     db: AsyncSession = Depends(get_db_session),
@@ -47,7 +47,7 @@ async def receive_webhook(
         data={
             "payload": payload,
             "_provider": provider,
-            "_signature_present": bool(x_nexus_signature),
+            "_signature_present": bool(x_cortex_signature),
             "_client_ip": request.client.host if request.client else "127.0.0.1"
         },
         trace_id=f"trc_{uuid.uuid4().hex[:8]}"

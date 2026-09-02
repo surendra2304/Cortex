@@ -3,9 +3,9 @@ import uuid
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-from nexus_integrations.intelx_client import IntelXClient, MarketSignal
+from cortex_integrations.intelx_client import IntelXClient, MarketSignal
 
-logger = logging.getLogger("nexus-market-signals")
+logger = logging.getLogger("cortex-market-signals")
 
 
 class MarketSignalDetector:

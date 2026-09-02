@@ -19,7 +19,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import (
+from cortex_integrations import (
     SentinelEventListener,
     SentinelPayload,
     SentinelFinding,
@@ -28,9 +28,9 @@ from nexus_integrations import (
     IntelXClient,
     FuturisClient
 )
-from nexus_agents import CompetitiveIntelligenceAgent, GrowthAgent, AgentInput
-from nexus_intelligence import AssetExposureMonitor, MarketSignalDetector, PredictionInformedPersonalization
-from nexus_workflow_engine import SecurityIncidentWorkflow, CapacityPlanningWorkflow
+from cortex_agents import CompetitiveIntelligenceAgent, GrowthAgent, AgentInput
+from cortex_intelligence import AssetExposureMonitor, MarketSignalDetector, PredictionInformedPersonalization
+from cortex_workflow_engine import SecurityIncidentWorkflow, CapacityPlanningWorkflow
 
 
 @pytest.mark.asyncio

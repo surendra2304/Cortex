@@ -1,4 +1,4 @@
-export interface NexusInitConfig {
+export interface CortexInitConfig {
   siteId: string;
   publicKey: string;
   endpoint?: string;
@@ -25,11 +25,11 @@ export interface WireEventPayload {
 }
 
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const STORAGE_VID = 'nexus_vid';
-const STORAGE_SID = 'nexus_sid';
-const STORAGE_LAST_ACTIVE = 'nexus_last_active';
-const STORAGE_CONSENT = 'nexus_consent';
-const STORAGE_UID = 'nexus_uid';
+const STORAGE_VID = 'cortex_vid';
+const STORAGE_SID = 'cortex_sid';
+const STORAGE_LAST_ACTIVE = 'cortex_last_active';
+const STORAGE_CONSENT = 'cortex_consent';
+const STORAGE_UID = 'cortex_uid';
 
 function genId(prefix: string): string {
   return prefix + '_' + Math.random().toString(36).slice(2, 11) + Date.now().toString(36);
@@ -51,8 +51,8 @@ function getDeviceType(): string {
   return /Mobi|Android/i.test(navigator.userAgent) ? 'mobile' : 'desktop';
 }
 
-export class NexusSDK {
-  private config: Required<NexusInitConfig> | null = null;
+export class CortexSDK {
+  private config: Required<CortexInitConfig> | null = null;
   private visitorId = '';
   private sessionId = '';
   private userId: string | null = null;
@@ -66,7 +66,7 @@ export class NexusSDK {
     this._loadConsent();
   }
 
-  public init(config: NexusInitConfig): void {
+  public init(config: CortexInitConfig): void {
     this.config = {
       endpoint: 'http://localhost:8000',
       autoCapture: true,
@@ -199,7 +199,7 @@ export class NexusSDK {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Nexus-Public-Key': this.config.publicKey,
+            'X-Cortex-Public-Key': this.config.publicKey,
           },
           body: JSON.stringify(events),
         });
@@ -221,7 +221,7 @@ export class NexusSDK {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Nexus-Public-Key': this.config.publicKey,
+            'X-Cortex-Public-Key': this.config.publicKey,
           },
           body: JSON.stringify(evt),
         });
@@ -305,15 +305,15 @@ export class NexusSDK {
 
   private _log(message: string, data?: Record<string, any>): void {
     if (this.config?.debug) {
-      console.log(`[NEXUS SDK] ${message}`, data || '');
+      console.log(`[CORTEX SDK] ${message}`, data || '');
     }
   }
 }
 
-export const Nexus = new NexusSDK();
+export const Cortex = new CortexSDK();
 
 if (typeof window !== 'undefined') {
-  (window as any).Nexus = Nexus;
+  (window as any).Cortex = Cortex;
 }
 
-export default Nexus;
+export default Cortex;

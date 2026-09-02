@@ -4,7 +4,7 @@ from pydantic import BaseModel, Field
 import re
 import logging
 
-logger = logging.getLogger("nexus-nl-analytics")
+logger = logging.getLogger("cortex-nl-analytics")
 
 
 class NLQueryRequest(BaseModel):
@@ -22,7 +22,7 @@ class NLQueryResponse(BaseModel):
 
 class AdvancedAnalyticsEngine:
     """
-    Advanced Analytics & Natural Language Query Engine per NEXUS spec:
+    Advanced Analytics & Natural Language Query Engine per CORTEX spec:
     - Real-time incremental metrics computation (active_visitors 5m, conversion_rate, bounce_rate)
     - Cohort retention curve evaluation
     - Multi-touch revenue attribution (First-touch, Last-touch, Linear, Time-decay with 7d half-life)

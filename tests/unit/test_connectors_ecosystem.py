@@ -21,13 +21,13 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import (
+from cortex_integrations import (
     create_calendar_tool,
     CalendarToolExecutor,
     get_connector_registry,
     CONNECTOR_HEALTH
 )
-from nexus_api.main import app
+from cortex_api.main import app
 
 
 def test_calendar_tool_creation():

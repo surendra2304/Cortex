@@ -2,7 +2,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("nexus-exposure-monitor")
+logger = logging.getLogger("cortex-exposure-monitor")
 
 
 class AssetExposure(BaseModel):

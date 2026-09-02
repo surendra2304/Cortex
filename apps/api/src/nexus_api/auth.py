@@ -9,12 +9,12 @@ from jose import jwt, JWTError
 
 import hmac
 
-logger = logging.getLogger("nexus-auth")
+logger = logging.getLogger("cortex-auth")
 security = HTTPBearer(auto_error=False)
 
 OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL")
 OIDC_ISSUER = os.getenv("OIDC_ISSUER")
-OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "nexus-api")
+OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "cortex-api")
 JWT_SECRET = os.getenv("JWT_SECRET", "super_secret_jwt_signing_key_replace_in_production")
 
 # FRIDAY integration shared secret
@@ -22,18 +22,18 @@ FRIDAY_API_KEY = os.getenv("FRIDAY_API_KEY", "")
 
 
 class Role(str, Enum):
-    NEXUS_VIEWER = "nexus_viewer"
-    NEXUS_OPERATOR = "nexus_operator"
-    NEXUS_ADMIN = "nexus_admin"
+    CORTEX_VIEWER = "cortex_viewer"
+    CORTEX_OPERATOR = "cortex_operator"
+    CORTEX_ADMIN = "cortex_admin"
     FRIDAY_SYSTEM = "friday_system"
 
 
 # Role hierarchy mapping
 ROLE_HIERARCHY = {
-    Role.NEXUS_VIEWER: [Role.NEXUS_VIEWER],
-    Role.NEXUS_OPERATOR: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR],
-    Role.NEXUS_ADMIN: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR, Role.NEXUS_ADMIN],
-    Role.FRIDAY_SYSTEM: [Role.NEXUS_VIEWER, Role.NEXUS_OPERATOR, Role.NEXUS_ADMIN, Role.FRIDAY_SYSTEM],
+    Role.CORTEX_VIEWER: [Role.CORTEX_VIEWER],
+    Role.CORTEX_OPERATOR: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR],
+    Role.CORTEX_ADMIN: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR, Role.CORTEX_ADMIN],
+    Role.FRIDAY_SYSTEM: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR, Role.CORTEX_ADMIN, Role.FRIDAY_SYSTEM],
 }
 
 # In-memory cached JWKS keys
@@ -66,9 +66,9 @@ async def verify_jwt_token(
         if os.getenv("MOCK_MODE", "true").lower() == "true":
             return {
                 "sub": "usr_dev_admin",
-                "role": Role.NEXUS_ADMIN.value,
+                "role": Role.CORTEX_ADMIN.value,
                 "tenant_id": "tenant_default",
-                "email": "admin@nexus.dev"
+                "email": "admin@cortex.dev"
             }
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -102,7 +102,7 @@ async def verify_jwt_token(
                     audience=OIDC_AUDIENCE,
                     issuer=OIDC_ISSUER
                 )
-                role = payload.get("role") or payload.get("https://nexus.dev/role") or Role.NEXUS_VIEWER.value
+                role = payload.get("role") or payload.get("https://cortex.dev/role") or Role.CORTEX_VIEWER.value
                 return {
                     "sub": payload.get("sub"),
                     "role": role,
@@ -116,7 +116,7 @@ async def verify_jwt_token(
     # 2. Fallback to HS256 / Symmetric Secret validation
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        role = payload.get("role", Role.NEXUS_VIEWER.value)
+        role = payload.get("role", Role.CORTEX_VIEWER.value)
         return {
             "sub": payload.get("sub", "usr_dev"),
             "role": role,
@@ -128,9 +128,9 @@ async def verify_jwt_token(
         if token == os.getenv("NEXT_PUBLIC_OPERATOR_TOKEN", "mock_operator_jwt_token_123"):
             return {
                 "sub": "usr_operator_123",
-                "role": Role.NEXUS_OPERATOR.value,
+                "role": Role.CORTEX_OPERATOR.value,
                 "tenant_id": "tenant_default",
-                "email": "operator@nexus.dev"
+                "email": "operator@cortex.dev"
             }
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -141,13 +141,13 @@ async def verify_jwt_token(
 def require_role(required_role: Role):
     """Dependency factory enforcing Role-Based Access Control (RBAC)."""
     async def role_checker(user: Dict[str, Any] = Depends(verify_jwt_token)) -> Dict[str, Any]:
-        user_role_str = user.get("role", Role.NEXUS_VIEWER.value)
+        user_role_str = user.get("role", Role.CORTEX_VIEWER.value)
         try:
             user_role = Role(user_role_str)
         except ValueError:
-            user_role = Role.NEXUS_VIEWER
+            user_role = Role.CORTEX_VIEWER
 
-        permitted_roles = ROLE_HIERARCHY.get(user_role, [Role.NEXUS_VIEWER])
+        permitted_roles = ROLE_HIERARCHY.get(user_role, [Role.CORTEX_VIEWER])
         if required_role not in permitted_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,

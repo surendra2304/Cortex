@@ -6,13 +6,13 @@ from typing import Dict, Any, List, Set, Optional
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
 
-logger = logging.getLogger("nexus-streaming")
+logger = logging.getLogger("cortex-streaming")
 router = APIRouter(tags=["Live Streaming"])
 
 
 class ChannelSubscriptionManager:
     """
-    Real-Time Channel Subscription & Multi-Tenant Event Broadcaster per NEXUS spec:
+    Real-Time Channel Subscription & Multi-Tenant Event Broadcaster per CORTEX spec:
     - Channels: 'events', 'visitors', 'leads', 'incidents', 'agent_activity', 'approvals'
     - Ring buffer per channel (last 50 messages) for immediate replay on client connection
     - Backpressure protection with throttled non-blocking queues

@@ -20,7 +20,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
+from cortex_api.main import app
 
 
 def test_tenant_onboarding_and_credentials_generation():

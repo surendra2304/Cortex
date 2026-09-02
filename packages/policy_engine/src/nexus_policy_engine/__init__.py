@@ -6,9 +6,9 @@ import os
 
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 
-from nexus_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision
+from cortex_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision
 
-logger = logging.getLogger("nexus-policy-engine")
+logger = logging.getLogger("cortex-policy-engine")
 
 
 class PolicyEngine:
@@ -71,7 +71,7 @@ class PolicyEngine:
         )
 
 
-from nexus_policy_engine.privacy import (
+from cortex_policy_engine.privacy import (
     SecretScrubber,
     PrivacyComplianceService,
     DataSubjectExport

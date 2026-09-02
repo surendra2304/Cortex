@@ -3,7 +3,7 @@ import Sidebar from "@/components/Sidebar";
 import "../globals.css";
 
 export const metadata = {
-  title: "NEXUS Control Center",
+  title: "CORTEX Control Center",
   description: "Autonomous Website & Web App Operations Intelligence Dashboard",
 };
 

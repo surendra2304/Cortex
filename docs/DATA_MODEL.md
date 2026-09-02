@@ -1,11 +1,11 @@
-# NEXUS Core Data Model & Schema Reference
+# CORTEX Core Data Model & Schema Reference
 
 ## 1. Relational Entities (PostgreSQL)
 
 | Table Name | Primary Key | Key Columns | Purpose |
 | :--- | :--- | :--- | :--- |
 | **`profiles`** | `id (VARCHAR)` | `tenant_id`, `primary_email`, `identities (JSONB)`, `traits (JSONB)` | Canonical unified profile stitching multiple visitor identities. |
-| **`visitors`** | `id (VARCHAR)` | `tenant_id`, `site_id`, `profile_id (FK)`, `first_seen_at`, `attributes` | Persistent browser visitors tracked via SDK (`nexus_vid`). |
+| **`visitors`** | `id (VARCHAR)` | `tenant_id`, `site_id`, `profile_id (FK)`, `first_seen_at`, `attributes` | Persistent browser visitors tracked via SDK (`cortex_vid`). |
 | **`sessions`** | `id (VARCHAR)` | `tenant_id`, `site_id`, `visitor_id (FK)`, `started_at`, `ended_at` | Individual visit sessions with 30-minute idle expiry. |
 | **`events`** | `id (VARCHAR)` | `tenant_id`, `site_id`, `session_id (FK)`, `type`, `occurred_at`, `actor_id` | Canonical immutable telemetry store with composite indexes. |
 | **`identity_links`** | `id (VARCHAR)` | `source_type`, `source_value`, `target_type`, `target_id`, `confidence` | Graph representation of identity linkages and mergers. |

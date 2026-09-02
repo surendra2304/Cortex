@@ -23,7 +23,7 @@ export default function ExecutiveOverviewPage() {
     const url = window.URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.setAttribute("href", url);
-    a.setAttribute("download", `nexus_executive_overview_${dateRange}.csv`);
+    a.setAttribute("download", `cortex_executive_overview_${dateRange}.csv`);
     a.click();
   };
 
@@ -110,7 +110,7 @@ export default function ExecutiveOverviewPage() {
             <span className="text-2xl font-bold text-slate-100 font-mono">{metrics?.conversions || 312}</span>
             <span className="text-xs text-emerald-400">4.8% CVR</span>
           </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Pricing $\rightarrow$ Checkout</span>
+          <span className="text-[11px] text-slate-400 block mt-1">Pricing → Checkout</span>
         </div>
 
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
@@ -154,21 +154,21 @@ export default function ExecutiveOverviewPage() {
             <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
               <div>
                 <span className="font-mono font-bold text-purple-400">GrowthAgent</span>
-                <span className="text-slate-400 ml-2">Evaluated pricing exit-intent $\rightarrow$ Proposed discount CTA banner</span>
+                <span className="text-slate-400 ml-2">Evaluated pricing exit-intent → Proposed discount CTA banner</span>
               </div>
               <span className="font-mono text-emerald-400 font-semibold">Score: 0.88</span>
             </div>
             <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
               <div>
                 <span className="font-mono font-bold text-sky-400">SalesAgent</span>
-                <span className="text-slate-400 ml-2">Identified `director@enterprise.com` $\rightarrow$ Routed to Enterprise Tier 1</span>
+                <span className="text-slate-400 ml-2">Identified `director@enterprise.com` → Routed to Enterprise Tier 1</span>
               </div>
               <span className="font-mono text-emerald-400 font-semibold">Score: 0.94</span>
             </div>
             <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
               <div>
                 <span className="font-mono font-bold text-emerald-400">SupportAgent</span>
-                <span className="text-slate-400 ml-2">Checkout telemetry analyzed $\rightarrow$ 0 errors detected (Healthy)</span>
+                <span className="text-slate-400 ml-2">Checkout telemetry analyzed → 0 errors detected (Healthy)</span>
               </div>
               <span className="font-mono text-slate-500">No Action</span>
             </div>

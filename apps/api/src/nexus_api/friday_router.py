@@ -1,17 +1,17 @@
 """
 FRIDAY Cross-System Integration Gateway
 ========================================
-This module exposes a dedicated set of NEXUS API endpoints optimised for
+This module exposes a dedicated set of CORTEX API endpoints optimised for
 consumption by FRIDAY — the general autonomous operating system that invokes
-NEXUS as a specialist capability.
+CORTEX as a specialist capability.
 
 Endpoints
 ---------
 POST /v1/friday/command
     Accepts a FridayCommand payload, authenticates FRIDAY via FRIDAY_API_KEY,
-    synthesises a canonical NEXUS EventSchema with actor type `friday_system`,
+    synthesises a canonical CORTEX EventSchema with actor type `friday_system`,
     and routes it directly through Orchestrator.run_cognitive_loop().
-    Returns the full 10-phase trace so FRIDAY can reason about what NEXUS did.
+    Returns the full 10-phase trace so FRIDAY can reason about what CORTEX did.
 
 GET /v1/friday/health_summary
     Returns a compact operational status: site uptime indicator, active
@@ -58,14 +58,14 @@ sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
-from nexus_event_schema import EventSchema, Actor, ActorType
-from nexus_core.orchestrator import Orchestrator
-from nexus_api.config import get_db_session
-from nexus_api.db_models import LeadModel, ProfileModel, EventModel, AuditRecordModel
-from nexus_api.auth import verify_friday_token
-from nexus_api.tracing import get_current_trace_id
+from cortex_event_schema import EventSchema, Actor, ActorType
+from cortex_core.orchestrator import Orchestrator
+from cortex_api.config import get_db_session
+from cortex_api.db_models import LeadModel, ProfileModel, EventModel, AuditRecordModel
+from cortex_api.auth import verify_friday_token
+from cortex_api.tracing import get_current_trace_id
 
-logger = logging.getLogger("nexus-friday-gateway")
+logger = logging.getLogger("cortex-friday-gateway")
 
 router = APIRouter(prefix="/v1/friday", tags=["FRIDAY Integration"])
 
@@ -89,19 +89,19 @@ class FridayCommand(BaseModel):
     """
     Canonical command structure issued by the FRIDAY general OS.
 
-    FRIDAY uses this to delegate a specific goal or action to NEXUS as a
-    specialist capability. NEXUS translates it into an EventSchema, routes it
+    FRIDAY uses this to delegate a specific goal or action to CORTEX as a
+    specialist capability. CORTEX translates it into an EventSchema, routes it
     through the full 10-phase cognitive loop, and returns the trace.
     """
     goal: str = Field(
         ...,
-        description="High-level objective FRIDAY wants NEXUS to achieve.",
+        description="High-level objective FRIDAY wants CORTEX to achieve.",
         examples=["Convert high-intent enterprise visitors to booked demos"],
     )
     context: Dict[str, Any] = Field(
         default_factory=dict,
         description=(
-            "Structured contextual data FRIDAY provides to inform NEXUS reasoning. "
+            "Structured contextual data FRIDAY provides to inform CORTEX reasoning. "
             "May include visitor_id, site_id, tenant_id, session signals, or prior "
             "FRIDAY inference results."
         ),
@@ -109,7 +109,7 @@ class FridayCommand(BaseModel):
     required_capability: str = Field(
         ...,
         description=(
-            "The NEXUS specialist capability FRIDAY requires. "
+            "The CORTEX specialist capability FRIDAY requires. "
             "Maps to agent domain: 'growth', 'sales', 'support', 'reliability'."
         ),
         examples=["sales"],
@@ -117,7 +117,7 @@ class FridayCommand(BaseModel):
     requested_action: str = Field(
         ...,
         description=(
-            "The specific action or event type FRIDAY wants to trigger in NEXUS. "
+            "The specific action or event type FRIDAY wants to trigger in CORTEX. "
             "This becomes the event 'type' in the cognitive loop (e.g. 'checkout.intent', "
             "'high_intent.detected', 'incident.alert')."
         ),
@@ -141,7 +141,7 @@ class FridayCommandResponse(BaseModel):
     """Response returned to FRIDAY after the cognitive loop completes."""
     status: str
     command_id: str
-    nexus_loop_id: str
+    cortex_loop_id: str
     agent_id: str
     decision: str
     executed_actions: int
@@ -246,8 +246,8 @@ def _intent_signals_from_metadata(metadata: dict) -> List[str]:
     summary="FRIDAY Command Gateway",
     description=(
         "Accepts a structured command from the FRIDAY general OS and routes it "
-        "through the full NEXUS 10-phase cognitive loop. Returns the complete "
-        "execution trace so FRIDAY can perform meta-reasoning on NEXUS outcomes."
+        "through the full CORTEX 10-phase cognitive loop. Returns the complete "
+        "execution trace so FRIDAY can perform meta-reasoning on CORTEX outcomes."
     ),
 )
 async def execute_friday_command(
@@ -265,7 +265,7 @@ async def execute_friday_command(
         f"command_id='{command_id}'"
     )
 
-    # Build a canonical NEXUS EventSchema from the FRIDAY command.
+    # Build a canonical CORTEX EventSchema from the FRIDAY command.
     # actor.type = FRIDAY_SYSTEM signals the cognitive loop that this event
     # originates from FRIDAY rather than an end-user browser session.
     event = EventSchema(
@@ -303,13 +303,13 @@ async def execute_friday_command(
         logger.error(f"Cognitive loop failed for FRIDAY command '{command_id}': {exc}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"NEXUS cognitive loop error: {exc}",
+            detail=f"CORTEX cognitive loop error: {exc}",
         )
 
     return FridayCommandResponse(
         status="success",
         command_id=command_id,
-        nexus_loop_id=loop_result["loop_id"],
+        cortex_loop_id=loop_result["loop_id"],
         agent_id=loop_result["agent_id"],
         decision=loop_result["decision"],
         executed_actions=loop_result["executed_actions"],
@@ -326,7 +326,7 @@ async def execute_friday_command(
 @router.get(
     "/health_summary",
     response_model=HealthSummary,
-    summary="NEXUS Health Summary for FRIDAY",
+    summary="CORTEX Health Summary for FRIDAY",
     description=(
         "Returns a compact JSON health snapshot: site uptime indicator, active "
         "incident count, active agent roster, recent error rate, and cognitive "
@@ -535,11 +535,11 @@ async def friday_incidents(
 
 
 # ==============================================================================
-# Outbound FridayClient (NEXUS -> FRIDAY Capability Delegator)
+# Outbound FridayClient (CORTEX -> FRIDAY Capability Delegator)
 # ==============================================================================
 
 class FridayCapabilityRequest(BaseModel):
-    """NEXUS request to FRIDAY for capabilities outside NEXUS's website scope."""
+    """CORTEX request to FRIDAY for capabilities outside CORTEX's website scope."""
     goal: str
     context: Dict[str, Any] = Field(default_factory=dict)
     required_capability: str  # desktop, file, voice, device
@@ -557,7 +557,7 @@ class FridayCapabilityResponse(BaseModel):
 
 
 class FridayClient:
-    """Outbound client used by NEXUS when requesting desktop/device actions from FRIDAY."""
+    """Outbound client used by CORTEX when requesting desktop/device actions from FRIDAY."""
 
     def __init__(self, endpoint: Optional[str] = None, api_key: Optional[str] = None):
         self.endpoint = endpoint or os.getenv("FRIDAY_API_URL", "http://localhost:9000")
@@ -601,14 +601,14 @@ async def delegate_to_friday(
     req: FridayCapabilityRequest,
     friday_auth: Dict[str, Any] = Depends(verify_friday_token)
 ):
-    """NEXUS delegates desktop/voice/device actions to FRIDAY OS."""
+    """CORTEX delegates desktop/voice/device actions to FRIDAY OS."""
     return await friday_client.request_capability(req)
 
 
 # ── Competitive & Market Intelligence for FRIDAY Voice Queries ──────────────
 
-from nexus_integrations.intelx_client import IntelXClient
-from nexus_intelligence.market_signals import MarketSignalDetector
+from cortex_integrations.intelx_client import IntelXClient
+from cortex_intelligence.market_signals import MarketSignalDetector
 
 _intelx_client = IntelXClient()
 _market_detector = MarketSignalDetector(intelx_client=_intelx_client)

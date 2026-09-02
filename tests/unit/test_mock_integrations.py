@@ -5,8 +5,8 @@ import pytest
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 
-from nexus_tool_runtime import ToolBus
-from nexus_integrations import (
+from cortex_tool_runtime import ToolBus
+from cortex_integrations import (
     EmailToolExecutor, create_email_tool,
     CRMToolExecutor, create_crm_tool,
     WebhookToolExecutor, create_webhook_tool
@@ -20,7 +20,7 @@ async def test_email_tool_mock_mode():
     bus = ToolBus()
     bus.register_tool(tool, executor)
 
-    params = {"to": "founder@startup.io", "subject": "Welcome", "body": "Welcome to NEXUS!"}
+    params = {"to": "founder@startup.io", "subject": "Welcome", "body": "Welcome to CORTEX!"}
     result = await bus.execute("email_tool", params)
 
     assert result["status"] == "success"

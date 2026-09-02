@@ -20,10 +20,10 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_integrations import IntelXClient
-from nexus_intelligence import MarketSignalDetector
-from nexus_agents import CompetitiveIntelligenceAgent, AgentInput, AgentRegistry
+from cortex_api.main import app
+from cortex_integrations import IntelXClient
+from cortex_intelligence import MarketSignalDetector
+from cortex_agents import CompetitiveIntelligenceAgent, AgentInput, AgentRegistry
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,7 @@ async def test_intelx_client_competitive_and_market_intelligence():
     profile = await client.fetch_competitor_intelligence("Datadog")
     assert profile.competitor_name == "Datadog"
     assert len(profile.feature_gaps) > 0
-    assert "Nexus" in profile.battlecard_summary
+    assert "Cortex" in profile.battlecard_summary
 
     # 2. Fetch market signals
     signals = await client.fetch_market_signals("saas_devops")
@@ -50,7 +50,7 @@ async def test_competitive_intelligence_agent_processing():
     inp = AgentInput(
         goal="Synthesize competitive positioning battlecard",
         events=[
-            {"type": "page_view", "data": {"url": "https://example.com/compare-datadog-vs-nexus"}},
+            {"type": "page_view", "data": {"url": "https://example.com/compare-datadog-vs-cortex"}},
             {"type": "search.performed", "data": {"query": "datadog pricing alternatives"}}
         ],
         context={"competitor_name": "Datadog"}

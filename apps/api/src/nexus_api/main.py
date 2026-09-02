@@ -13,16 +13,16 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../.
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/policy_engine/src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/workflow_engine/src")))
 
-from nexus_api.config import settings
-from nexus_api.tracing import TracingMiddleware
-from nexus_api.events_router import router as events_router
-from nexus_api.webhooks_router import router as webhooks_router
-from nexus_api.stripe_webhook_router import router as stripe_webhook_router
-from nexus_api.friday_router import router as friday_router
-from nexus_api.public_gateway import router as public_gateway_router
-from nexus_api.understand_router import router as understand_router
-from nexus_api.production_router import router as production_router
-from nexus_api.streaming_router import router as streaming_router
+from cortex_api.config import settings
+from cortex_api.tracing import TracingMiddleware
+from cortex_api.events_router import router as events_router
+from cortex_api.webhooks_router import router as webhooks_router
+from cortex_api.stripe_webhook_router import router as stripe_webhook_router
+from cortex_api.friday_router import router as friday_router
+from cortex_api.public_gateway import router as public_gateway_router
+from cortex_api.understand_router import router as understand_router
+from cortex_api.production_router import router as production_router
+from cortex_api.streaming_router import router as streaming_router
 
 app = FastAPI(
     title=settings.app_name,
@@ -74,4 +74,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("nexus_api.main:app", host=settings.host, port=settings.port, reload=settings.debug)
+    uvicorn.run("cortex_api.main:app", host=settings.host, port=settings.port, reload=settings.debug)

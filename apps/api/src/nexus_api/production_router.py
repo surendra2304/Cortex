@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 import redis.asyncio as aioredis
 
-from nexus_api.config import get_db_session, get_redis_client, settings
+from cortex_api.config import get_db_session, get_redis_client, settings
 
-logger = logging.getLogger("nexus-production-hardening")
+logger = logging.getLogger("cortex-production-hardening")
 router = APIRouter(tags=["Production & Observability"])
 
 # Prometheus Metrics Storage in memory
@@ -211,7 +211,7 @@ async def websocket_live_events(websocket: WebSocket):
 
 # ── 4. CONNECTOR REGISTRY & HEALTH ───────────────────────────────────────────
 
-from nexus_integrations import get_connector_registry
+from cortex_integrations import get_connector_registry
 
 
 @router.get("/connectors")
@@ -222,7 +222,7 @@ async def list_registered_connectors():
 
 # ── 5. EXPERIMENTATION & PERSONALIZATION ─────────────────────────────────────
 
-from nexus_analytics import ExperimentationEngine, ExperimentDefinition, ExperimentVariant, ExperimentStatus
+from cortex_analytics import ExperimentationEngine, ExperimentDefinition, ExperimentVariant, ExperimentStatus
 
 exp_engine = ExperimentationEngine()
 
@@ -277,7 +277,7 @@ async def match_personalization_experience(payload: Dict[str, Any]):
 
 # ── 6. NATURAL LANGUAGE ANALYTICS QUERYING ───────────────────────────────────
 
-from nexus_analytics import AdvancedAnalyticsEngine, NLQueryRequest, NLQueryResponse
+from cortex_analytics import AdvancedAnalyticsEngine, NLQueryRequest, NLQueryResponse
 
 nl_analytics_engine = AdvancedAnalyticsEngine()
 
@@ -290,7 +290,7 @@ async def query_analytics_natural_language(req: NLQueryRequest):
 
 # ── 7. COMPLIANCE, PRIVACY & GOVERNANCE ─────────────────────────────────────
 
-from nexus_policy_engine import PrivacyComplianceService, DataSubjectExport
+from cortex_policy_engine import PrivacyComplianceService, DataSubjectExport
 
 privacy_service = PrivacyComplianceService()
 
@@ -340,7 +340,7 @@ class TenantSettings(BaseModel):
     max_sites: int
     monthly_event_limit: int
     branding: Dict[str, Any] = Field(default_factory=lambda: {
-        "logo_url": "/nexus-logo.png",
+        "logo_url": "/cortex-logo.png",
         "primary_color": "#0284c7",
         "custom_domain": "app.tenant.io"
     })
@@ -378,7 +378,7 @@ async def get_tenant_settings():
         max_sites=10,
         monthly_event_limit=5000000,
         branding={
-            "logo_url": "/nexus-logo.png",
+            "logo_url": "/cortex-logo.png",
             "primary_color": "#0284c7",
             "custom_domain": "ops.enterprise-corp.com"
         },
@@ -404,9 +404,9 @@ async def get_tenant_usage():
 
 # ── 6. SENTINEL INTEGRATION & SECURITY INCIDENT COORDINATION ──────────────────
 
-from nexus_integrations.sentinel_listener import SentinelEventListener, SentinelPayload
-from nexus_intelligence.exposure_monitor import AssetExposureMonitor
-from nexus_workflow_engine.security_incident import SecurityIncidentWorkflow
+from cortex_integrations.sentinel_listener import SentinelEventListener, SentinelPayload
+from cortex_intelligence.exposure_monitor import AssetExposureMonitor
+from cortex_workflow_engine.security_incident import SecurityIncidentWorkflow
 
 _exposure_monitor = AssetExposureMonitor()
 _sentinel_listener = SentinelEventListener(exposure_monitor=_exposure_monitor)
@@ -461,8 +461,8 @@ async def get_sentinel_findings():
 
 # ── 7. DEVSECOPS DEPLOYMENT SECURITY GATES & COMPLIANCE ───────────────────────
 
-from nexus_integrations.deployment_gate import DeploymentSecurityGate
-from nexus_analytics.security_baseline import SecurityBaselineTracker
+from cortex_integrations.deployment_gate import DeploymentSecurityGate
+from cortex_analytics.security_baseline import SecurityBaselineTracker
 
 _deployment_gate = DeploymentSecurityGate(sentinel_listener=_sentinel_listener)
 _baseline_tracker = SecurityBaselineTracker()
@@ -495,9 +495,9 @@ async def get_security_compliance_report():
 
 # ── 8. FUTURIS PREDICTIVE OPERATIONS & CAPACITY PLANNING ──────────────────────
 
-from nexus_integrations.futuris_client import FuturisClient
-from nexus_workflow_engine.capacity_planning import CapacityPlanningWorkflow
-from nexus_intelligence.predictive_personalization import PredictionInformedPersonalization
+from cortex_integrations.futuris_client import FuturisClient
+from cortex_workflow_engine.capacity_planning import CapacityPlanningWorkflow
+from cortex_intelligence.predictive_personalization import PredictionInformedPersonalization
 
 _futuris_client = FuturisClient()
 _capacity_workflow = CapacityPlanningWorkflow(futuris_client=_futuris_client)

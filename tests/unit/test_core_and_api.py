@@ -6,14 +6,14 @@ sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from nexus_core import (
+from cortex_core import (
     Tenant, Site, Visitor, Session, Event, Profile, Account,
     Conversation, Lead, Opportunity, Customer, Workflow, Action,
     Experiment, Incident, AgentRun, IntelligenceRequest, Memory, AuditRecord
 )
-from nexus_event_schema import EventSchema, Actor, ActorType
+from cortex_event_schema import EventSchema, Actor, ActorType
 from fastapi.testclient import TestClient
-from nexus_api.main import app
+from cortex_api.main import app
 
 
 def test_core_models():

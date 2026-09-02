@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pydantic import BaseModel
 
-logger = logging.getLogger("nexus-capacity-planning")
+logger = logging.getLogger("cortex-capacity-planning")
 
 
 class CapacityPlanResult(BaseModel):
@@ -28,7 +28,7 @@ class CapacityPlanningWorkflow:
     def __init__(self, futuris_client: Optional[Any] = None):
         if futuris_client is None:
             try:
-                from nexus_integrations.futuris_client import FuturisClient
+                from cortex_integrations.futuris_client import FuturisClient
                 self.futuris_client = FuturisClient()
             except ImportError:
                 self.futuris_client = None
@@ -37,7 +37,7 @@ class CapacityPlanningWorkflow:
 
     async def evaluate_capacity(self, site_id: str = "site_main") -> CapacityPlanResult:
         if self.futuris_client is None:
-            from nexus_integrations.futuris_client import FuturisClient
+            from cortex_integrations.futuris_client import FuturisClient
             self.futuris_client = FuturisClient()
 
         forecast = await self.futuris_client.predict_traffic(site_id, horizon_hours=24)

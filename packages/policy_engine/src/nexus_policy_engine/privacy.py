@@ -5,12 +5,12 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 import logging
 
-logger = logging.getLogger("nexus-privacy-compliance")
+logger = logging.getLogger("cortex-privacy-compliance")
 
 
 class SecretScrubber:
     """
-    Automated PII and Secret Scrubber per NEXUS spec sections 31-33:
+    Automated PII and Secret Scrubber per CORTEX spec sections 31-33:
     - Detects emails, phone numbers, credit card numbers, SSNs, and API keys
     - Automatically masks or hashes sensitive fields before logging or AI consultation
     """
@@ -42,7 +42,7 @@ class SecretScrubber:
         return data
 
     @classmethod
-    def hash_pii(cls, value: str, salt: str = "nexus_privacy_salt") -> str:
+    def hash_pii(cls, value: str, salt: str = "cortex_privacy_salt") -> str:
         """One-way pseudonymous hashing for identity resolution without raw storage."""
         if not value:
             return ""

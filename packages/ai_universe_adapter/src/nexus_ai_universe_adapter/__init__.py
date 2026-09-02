@@ -6,7 +6,7 @@ import os
 import asyncio
 import logging
 
-logger = logging.getLogger("nexus-ai-universe-adapter")
+logger = logging.getLogger("cortex-ai-universe-adapter")
 
 
 class EvidenceItem(BaseModel):
@@ -89,10 +89,10 @@ class AIUniverseClient:
         )
 
     async def evaluate(self, request: IntelligenceRequest) -> IntelligenceResponse:
-        url = f"{self.endpoint}/v1/nexus/intelligence"
+        url = f"{self.endpoint}/v1/cortex/intelligence"
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "NEXUS-AIUniverse-Adapter/1.0"
+            "User-Agent": "CORTEX-AIUniverse-Adapter/1.0"
         }
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -154,7 +154,7 @@ class RequestClassification(str, Enum):
 
 class RequestClassifier:
     """
-    Per NEXUS spec section 17: NOT every event goes to AI Universe.
+    Per CORTEX spec section 17: NOT every event goes to AI Universe.
     Deterministic-first: agents run first, AI called only when classification warrants it.
     """
 

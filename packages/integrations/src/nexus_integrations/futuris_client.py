@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("nexus-futuris-client")
+logger = logging.getLogger("cortex-futuris-client")
 
 
 class ForecastHorizon(BaseModel):

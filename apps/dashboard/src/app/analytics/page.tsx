@@ -19,7 +19,7 @@ export default function AnalyticsPage() {
       setNlResult(res.data);
     } catch {
       setNlResult({
-        answer_summary: "Unable to reach the analytics query endpoint. Please ensure the NEXUS API is running on localhost:8000.",
+        answer_summary: "Unable to reach the analytics query endpoint. Please ensure the CORTEX API is running on localhost:8000.",
         sql_translation: "SELECT * FROM events LIMIT 10;",
         data: []
       });
@@ -56,7 +56,7 @@ export default function AnalyticsPage() {
             disabled={isQuerying}
             className="px-5 py-2 bg-sky-600 hover:bg-sky-500 text-white text-xs font-semibold rounded-lg transition disabled:opacity-50"
           >
-            {isQuerying ? "Analyzing..." : "Ask NEXUS"}
+            {isQuerying ? "Analyzing..." : "Ask CORTEX"}
           </button>
         </form>
 
@@ -168,7 +168,7 @@ export default function AnalyticsPage() {
               <div className="p-3 bg-sky-950/30 border border-sky-800/60 rounded space-y-1">
                 <span className="font-bold text-sky-400 block text-[11px]">Recommended Sales Battlecard:</span>
                 <p className="text-slate-300 text-[11px]">
-                  Position Nexus's sub-100ms real-time autonomous cognitive loops and zero per-seat tax as a 60% TCO savings over legacy APM.
+                  Position Cortex's sub-100ms real-time autonomous cognitive loops and zero per-seat tax as a 60% TCO savings over legacy APM.
                 </p>
               </div>
             </div>

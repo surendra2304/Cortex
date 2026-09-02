@@ -10,7 +10,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_intelligence import AssetExposureMonitor
+from cortex_intelligence import AssetExposureMonitor
 
 
 def test_exposure_correlation_e2e():

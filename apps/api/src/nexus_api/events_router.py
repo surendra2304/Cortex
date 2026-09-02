@@ -8,11 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 import redis.asyncio as aioredis
 
-from nexus_event_schema import EventSchema, IngestEventResponse
-from nexus_api.config import get_db_session, get_redis_client, settings
-from nexus_api.db_models import EventModel, ApiKeyModel
+from cortex_event_schema import EventSchema, IngestEventResponse
+from cortex_api.config import get_db_session, get_redis_client, settings
+from cortex_api.db_models import EventModel, ApiKeyModel
 
-logger = logging.getLogger("nexus-event-gateway")
+logger = logging.getLogger("cortex-event-gateway")
 router = APIRouter(prefix="/v1/events", tags=["Event Gateway"])
 
 RATE_LIMIT_MAX_REQUESTS = 1000
@@ -79,17 +79,17 @@ async def check_redis_rate_limit(redis_client: aioredis.Redis, key: str) -> None
 async def ingest_event(
     event: EventSchema,
     request: Request,
-    x_nexus_public_key: Optional[str] = Header(None, alias="X-Nexus-Public-Key"),
+    x_cortex_public_key: Optional[str] = Header(None, alias="X-Cortex-Public-Key"),
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
     
     # 1. Validate Public API Key against PostgreSQL
-    await validate_api_key(x_nexus_public_key, event.site_id, db)
+    await validate_api_key(x_cortex_public_key, event.site_id, db)
 
     # 2. Check Rate Limit (1000/min)
-    rate_key = f"{x_nexus_public_key or client_ip}:{event.site_id}"
+    rate_key = f"{x_cortex_public_key or client_ip}:{event.site_id}"
     await check_redis_rate_limit(redis_client, rate_key)
 
     # 3. Server-side context enrichment
@@ -98,7 +98,7 @@ async def ingest_event(
         "client_ip": client_ip,
         "user_agent": request.headers.get("user-agent"),
         "received_at": datetime.utcnow().isoformat(),
-        "public_key_present": bool(x_nexus_public_key)
+        "public_key_present": bool(x_cortex_public_key)
     }
 
     # 4. Persist to PostgreSQL
@@ -148,7 +148,7 @@ async def ingest_event(
 async def ingest_event_batch(
     events: List[EventSchema],
     request: Request,
-    x_nexus_public_key: Optional[str] = Header(None, alias="X-Nexus-Public-Key"),
+    x_cortex_public_key: Optional[str] = Header(None, alias="X-Cortex-Public-Key"),
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
@@ -163,9 +163,9 @@ async def ingest_event_batch(
 
     client_ip = request.client.host if request.client else "127.0.0.1"
     site_id = events[0].site_id
-    await validate_api_key(x_nexus_public_key, site_id, db)
+    await validate_api_key(x_cortex_public_key, site_id, db)
 
-    rate_key = f"{x_nexus_public_key or client_ip}:{site_id}"
+    rate_key = f"{x_cortex_public_key or client_ip}:{site_id}"
     await check_redis_rate_limit(redis_client, rate_key)
 
     responses: List[IngestEventResponse] = []
@@ -175,7 +175,7 @@ async def ingest_event_batch(
             "client_ip": client_ip,
             "user_agent": request.headers.get("user-agent"),
             "received_at": datetime.utcnow().isoformat(),
-            "public_key_present": bool(x_nexus_public_key),
+            "public_key_present": bool(x_cortex_public_key),
             "batch": True,
         }
 

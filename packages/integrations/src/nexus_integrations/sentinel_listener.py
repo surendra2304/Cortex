@@ -4,7 +4,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("nexus-sentinel-listener")
+logger = logging.getLogger("cortex-sentinel-listener")
 
 
 class SentinelFinding(BaseModel):
@@ -29,7 +29,7 @@ class SentinelEventListener:
     """
     Sentinel Security Findings Listener & Bridge:
     - Receives automated vulnerability and posture findings from Sentinel
-    - Transforms findings into typed Nexus security events for Cognitive Loop ingestion
+    - Transforms findings into typed Cortex security events for Cognitive Loop ingestion
     - Integrates with AssetExposureMonitor to evaluate actual attack surface exposure
     """
 

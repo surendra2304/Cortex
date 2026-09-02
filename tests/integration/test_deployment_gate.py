@@ -11,7 +11,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import DeploymentSecurityGate, GateVerdict
+from cortex_integrations import DeploymentSecurityGate, GateVerdict
 
 
 @pytest.mark.asyncio

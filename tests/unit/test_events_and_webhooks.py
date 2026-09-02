@@ -10,10 +10,10 @@ sys.path.insert(0, os.path.abspath("apps/api/src"))
 sys.path.insert(0, os.path.abspath("apps/worker/src"))
 
 from fastapi.testclient import TestClient
-from nexus_api.main import app
-from nexus_api.config import get_db_session, get_redis_client
-from nexus_core.orchestrator import Orchestrator
-from nexus_worker.main import process_event
+from cortex_api.main import app
+from cortex_api.config import get_db_session, get_redis_client
+from cortex_core.orchestrator import Orchestrator
+from cortex_worker.main import process_event
 
 
 def test_events_gateway_with_db_and_redis_mocks():
@@ -50,7 +50,7 @@ def test_events_gateway_with_db_and_redis_mocks():
         "data": {"cart_value": 249.99}
     }
 
-    res = client.post("/v1/events", json=payload, headers={"X-Nexus-Public-Key": "pk_test_live"})
+    res = client.post("/v1/events", json=payload, headers={"X-Cortex-Public-Key": "pk_test_live"})
     assert res.status_code == 200
     assert res.json()["status"] == "accepted"
     assert res.json()["event_id"] == "evt_stream_test_1"

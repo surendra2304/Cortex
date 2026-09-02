@@ -19,7 +19,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_analytics import (
+from cortex_analytics import (
     ExperimentationEngine,
     ExperimentDefinition,
     ExperimentVariant,

@@ -10,7 +10,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_policy_engine import SecretScrubber, PrivacyComplianceService
+from cortex_policy_engine import SecretScrubber, PrivacyComplianceService
 
 
 def test_privacy_flow_consent_and_erasure_e2e():

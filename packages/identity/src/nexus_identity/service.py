@@ -5,14 +5,14 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-from nexus_api.db_models import ProfileModel, VisitorModel, LeadModel, IdentityLinkModel, AuditRecordModel
+from cortex_api.db_models import ProfileModel, VisitorModel, LeadModel, IdentityLinkModel, AuditRecordModel
 
-logger = logging.getLogger("nexus-identity")
+logger = logging.getLogger("cortex-identity")
 
 
 class IdentityResolver:
     """
-    Identity Resolution Engine per NEXUS spec section 9:
+    Identity Resolution Engine per CORTEX spec section 9:
     - Input: anonymous visitor ID, email, user ID, device fingerprint
     - Resolution graph: links stored in IdentityLinkModel
     - Policy: only link identities when consent granted AND tenant policy allows

@@ -21,8 +21,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_api.config import get_db_session, get_redis_client
+from cortex_api.main import app
+from cortex_api.config import get_db_session, get_redis_client
 
 
 def test_liveness_probe():

@@ -20,7 +20,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_analytics import AdvancedAnalyticsEngine
+from cortex_analytics import AdvancedAnalyticsEngine
 
 
 def test_natural_language_query_intent_parsing():

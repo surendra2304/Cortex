@@ -1,7 +1,7 @@
 """
 Stripe Webhook Receiver
 =======================
-Receives signed webhook events from Stripe and pushes them into the NEXUS
+Receives signed webhook events from Stripe and pushes them into the CORTEX
 Redis event stream so the background worker can process them through the
 10-phase cognitive loop.
 
@@ -31,7 +31,7 @@ from datetime import datetime
 
 import redis.asyncio as aioredis
 
-from nexus_api.config import get_redis_client, settings
+from cortex_api.config import get_redis_client, settings
 
 # Stripe SDK — graceful degradation if not installed
 try:
@@ -40,11 +40,11 @@ try:
 except ImportError:
     HAVE_STRIPE = False
 
-logger = logging.getLogger("nexus-stripe-webhook")
+logger = logging.getLogger("cortex-stripe-webhook")
 
 router = APIRouter(prefix="/v1/webhooks", tags=["Stripe Webhooks"])
 
-# Stripe events we care about → NEXUS event type mapping
+# Stripe events we care about → CORTEX event type mapping
 SUPPORTED_STRIPE_EVENTS = {
     "checkout.session.completed": "checkout.completed",
     "customer.subscription.updated": "subscription.updated",
@@ -117,13 +117,13 @@ def _verify_stripe_signature(payload: bytes, sig_header: Optional[str], secret: 
         )
 
 
-def _build_nexus_event(stripe_event: dict) -> dict:
+def _build_cortex_event(stripe_event: dict) -> dict:
     """
-    Maps a raw Stripe event dict to a NEXUS-compatible event payload
+    Maps a raw Stripe event dict to a CORTEX-compatible event payload
     that the worker can deserialise and pass to the cognitive loop.
     """
     stripe_type = stripe_event.get("type", "stripe.unknown")
-    nexus_type = SUPPORTED_STRIPE_EVENTS.get(stripe_type, f"stripe.{stripe_type}")
+    cortex_type = SUPPORTED_STRIPE_EVENTS.get(stripe_type, f"stripe.{stripe_type}")
     stripe_data = stripe_event.get("data", {}).get("object", {})
 
     # Extract the most useful identifiers from the Stripe object
@@ -137,12 +137,12 @@ def _build_nexus_event(stripe_event: dict) -> dict:
     subscription_id = stripe_data.get("subscription") or stripe_data.get("id")
 
     return {
-        # Standard NEXUS event envelope
+        # Standard CORTEX event envelope
         "event_id": f"stripe_{stripe_event.get('id', uuid.uuid4().hex)}",
-        "tenant_id": os.getenv("NEXUS_DEFAULT_TENANT_ID", "default"),
-        "site_id": os.getenv("NEXUS_DEFAULT_SITE_ID", "stripe"),
+        "tenant_id": os.getenv("CORTEX_DEFAULT_TENANT_ID", "default"),
+        "site_id": os.getenv("CORTEX_DEFAULT_SITE_ID", "stripe"),
         "session_id": customer_id or f"stripe_session_{uuid.uuid4().hex[:8]}",
-        "type": nexus_type,
+        "type": cortex_type,
         "occurred_at": datetime.utcfromtimestamp(
             stripe_event.get("created", datetime.utcnow().timestamp())
         ).isoformat(),
@@ -174,7 +174,7 @@ def _build_nexus_event(stripe_event: dict) -> dict:
     description=(
         "Receives signed Stripe webhook events, verifies the Stripe-Signature, "
         "and pushes checkout.completed and subscription.updated events into the "
-        "NEXUS Redis event stream for autonomous cognitive loop processing."
+        "CORTEX Redis event stream for autonomous cognitive loop processing."
     ),
 )
 async def receive_stripe_webhook(
@@ -200,20 +200,20 @@ async def receive_stripe_webhook(
     # 2. Filter — only forward event types we care about
     if stripe_event_type not in SUPPORTED_STRIPE_EVENTS:
         logger.debug(
-            f"Stripe event type '{stripe_event_type}' is not in the NEXUS processing list — acknowledged and ignored."
+            f"Stripe event type '{stripe_event_type}' is not in the CORTEX processing list — acknowledged and ignored."
         )
         return {"status": "acknowledged", "action": "ignored", "stripe_event_id": stripe_event_id}
 
-    # 3. Map to a NEXUS event envelope and push to Redis Stream
-    nexus_event = _build_nexus_event(stripe_event)
+    # 3. Map to a CORTEX event envelope and push to Redis Stream
+    cortex_event = _build_cortex_event(stripe_event)
 
     try:
         await redis_client.xadd(
             settings.redis_event_stream,
-            {"payload": json.dumps(nexus_event)},
+            {"payload": json.dumps(cortex_event)},
         )
         logger.info(
-            f"Stripe event '{stripe_event_type}' → NEXUS event '{nexus_event['type']}' "
+            f"Stripe event '{stripe_event_type}' → CORTEX event '{cortex_event['type']}' "
             f"pushed to stream '{settings.redis_event_stream}'."
         )
     except Exception as exc:
@@ -230,8 +230,8 @@ async def receive_stripe_webhook(
 
     return {
         "status": "accepted",
-        "nexus_event_type": nexus_event["type"],
-        "nexus_event_id": nexus_event["event_id"],
+        "cortex_event_type": cortex_event["type"],
+        "cortex_event_id": cortex_event["event_id"],
         "stripe_event_id": stripe_event_id,
         "queued_at": datetime.utcnow().isoformat(),
     }

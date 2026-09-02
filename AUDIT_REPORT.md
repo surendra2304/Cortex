@@ -23,11 +23,11 @@
 
 ### Phase 1: Bug Hunt & Warning Analysis
 - **Unawaited Coroutine Warning in `WorkflowStateMachine`**:
-  - *Location*: `packages/workflow_engine/src/nexus_workflow_engine/__init__.py:128-138`
+  - *Location*: `packages/workflow_engine/src/cortex_workflow_engine/__init__.py:128-138`
   - *Problem*: `self.db.execute(stmt)` return value inspection directly called `.scalar_one_or_none()` assuming concrete SQLAlchemy cursor, creating unawaited coroutine warnings in mock contexts.
   - *Fix*: Added safe attribute inspection `if hasattr(res, "scalar_one_or_none"):` and defensive execution wrapper.
 - **Unawaited Coroutine Warning in `validate_api_key`**:
-  - *Location*: `apps/api/src/nexus_api/events_router.py:41-48`
+  - *Location*: `apps/api/src/cortex_api/events_router.py:41-48`
   - *Problem*: Unchecked scalar retrieval on database query result objects during API key validation.
   - *Fix*: Added guarded check for `hasattr(res, "scalar_one_or_none")` to handle both production SQLAlchemy async sessions and testing mocks cleanly.
 - **Integration Test Mocks**:
@@ -43,13 +43,13 @@
 
 ### Phase 2: Error Handling & Edge Cases
 - All ingestion endpoints (`/v1/events`, `/v1/events/batch`) properly validate against Pydantic canonical schemas with RFC 7807 compatible HTTP error codes (`400 Bad Request`, `401 Unauthorized`, `403 Forbidden`, `429 Too Many Requests`).
-- Worker consumer in `apps/worker/src/nexus_worker/main.py` catches `json.JSONDecodeError` and unexpected runtime exceptions without crashing the background worker event loop.
+- Worker consumer in `apps/worker/src/cortex_worker/main.py` catches `json.JSONDecodeError` and unexpected runtime exceptions without crashing the background worker event loop.
 
 ### Phase 3: Security & RBAC Audit
-- `apps/api/src/nexus_api/auth.py`:
+- `apps/api/src/cortex_api/auth.py`:
   - Token comparisons for FRIDAY service keys enforce `hmac.compare_digest` to eliminate side-channel timing attacks.
-  - Role-based access control enforces strict role hierarchies (`NEXUS_VIEWER` < `NEXUS_OPERATOR` < `NEXUS_ADMIN` < `FRIDAY_SYSTEM`).
-  - Privacy data scrubbing and consent gating prevent unconsented PII linking in `packages/policy_engine/src/nexus_policy_engine/privacy.py`.
+  - Role-based access control enforces strict role hierarchies (`CORTEX_VIEWER` < `CORTEX_OPERATOR` < `CORTEX_ADMIN` < `FRIDAY_SYSTEM`).
+  - Privacy data scrubbing and consent gating prevent unconsented PII linking in `packages/policy_engine/src/cortex_policy_engine/privacy.py`.
 
 ### Phase 4 & 5: Test Suite Integrity & Zero Warnings
 - Ran `pytest -W error::RuntimeWarning` across all 128 tests.

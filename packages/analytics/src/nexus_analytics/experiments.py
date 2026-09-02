@@ -9,7 +9,7 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
-logger = logging.getLogger("nexus-experimentation")
+logger = logging.getLogger("cortex-experimentation")
 
 
 class ExperimentStatus(str, Enum):
@@ -44,7 +44,7 @@ class ExperimentDefinition(BaseModel):
 
 class ExperimentationEngine:
     """
-    Production A/B Testing & Personalization Engine per NEXUS spec section 9:
+    Production A/B Testing & Personalization Engine per CORTEX spec section 9:
     - Deterministic sticky variant assignment via MD5 hash of visitor_id + experiment_id
     - Real-time conversion and engagement metric tracking per variant
     - Statistical significance calculation using two-proportion z-test (p < 0.05 / z > 1.96)

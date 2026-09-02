@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger("nexus-intelx-client")
+logger = logging.getLogger("cortex-intelx-client")
 
 
 class CompetitorProfile(BaseModel):
@@ -35,7 +35,7 @@ class IntelXClient:
     IntelX Autonomous Market & Competitive Intelligence Client:
     - Queries IntelX for competitive intelligence on alternatives (pricing, feature gaps, battlecards)
     - Retrieves real-time market trends, industry regulations, and high-velocity topics
-    - Feeds structured insights into GrowthAgent, SalesAgent, and Nexus Personalization
+    - Feeds structured insights into GrowthAgent, SalesAgent, and Cortex Personalization
     """
 
     def __init__(self, api_key: Optional[str] = None, mock_mode: bool = True):
@@ -60,7 +60,7 @@ class IntelXClient:
                 ],
                 strengths=["Extensive legacy infrastructure APM metric integrations"],
                 market_share_tier="dominant",
-                battlecard_summary="Emphasize Nexus's sub-100ms real-time autonomous cognitive loops, zero-ops deployment, and integrated AI Universe deliberation without per-seat tax.",
+                battlecard_summary="Emphasize Cortex's sub-100ms real-time autonomous cognitive loops, zero-ops deployment, and integrated AI Universe deliberation without per-seat tax.",
                 evidence_citations=[
                     "https://intelx.dev/research/observability-market-2026",
                     "https://intelx.dev/pricing-benchmarks/apm-saas"
@@ -77,7 +77,7 @@ class IntelXClient:
                 ],
                 strengths=["Established CDP destination ecosystem"],
                 market_share_tier="established",
-                battlecard_summary="Position Nexus not just as telemetry pipe, but as active cognitive brain that autonomously intervenes and closes conversions.",
+                battlecard_summary="Position Cortex not just as telemetry pipe, but as active cognitive brain that autonomously intervenes and closes conversions.",
                 evidence_citations=[
                     "https://intelx.dev/research/cdp-evolution-agentic"
                 ]
@@ -92,7 +92,7 @@ class IntelXClient:
                 ],
                 strengths=["Broad brand recognition"],
                 market_share_tier="challenger",
-                battlecard_summary=f"Highlight Nexus's full closed-loop learning and explainable predictive scoring over {competitor_name}.",
+                battlecard_summary=f"Highlight Cortex's full closed-loop learning and explainable predictive scoring over {competitor_name}.",
                 evidence_citations=[f"https://intelx.dev/research/{norm_name}-comparison"]
             )
 
@@ -115,7 +115,7 @@ class IntelXClient:
                 trend_title="Heightened Data Sovereignty & GDPR Subject Erasure Audits",
                 impact_level="high",
                 summary="European and US enterprises require verifiable one-way PII masking and automated Art. 17 hard erasure before installing third-party browser SDKs.",
-                recommended_positioning="Highlight Nexus's zero-plaintext PII policy, automated GDPR exports, and 7-year tamper-evident audit logs.",
+                recommended_positioning="Highlight Cortex's zero-plaintext PII policy, automated GDPR exports, and 7-year tamper-evident audit logs.",
                 trending_topics=["GDPR Article 17 Automation", "Client-Side PII Redaction", "Tamper-Evident Hash Audit"],
                 citations=["https://intelx.dev/compliance/privacy-regulations-2026"]
             )

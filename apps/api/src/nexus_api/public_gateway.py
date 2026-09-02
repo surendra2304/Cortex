@@ -12,14 +12,14 @@ sys.path.insert(0, os.path.abspath("packages/agents/src"))
 sys.path.insert(0, os.path.abspath("packages/identity/src"))
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 
-from nexus_core.models import Lead, Visitor, AuditRecord, Workflow
-from nexus_agents import AgentRegistry, AgentInput
-from nexus_identity import IdentityService
-from nexus_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient
-from nexus_api.config import get_db_session
-from nexus_api.db_models import VisitorModel, ProfileModel, LeadModel, SessionModel
-from nexus_api.tracing import get_current_trace_id
-from nexus_api.auth import verify_jwt_token, require_role, Role
+from cortex_core.models import Lead, Visitor, AuditRecord, Workflow
+from cortex_agents import AgentRegistry, AgentInput
+from cortex_identity import IdentityService
+from cortex_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient
+from cortex_api.config import get_db_session
+from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel, SessionModel
+from cortex_api.tracing import get_current_trace_id
+from cortex_api.auth import verify_jwt_token, require_role, Role
 
 router = APIRouter(prefix="/v1", tags=["Public API Gateway"])
 
@@ -43,7 +43,7 @@ ACTIONS_DB: Dict[str, Dict[str, Any]] = {
 async def identify_visitor(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     visitor_id = payload.get("visitor_id")
     if not visitor_id:
@@ -71,7 +71,7 @@ async def identify_visitor(
 async def get_visitor(
     visitor_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
     res = await db.execute(stmt)
@@ -113,7 +113,7 @@ async def get_visitor(
 async def get_lead(
     lead_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     stmt = select(LeadModel).where(LeadModel.id == lead_id)
     res = await db.execute(stmt)
@@ -140,7 +140,7 @@ async def get_lead(
 @router.get("/leads")
 async def list_leads(
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     tenant_id = auth.get("tenant_id", "default")
     stmt = select(LeadModel).where(LeadModel.tenant_id == tenant_id)
@@ -166,7 +166,7 @@ async def list_leads(
 async def create_lead(
     payload: Dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     lead_id = f"lead_{uuid.uuid4().hex[:8]}"
     db_lead = LeadModel(
@@ -197,7 +197,7 @@ async def create_lead(
 @router.get("/analytics/{metric}")
 async def get_analytics(
     metric: str,
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     return {
         "metric": metric,
@@ -215,7 +215,7 @@ async def get_analytics(
 @router.post("/intelligence/requests")
 async def create_intelligence_request(
     req: IntelligenceRequest,
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     res = await ai_client.evaluate(req)
     return {"response": res.model_dump(mode="json"), "trace_id": get_current_trace_id()}
@@ -223,7 +223,7 @@ async def create_intelligence_request(
 
 # 6. Agents - List requires VIEWER, Run requires OPERATOR
 @router.get("/agents")
-async def list_agents(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))):
+async def list_agents(auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
     return {
         "agents": [
             {"id": "agent_growth", "domain": "growth", "capabilities": ["experiment_mutate", "banner_injection"]},
@@ -239,7 +239,7 @@ async def list_agents(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIE
 async def run_agent(
     agent_id: str,
     input_data: AgentInput,
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     agent = agent_registry.get(agent_id)
     if not agent:
@@ -250,7 +250,7 @@ async def run_agent(
 
 # 7. Workflows - Requires VIEWER role
 @router.get("/workflows")
-async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_VIEWER))):
+async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
     return {
         "workflows": [
             {
@@ -275,7 +275,7 @@ async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_
 async def approve_action(
     action_id: str,
     payload: Dict[str, Any] = {},
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     action = ACTIONS_DB.get(action_id)
     if not action:
@@ -290,7 +290,7 @@ async def approve_action(
 @router.get("/audit/{resource_type}")
 async def get_audit_logs(
     resource_type: str,
-    auth: Dict[str, Any] = Depends(require_role(Role.NEXUS_OPERATOR))
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     return {
         "resource_type": resource_type,
@@ -308,5 +308,5 @@ async def get_audit_logs(
 
 # Note: The full FRIDAY integration gateway (POST /v1/friday/command,
 # GET /v1/friday/health_summary, GET /v1/friday/priority_leads,
-# GET /v1/friday/incidents) is implemented in nexus_api.friday_router and
+# GET /v1/friday/incidents) is implemented in cortex_api.friday_router and
 # mounted separately in main.py.  The stub below is intentionally removed.

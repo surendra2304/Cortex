@@ -20,8 +20,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_api.main import app
-from nexus_api.streaming_router import stream_manager
+from cortex_api.main import app
+from cortex_api.streaming_router import stream_manager
 
 
 @pytest.mark.asyncio

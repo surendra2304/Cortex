@@ -19,8 +19,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from nexus_integrations import IntelXClient
-from nexus_agents import CompetitiveIntelligenceAgent, AgentInput, GrowthAgent
+from cortex_integrations import IntelXClient
+from cortex_agents import CompetitiveIntelligenceAgent, AgentInput, GrowthAgent
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,7 @@ from sqlalchemy.orm import declarative_base
 import redis.asyncio as aioredis
 import logging
 
-logger = logging.getLogger("nexus-config")
+logger = logging.getLogger("cortex-config")
 
 Base = declarative_base()
 

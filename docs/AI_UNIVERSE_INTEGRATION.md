@@ -1,7 +1,7 @@
-# NEXUS AI Universe Integration & Deliberation Engine
+# CORTEX AI Universe Integration & Deliberation Engine
 
 ## 1. Overview
-NEXUS consumes **AI Universe** as its foundational intelligence and multi-agent deliberation layer. However, per specification section 17, **not every event is routed to AI Universe**. NEXUS follows a **deterministic-first** philosophy, calling AI deliberation only when the expected value is high.
+CORTEX consumes **AI Universe** as its foundational intelligence and multi-agent deliberation layer. However, per specification section 17, **not every event is routed to AI Universe**. CORTEX follows a **deterministic-first** philosophy, calling AI deliberation only when the expected value is high.
 
 ---
 
