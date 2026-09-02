@@ -65,3 +65,15 @@ This document serves as the master record of engineering progress, architecture 
   - **Official Audit Documentation**: Published `AUDIT_REPORT.md` documenting all findings, remediations, and verification results.
 - **Test Results**: **128 passed / 0 failed (0 warnings, 0 errors)** (100% green pass rate under pytest).
 
+---
+
+### [Day 6 — 2026-09-02: Frontend Rebranding to CORTEX, Telemetry Optimization & Clean UX](diary/2026-09-02.md)
+- **Focus**: Complete modernization of Next.js dashboard UI, purging legacy NEXUS branding, fixing LaTeX typesetting escape artifacts, and aligning API client endpoints.
+- **What Was Completed**:
+  - **Comprehensive Dashboard Rebranding**: Updated browser titles, header breadcrumbs, layout metadata, and sidebar logos across all 17 operational views from NEXUS to CORTEX.
+  - **Clean Formatting & Typography**: Normalized raw LaTeX math notation (`\$\rightarrow\$`) to clean Unicode arrow glyphs (`→`) in conversion funnel and cognitive loop cards.
+  - **Client-Side SWR Telemetry**: Optimized data polling intervals and ensured layout stability on live streaming telemetry cards without layout shifts.
+  - **Endpoint Standardization**: Configured frontend API clients to route cleanly to `api.cortex.dev` with full CORS support.
+- **Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest); all diary validation invariants passed.
+
+
