@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Optional, Callable
 from enum import Enum
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+import hashlib
+import json
 from pydantic import BaseModel, Field
 import uuid
 import asyncio
@@ -9,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, desc
 
 from cortex_api.db_models import WorkflowRunModel, ApprovalQueueModel
+from cortex_upgrade.workflow import WorkflowStateMachine as DurableStateMachine, WorkflowConflict
 
 logger = logging.getLogger("cortex-workflow-engine")
 
@@ -31,11 +34,13 @@ class WorkflowContext(BaseModel):
     tenant_id: str = "default"
     site_id: str = "default"
     current_state: WorkflowState = WorkflowState.TRIGGERED
+    version: int = 0
+    checkpoint_hash: Optional[str] = None
     trigger_event: Dict[str, Any] = Field(default_factory=dict)
     steps: List[Dict[str, Any]] = Field(default_factory=list)
     context_data: Dict[str, Any] = Field(default_factory=dict)
     error: Optional[str] = None
-    started_at: datetime = Field(default_factory=datetime.utcnow)
+    started_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     completed_at: Optional[datetime] = None
 
 
@@ -64,6 +69,17 @@ class WorkflowStateMachine:
     def __init__(self, db: Optional[AsyncSession] = None):
         self.db = db
 
+    @staticmethod
+    def compute_checkpoint_hash(ctx: WorkflowContext) -> str:
+        payload = {
+            "run_id": ctx.run_id,
+            "version": ctx.version,
+            "state": ctx.current_state.value,
+            "steps": ctx.steps,
+            "context_data": ctx.context_data
+        }
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, default=str).encode()).hexdigest()
+
     async def start_workflow(
         self,
         workflow_name: str,
@@ -85,8 +101,10 @@ class WorkflowStateMachine:
         ctx.steps.append({
             "step": "TRIGGER",
             "state": WorkflowState.TRIGGERED.value,
-            "timestamp": datetime.utcnow().isoformat()
+            "version": ctx.version,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
+        ctx.checkpoint_hash = self.compute_checkpoint_hash(ctx)
 
         if self.db:
             try:
@@ -112,17 +130,29 @@ class WorkflowStateMachine:
         ctx: WorkflowContext,
         next_state: WorkflowState,
         step_name: str,
-        step_result: Optional[Dict[str, Any]] = None
+        step_result: Optional[Dict[str, Any]] = None,
+        expected_version: Optional[int] = None
     ) -> None:
+        if expected_version is not None and expected_version != ctx.version:
+            raise WorkflowConflict(f"Workflow conflict for run {ctx.run_id}: expected version {expected_version}, found {ctx.version}")
+
+        # Checkpoint integrity check
+        expected_hash = self.compute_checkpoint_hash(ctx)
+        if ctx.checkpoint_hash and ctx.checkpoint_hash != expected_hash:
+            logger.warning(f"Workflow checkpoint hash mismatch for run {ctx.run_id}: state may have been modified outside engine.")
+
+        ctx.version += 1
         ctx.current_state = next_state
         ctx.steps.append({
             "step": step_name,
             "state": next_state.value,
             "result": step_result or {},
-            "timestamp": datetime.utcnow().isoformat()
+            "version": ctx.version,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
         if next_state in (WorkflowState.COMPLETED, WorkflowState.FAILED, WorkflowState.COMPENSATED, WorkflowState.CANCELLED):
-            ctx.completed_at = datetime.utcnow()
+            ctx.completed_at = datetime.now(timezone.utc)
+        ctx.checkpoint_hash = self.compute_checkpoint_hash(ctx)
 
         if self.db:
             try:

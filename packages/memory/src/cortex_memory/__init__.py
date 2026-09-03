@@ -1,5 +1,5 @@
 from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pydantic import BaseModel, Field
 from enum import Enum
 import uuid
@@ -8,6 +8,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 
 from cortex_api.db_models import MemoryEntryModel
+from cortex_upgrade.memory import ScopedMemory
+from cortex_upgrade.learning import StrategyLearner
+from cortex_upgrade.audit import redact
 
 logger = logging.getLogger("cortex-memory")
 
@@ -50,6 +53,7 @@ class MemoryStore:
 
     def __init__(self):
         self._in_memory: Dict[str, List[MemoryEntry]] = {}
+        self.scoped_memory = ScopedMemory()
 
     async def put(
         self,
@@ -64,7 +68,9 @@ class MemoryStore:
         ttl_days: Optional[int] = None
     ) -> MemoryEntry:
         entry_id = f"mem_{uuid.uuid4().hex[:10]}"
-        expires_at = datetime.utcnow() + timedelta(days=ttl_days) if ttl_days else None
+        now = datetime.now(timezone.utc)
+        expires_at = now + timedelta(days=ttl_days) if ttl_days else None
+        safe_content = redact(content)
 
         entry = MemoryEntry(
             id=entry_id,
@@ -72,10 +78,10 @@ class MemoryStore:
             scope=scope,
             scope_id=scope_id,
             key=key,
-            content=content,
+            content=safe_content,
             trust_label=trust_label,
             source=source,
-            created_at=datetime.utcnow(),
+            created_at=now,
             expires_at=expires_at
         )
 
@@ -192,7 +198,7 @@ class MemoryStore:
             "context_snapshot": context_snapshot,
             "verdict": verdict,
             "metric_delta": metric_delta,
-            "recorded_at": datetime.utcnow().isoformat()
+            "recorded_at": datetime.now(timezone.utc).isoformat()
         }
         return await self.put(
             db=db,
@@ -208,7 +214,7 @@ class MemoryStore:
         self,
         strategy_name: str
     ) -> Dict[str, Any]:
-        """Calculates success rate and auto-promotion/demotion status."""
+        """Calculates success rate and auto-promotion/demotion status using StrategyLearner with sample size guard."""
         entries = await self.get(db=None, scope=MemoryScope.STRATEGY.value, scope_id=strategy_name)
         outcomes = [e.content for e in entries if "verdict" in e.content]
         total = len(outcomes)
@@ -217,6 +223,11 @@ class MemoryStore:
 
         successes = sum(1 for o in outcomes if o.get("verdict") == "SUCCESS")
         rate = successes / total
+
+        learner = StrategyLearner(promote_at=0.60, demote_at=0.30, min_samples=20)
+        for o in outcomes:
+            learner.observe(strategy_name, won=(o.get("verdict") == "SUCCESS"))
+        disp = learner.disposition(strategy_name)
 
         status = "CANDIDATE"
         if total >= 20 and rate >= 0.60:
@@ -228,5 +239,7 @@ class MemoryStore:
             "strategy": strategy_name,
             "total_executions": total,
             "success_rate": rate,
-            "status": status
+            "status": status,
+            "disposition": disp,
+            "min_samples_met": total >= 20
         }

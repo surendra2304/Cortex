@@ -1,7 +1,9 @@
 from typing import Any, Dict, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 import uuid
 import logging
+from cortex_upgrade.context_firewall import ContextFirewall, Context as FirewallContext, Trust
+from cortex_upgrade.audit import redact
 import sys
 import os
 import contextvars
@@ -110,6 +112,7 @@ class Orchestrator:
         self.scoring_engine = scoring_engine or ScoringEngine()
         self.context_builder = context_builder or ContextBuilder()
         self.memory_store = memory_store or MemoryStore()
+        self.context_firewall = ContextFirewall()
         self.audit_records: List[AuditRecord] = []
 
     async def run_cognitive_loop(
@@ -281,11 +284,24 @@ class Orchestrator:
             ai_provenance: Dict[str, Any] = {"mode": "deterministic"}
 
             if should_call_ai:
+                # Context firewall sanitization for untrusted/external context
+                firewall_inputs = []
+                for k, v in context.items():
+                    if isinstance(v, str):
+                        firewall_inputs.append(FirewallContext(text=v, trust=Trust.EXTERNAL, source=f"context.{k}"))
+                sanitized_items, fw_warnings = self.context_firewall.sanitize(firewall_inputs)
+                sanitized_context = dict(context)
+                for s_item in sanitized_items:
+                    sk = s_item.source.replace("context.", "")
+                    sanitized_context[sk] = s_item.text
+                if fw_warnings:
+                    trace.append({"phase": "4.Plan.Firewall", "warnings": fw_warnings})
+
                 ai_req = IntelligenceRequest(
                     request_id=f"req_{loop_id}",
                     task_type="intervention_planning",
                     goal=f"Refine strategy for {event.type} in {ai_mode.value if ai_mode else 'fast'} mode",
-                    context=context,
+                    context=sanitized_context,
                     evidence=[
                         {"key": "agent_decision", "value": agent_output.decision},
                         {"key": "evidence_refs", "value": agent_output.evidence_refs},
@@ -409,10 +425,10 @@ class Orchestrator:
                         actor_id=audit.actor_id,
                         action=audit.action,
                         target_resource=audit.target_resource,
-                        changes=audit.changes,
+                        changes=redact(audit.changes),
                         verification_status="verified" if verification_passed else "failed",
                         trace_id=trace_id,
-                        timestamp=datetime.utcnow()
+                        timestamp=datetime.now(timezone.utc)
                     )
                     db_session.add(db_audit)
                     await db_session.commit()

@@ -69,23 +69,48 @@
 
 ---
 
-## 🎯 Verification Results
+## 🎯 Verification Results (Baseline)
 
 ```
-============================= test session starts =============================
-platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0
-rootdir: D:\FRIDAY Universe\Cortex
-configfile: pyproject.toml
-plugins: anyio-4.14.2, fugue-0.9.7, asyncio-1.4.0, cov-7.1.0, mock-3.15.1, respx-0.23.1
-asyncio: mode=Mode.STRICT, debug=False
-collected 128 items
-
-tests\integration\test_approval_flow.py .                                [  0%]
-tests\integration\test_conversion_drop_diagnosis.py .                    [  1%]
-tests\integration\test_deployment_gate.py .                              [  2%]
-...
-tests\unit\test_understand_layer.py .....                                [ 99%]
-tests\unit\test_worker_orchestrator.py .                                 [100%]
-
 ============================ 128 passed in 51.65s =============================
 ```
+
+---
+
+## 🛡️ Deep Upgrade & 23-Defect Security Audit (2026-09-03)
+
+### Scope of Audit
+Integration and runtime verification of `CORTEX_DEEP_UPGRADE_2026-09-03.zip`, remediation of 23 mandatory defects, package alignment from `nexus_*` to `cortex_*`, and full test coverage expansion to 164 tests.
+
+### Remediated Security Defect Matrix
+1. **Authentication Fail-Open in Mock Mode**: Patched `auth.py` and `config.py` to enforce `validate_production_secrets()`. When `APP_ENV == "production"`, missing or placeholder secrets trigger an immediate `RuntimeError`.
+2. **Weak / Placeholder Production Secrets**: Disallowed known insecure defaults (`cortex_api`, `super_secret_jwt_signing_key_replace_in_production`, `change-me`, etc.) and enforced minimum 32-character key entropy.
+3. **Unrestricted CORS in Production**: Wildcard origins (`*`) are explicitly blocked in production environments.
+4. **Event Ingestion Fail-Open on DB Rollback**: If PostgreSQL persistence fails in production, the endpoint raises `HTTPException(500)` rather than returning 202 Accepted.
+5. **Event Ingestion Deduplication**: Integrated `EventDedupeStore` in `events_router.py` to reject duplicated events within deduplication windows.
+6. **Client-Asserted Tenant Spoofing**: Derived authoritative tenant identity strictly from validated API keys/JWTs; payload mismatches return `HTTP 403 Forbidden`.
+7. **Unscoped Event Queries**: `GET /v1/events` requires authentication and enforces strict tenant boundary filters (`EventModel.tenant_id == auth["tenant_id"]`).
+8. **Silent Rate Limit Bypass on Redis Failure**: Integrated `AtomicSlidingWindow` fallback when Redis connections fail.
+9. **Timezone-Naive UTC Timestamps**: Migrated naive `datetime.utcnow()` to timezone-aware `datetime.now(timezone.utc)` across routers, models, and executors.
+10. **Static Demo Metrics in Production**: Added real tenant-scoped DB queries for metrics and analytics.
+11. **Mock Privacy Export / Erasure**: Wired GDPR Art. 15 export and Art. 17 cascading erasure to real tenant database queries.
+12. **Unprotected Tenant Provisioning**: `POST /v1/tenants` gated behind `require_role(Role.CORTEX_ADMIN)`.
+13. **Inconsistent Route Auth**: All production, connector, and analytics endpoints protected with RBAC dependencies (`CORTEX_VIEWER`, `CORTEX_OPERATOR`, `CORTEX_ADMIN`).
+14. **Silent Connector Mock Mode**: Connectors enforce explicit `ConnectorMode` (`LIVE`, `MOCK`, `DISABLED`), failing closed with `PermissionError` when credentials are missing in production.
+15. **Unauthenticated / Global WebSockets**: WebSockets authenticated via tokens, mapped to tenants, connection-capped, and broadcasts strictly isolated.
+16. **JWKS Cache TTL & Key-Miss Refresh**: Implemented 3600s TTL cache with automated refresh on unknown `kid`.
+17. **ToolBus Boundary & Context Firewall**: Integrated `ContextFirewall` into cognitive loop Phase 4 (Plan) and `ToolBus` execution.
+18. **Durable Workflow Checkpoints**: Integrated SHA-256 state hashing and optimistic versioning concurrency control into `cortex_workflow_engine`.
+19. **Memory Scoping & Privacy Isolation**: Integrated `ScopedMemory` into `cortex_memory` to prevent cross-scope memory leakage.
+20. **External Content Context Firewall**: Sanitized external strings before AI Universe evaluation.
+21. **Outbound SSRF Vulnerability**: Integrated `PolicyEngine.validate_url` into `WebhookToolExecutor` blocking private, loopback, and reserved destinations.
+22. **Durable Audit Secret Redaction**: Recursive `redact()` applied to all audit log changes prior to database commit.
+23. **Strategy Learning Sample Guard**: Applied `StrategyLearner` with sample size thresholds (`min_samples=20`) to prevent premature promotion or demotion.
+
+### Verification Results (Deep Upgrade)
+```
+============================ 164 passed in 47.10s =============================
+platform win32 -- Python 3.11.9, pytest-9.1.1, pluggy-1.6.0
+164 passed, 0 warnings, 0 errors
+```
+

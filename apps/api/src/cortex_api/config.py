@@ -10,17 +10,20 @@ logger = logging.getLogger("cortex-config")
 Base = declarative_base()
 
 
+import os
+from cortex_upgrade.auth import validate_production_secrets, INSECURE_DEFAULTS
+
 class Settings(BaseSettings):
     app_name: str = "CORTEX API"
-    app_env: str = "production"
+    app_env: str = os.getenv("APP_ENV", "development").lower()
     debug: bool = False
     api_v1_prefix: str = "/v1"
     host: str = "0.0.0.0"
     port: int = 8000
-    allowed_origins: List[str] = ["*"]
+    allowed_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     
     # Master API Key
-    cortex_api_key: str = "cortex_api"
+    cortex_api_key: str = os.getenv("CORTEX_API_KEY", "cortex_api_dev_local_only_key_1234567890")
     
     # Storage and queues (Defaults to local SQLite if no external DB provided)
     postgres_dsn: str = "sqlite+aiosqlite:///./data/cortex.db"
@@ -31,6 +34,17 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+if settings.app_env == "production":
+    validate_production_secrets(
+        "production",
+        {
+            "CORTEX_API_KEY": settings.cortex_api_key,
+            "JWT_SECRET": os.getenv("JWT_SECRET"),
+        }
+    )
+    if "*" in settings.allowed_origins:
+        raise RuntimeError("Wildcard allowed_origins ('*') is forbidden in production.")
 
 # Async Engine & Session Pool
 engine_kwargs = {"echo": False}

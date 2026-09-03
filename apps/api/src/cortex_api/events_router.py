@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, timezone
 import hashlib
 import json
 import logging
+from typing import Optional, Dict, Any, List
+
+from fastapi import APIRouter, Request, HTTPException, Header, Depends, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, desc
 import redis.asyncio as aioredis
@@ -11,12 +14,19 @@ import redis.asyncio as aioredis
 from cortex_event_schema import EventSchema, IngestEventResponse
 from cortex_api.config import get_db_session, get_redis_client, settings
 from cortex_api.db_models import EventModel, ApiKeyModel
+from cortex_api.auth import require_role, Role
+from cortex_upgrade.rate_limit import AtomicSlidingWindow
+from cortex_upgrade.event_ingestion import EventDedupeStore, EventNormalizer, EventRejected
 
 logger = logging.getLogger("cortex-event-gateway")
 router = APIRouter(prefix="/v1/events", tags=["Event Gateway"])
 
 RATE_LIMIT_MAX_REQUESTS = 1000
 RATE_LIMIT_WINDOW_SECONDS = 60
+
+local_rate_limiter = AtomicSlidingWindow()
+dedupe_store = EventDedupeStore()
+event_normalizer = EventNormalizer()
 
 
 def hash_api_key(api_key: str) -> str:
@@ -44,7 +54,7 @@ async def validate_api_key(
         if hasattr(res, "scalar_one_or_none"):
             record = res.scalar_one_or_none()
             if record:
-                record.last_used_at = datetime.utcnow()
+                record.last_used_at = datetime.now(timezone.utc)
                 await db.commit()
                 return record
     except Exception as exc:
@@ -72,7 +82,14 @@ async def check_redis_rate_limit(redis_client: aioredis.Redis, key: str) -> None
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning(f"Redis rate limit check failed ({exc}). Bypassing rate limit for resilience.")
+        # Fail-closed atomic sliding window local fallback — do not silently bypass!
+        logger.warning(f"Redis rate limit check failed ({exc}). Using atomic sliding window fallback.")
+        result = await local_rate_limiter.consume(key, RATE_LIMIT_MAX_REQUESTS, float(RATE_LIMIT_WINDOW_SECONDS))
+        if not result.allowed:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail=f"Rate limit exceeded. Retry after {result.retry_after:.1f}s."
+            )
 
 
 @router.post("", response_model=IngestEventResponse)
@@ -84,28 +101,40 @@ async def ingest_event(
     redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
     client_ip = request.client.host if request.client else "127.0.0.1"
+    now_utc = datetime.now(timezone.utc)
     
     # 1. Validate Public API Key against PostgreSQL
-    await validate_api_key(x_cortex_public_key, event.site_id, db)
+    api_key_record = await validate_api_key(x_cortex_public_key, event.site_id, db)
 
-    # 2. Check Rate Limit (1000/min)
+    # 2. Derive authoritative tenant and enforce tenant isolation
+    auth_tenant = api_key_record.tenant_id if api_key_record else event.tenant_id
+    if api_key_record and event.tenant_id and event.tenant_id != api_key_record.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Tenant mismatch: supplied '{event.tenant_id}' does not match credential tenant '{api_key_record.tenant_id}'."
+        )
+
+    # 3. Check Rate Limit (1000/min)
     rate_key = f"{x_cortex_public_key or client_ip}:{event.site_id}"
     await check_redis_rate_limit(redis_client, rate_key)
 
-    # 3. Server-side context enrichment
+    # 4. Deduplicate event IDs within tenant
+    await dedupe_store.claim(auth_tenant, event.event_id)
+
+    # 5. Server-side context enrichment
     enriched_data = dict(event.data)
     enriched_data["_server"] = {
         "client_ip": client_ip,
         "user_agent": request.headers.get("user-agent"),
-        "received_at": datetime.utcnow().isoformat(),
+        "received_at": now_utc.isoformat(),
         "public_key_present": bool(x_cortex_public_key)
     }
 
-    # 4. Persist to PostgreSQL
+    # 6. Persist to PostgreSQL (FAIL-CLOSED: if DB fails, request fails)
     try:
         db_event = EventModel(
             id=event.event_id,
-            tenant_id=event.tenant_id,
+            tenant_id=auth_tenant,
             site_id=event.site_id,
             session_id=event.session_id,
             type=event.type,
@@ -116,7 +145,7 @@ async def ingest_event(
             data=enriched_data,
             consent=event.consent,
             trace_id=event.trace_id,
-            server_received_at=datetime.utcnow(),
+            server_received_at=now_utc,
             client_ip=client_ip,
             user_agent=request.headers.get("user-agent")
         )
@@ -124,11 +153,19 @@ async def ingest_event(
         await db.commit()
     except Exception as exc:
         await db.rollback()
-        logger.error(f"Failed to persist event {event.event_id} to PostgreSQL: {exc}")
+        if settings.app_env == "production":
+            logger.error(f"Failed to persist event {event.event_id} to PostgreSQL in production: {exc}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to durably commit event {event.event_id} to store: {exc}"
+            )
+        else:
+            logger.warning(f"Failed to persist event {event.event_id} to PostgreSQL (dev/test offline mode): {exc}")
 
-    # 5. Dispatch event to Redis Stream
+    # 7. Dispatch event to Redis Stream (with outbox / logging fail-safe)
     try:
         event_wire_payload = event.model_dump(mode="json")
+        event_wire_payload["tenant_id"] = auth_tenant
         event_wire_payload["data"] = enriched_data
         await redis_client.xadd(
             settings.redis_event_stream,
@@ -140,7 +177,7 @@ async def ingest_event(
     return IngestEventResponse(
         status="accepted",
         event_id=event.event_id,
-        processed_at=datetime.utcnow()
+        processed_at=now_utc
     )
 
 
@@ -162,19 +199,29 @@ async def ingest_event_batch(
         return []
 
     client_ip = request.client.host if request.client else "127.0.0.1"
+    now_utc = datetime.now(timezone.utc)
     site_id = events[0].site_id
-    await validate_api_key(x_cortex_public_key, site_id, db)
+    api_key_record = await validate_api_key(x_cortex_public_key, site_id, db)
 
     rate_key = f"{x_cortex_public_key or client_ip}:{site_id}"
     await check_redis_rate_limit(redis_client, rate_key)
 
     responses: List[IngestEventResponse] = []
     for event in events:
+        auth_tenant = api_key_record.tenant_id if api_key_record else event.tenant_id
+        if api_key_record and event.tenant_id and event.tenant_id != api_key_record.tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Batch tenant mismatch for event {event.event_id}."
+            )
+
+        await dedupe_store.claim(auth_tenant, event.event_id)
+
         enriched_data = dict(event.data)
         enriched_data["_server"] = {
             "client_ip": client_ip,
             "user_agent": request.headers.get("user-agent"),
-            "received_at": datetime.utcnow().isoformat(),
+            "received_at": now_utc.isoformat(),
             "public_key_present": bool(x_cortex_public_key),
             "batch": True,
         }
@@ -182,7 +229,7 @@ async def ingest_event_batch(
         try:
             db_event = EventModel(
                 id=event.event_id,
-                tenant_id=event.tenant_id,
+                tenant_id=auth_tenant,
                 site_id=event.site_id,
                 session_id=event.session_id,
                 type=event.type,
@@ -193,7 +240,7 @@ async def ingest_event_batch(
                 data=enriched_data,
                 consent=event.consent,
                 trace_id=event.trace_id,
-                server_received_at=datetime.utcnow(),
+                server_received_at=now_utc,
                 client_ip=client_ip,
                 user_agent=request.headers.get("user-agent")
             )
@@ -203,6 +250,7 @@ async def ingest_event_batch(
 
         try:
             event_wire_payload = event.model_dump(mode="json")
+            event_wire_payload["tenant_id"] = auth_tenant
             event_wire_payload["data"] = enriched_data
             await redis_client.xadd(
                 settings.redis_event_stream,
@@ -214,7 +262,7 @@ async def ingest_event_batch(
         responses.append(IngestEventResponse(
             status="accepted",
             event_id=event.event_id,
-            processed_at=datetime.utcnow()
+            processed_at=now_utc
         ))
 
     try:
@@ -222,6 +270,10 @@ async def ingest_event_batch(
     except Exception as exc:
         await db.rollback()
         logger.error(f"Failed to commit batch of {len(events)} events: {exc}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to durably commit batch to store: {exc}"
+        )
 
     return responses
 
@@ -233,11 +285,13 @@ async def query_events(
     actor_id: Optional[str] = None,
     session_id: Optional[str] = None,
     limit: int = 50,
+    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
     db: AsyncSession = Depends(get_db_session)
 ):
-    """Query recent events from the event store with filters."""
+    """Query recent events from the event store scoped strictly to the authenticated tenant."""
     limit = min(limit, 200)
-    stmt = select(EventModel)
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(EventModel).where(EventModel.tenant_id == tenant_id)
     conditions = []
 
     if site_id:
