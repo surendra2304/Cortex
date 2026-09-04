@@ -392,14 +392,14 @@ async def export_audit_log(
     tenant_id = auth.get("tenant_id", "tenant_default")
     records = []
     try:
-        stmt = select(AuditRecordModel).where(AuditRecordModel.tenant_id == tenant_id).order_by(desc(AuditRecordModel.created_at)).limit(100)
+        stmt = select(AuditRecordModel).where(AuditRecordModel.tenant_id == tenant_id).order_by(desc(AuditRecordModel.timestamp)).limit(100)
         res = await db.execute(stmt)
         for r in res.scalars().all():
             records.append({
                 "action": r.action,
                 "actor": r.actor_id,
-                "timestamp": r.created_at.isoformat() if r.created_at else datetime.now(timezone.utc).isoformat(),
-                "details": redact(r.details or {})
+                "timestamp": r.timestamp.isoformat() if r.timestamp else datetime.now(timezone.utc).isoformat(),
+                "changes": redact(r.changes or {})
             })
     except Exception as exc:
         logger.warning(f"Failed to query audit records: {exc}")
