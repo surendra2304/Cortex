@@ -1,5 +1,8 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer, Index
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer, Index, JSON
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+# Universal JSON type: compiles to native JSONB on PostgreSQL and JSON on SQLite
+JSONB = JSON().with_variant(PG_JSONB, "postgresql")
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from cortex_api.config import Base
