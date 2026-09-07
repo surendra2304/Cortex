@@ -2,8 +2,7 @@
 
 import React, { useState } from "react";
 import useSWR from "swr";
-import { fetcher } from "@/lib/api";
-import axios from "axios";
+import { fetcher, apiClient } from "@/lib/api";
 
 export default function AnalyticsPage() {
   const [nlQuery, setNlQuery] = useState("What's the top traffic source by conversion rate?");
@@ -15,11 +14,11 @@ export default function AnalyticsPage() {
     if (!nlQuery.trim()) return;
     setIsQuerying(true);
     try {
-      const res = await axios.post("http://localhost:8000/v1/analytics/query", { question: nlQuery });
+      const res = await apiClient.post("/v1/analytics/query", { question: nlQuery });
       setNlResult(res.data);
     } catch {
       setNlResult({
-        answer_summary: "Unable to reach the analytics query endpoint. Please ensure the CORTEX API is running on localhost:8000.",
+        answer_summary: "Unable to reach the analytics query endpoint. Please ensure the CORTEX API is running.",
         sql_translation: "SELECT * FROM events LIMIT 10;",
         data: []
       });

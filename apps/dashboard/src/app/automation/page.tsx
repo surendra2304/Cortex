@@ -15,7 +15,7 @@ export default function AutomationPage() {
 
   const handleDecision = async (actionId: string, decision: "approve" | "reject") => {
     try {
-      const res = await fetch(`http://localhost:8000/v1/actions/${actionId}/${decision}`, {
+      const res = await fetch(`/v1/actions/${actionId}/${decision}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ operator_id: "operator_alex", reason: decision === "approve" ? "Approved in dashboard" : "Rejected by operator" })

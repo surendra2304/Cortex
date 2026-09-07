@@ -1,4 +1,18 @@
 # Multi-stage Dockerfile for CORTEX Operations Platform
+
+# Stage 1: Build Next.js Dashboard static export
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /build
+
+COPY apps/dashboard/package.json ./apps/dashboard/
+COPY package.json package-lock.json ./
+RUN npm install --workspace=apps/dashboard
+
+COPY apps/dashboard ./apps/dashboard
+RUN npm run build --workspace=@cortex/dashboard
+
+# Stage 2: Build Python virtual environment
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
@@ -11,6 +25,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel && pip install --no-cache-dir -r requirements.txt
 
+# Stage 3: Production Runner
 FROM python:3.11-slim AS runner
 
 WORKDIR /app
@@ -27,10 +42,12 @@ RUN mkdir -p /app/data
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 COPY infra/ ./infra/
+COPY --from=dashboard-builder /build/apps/dashboard/out ./apps/dashboard/out
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["sh", "-c", "uvicorn nexus_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn cortex_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+

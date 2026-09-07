@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const handleOnboard = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const res = await fetch("http://localhost:8000/v1/tenants", {
+      const res = await fetch("/v1/tenants", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tenant_name: onboardName, admin_email: onboardEmail, plan: "pro" })

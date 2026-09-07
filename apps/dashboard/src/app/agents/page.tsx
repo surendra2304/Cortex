@@ -11,7 +11,9 @@ export default function AgentsPage() {
 
   useEffect(() => {
     try {
-      const ws = new WebSocket("ws://localhost:8000/ws/v1/live?token=dev_operator");
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      const wsUrl = `${proto}//${window.location.host}/ws/v1/live?token=dev_operator`;
+      const ws = new WebSocket(wsUrl);
       wsRef.current = ws;
 
       ws.onopen = () => {

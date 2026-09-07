@@ -35,7 +35,7 @@ export default function GovernancePage() {
 
   const handleExport = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/v1/privacy/export/${exportVid}`, { method: "POST" });
+      const res = await fetch(`/v1/privacy/export/${exportVid}`, { method: "POST" });
       const json = await res.json();
       setPrivacyOutput(json);
     } catch {
@@ -45,7 +45,7 @@ export default function GovernancePage() {
 
   const handleDelete = async () => {
     try {
-      const res = await fetch(`http://localhost:8000/v1/privacy/delete/${exportVid}`, { method: "POST" });
+      const res = await fetch(`/v1/privacy/delete/${exportVid}`, { method: "POST" });
       const json = await res.json();
       setPrivacyOutput(json);
     } catch {
