@@ -8,7 +8,10 @@ import os
 
 from cortex_api.landing_page import FALLBACK_WEBSITE_HTML
 
-# Add local packages to sys.path
+# Add local packages and repo root to sys.path
+_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../.."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/core/src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/event_schema/src")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../packages/agents/src")))

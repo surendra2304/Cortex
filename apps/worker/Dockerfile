@@ -19,7 +19,7 @@ WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
     PATH="/root/.local/bin:$PATH" \
-    PYTHONPATH="/app/apps/api/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src"
+    PYTHONPATH="/app:/app/apps/api/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src"
 
 COPY --from=builder /root/.local /root/.local
 
@@ -27,5 +27,6 @@ COPY pyproject.toml .
 COPY packages/ ./packages/
 COPY apps/ ./apps/
 COPY infra/ ./infra/
+COPY cortex_upgrade/ ./cortex_upgrade/
 
-CMD ["python", "-m", "nexus_worker.main"]
+CMD ["python", "-m", "cortex_worker.main"]
