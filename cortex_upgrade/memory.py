@@ -39,6 +39,20 @@ class ScopedMemory:
         record = Memory(self._id(tenant_id, text), tenant_id, user_id, agent_id, run_id, text, category, importance, expiry, metadata or {})
         async with self._lock:
             self._rows[record.memory_id] = record
+
+        # Forward persistent memory to Memora Knowledge Fabric
+        try:
+            from cortex_upgrade.memora_client import memora_client
+            memora_client.record_fact(
+                agent_name="cortex",
+                fact_text=text,
+                category=category,
+                importance=importance,
+                entities=[category, tenant_id]
+            )
+        except Exception:
+            pass
+
         return record
 
     async def search(self, tenant_id: str, query: str, *, user_id: str | None = None,
