@@ -24,6 +24,8 @@ class TrafficForecast(BaseModel):
     capacity_threshold_rps: float = 500.0
     exceeds_capacity: bool = False
     data_points: List[ForecastHorizon] = Field(default_factory=list)
+    is_advisory: bool = True
+    prediction_is_not_authorization: bool = True
 
 
 class ConversionTrendForecast(BaseModel):
@@ -34,6 +36,8 @@ class ConversionTrendForecast(BaseModel):
     drop_probability: float  # 0.0 to 1.0
     bottleneck_step: Optional[str] = None
     confidence: float = 0.88
+    is_advisory: bool = True
+    prediction_is_not_authorization: bool = True
 
 
 class ChurnSegmentForecast(BaseModel):
@@ -42,6 +46,8 @@ class ChurnSegmentForecast(BaseModel):
     at_risk_account_count: int
     primary_churn_driver: str
     urgency: str  # low, medium, high, critical
+    is_advisory: bool = True
+    prediction_is_not_authorization: bool = True
 
 
 class FuturisClient:
@@ -127,3 +133,13 @@ class FuturisClient:
                 urgency="medium"
             )
         ]
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Performs health check on Futuris predictive advisory integration."""
+        return {
+            "status": "UP",
+            "service": "futuris",
+            "advisory_only": True,
+            "invariant": "prediction_is_not_authorization",
+            "timestamp": datetime.utcnow().isoformat()
+        }

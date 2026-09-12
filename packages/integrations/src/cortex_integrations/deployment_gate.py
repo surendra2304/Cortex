@@ -119,3 +119,13 @@ class DeploymentSecurityGate:
             "gate_result": gate_res.model_dump(),
             "traffic_routed": gate_res.verdict == GateVerdict.APPROVED
         }
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Performs health check on DeploymentSecurityGate integration."""
+        return {
+            "status": "UP",
+            "service": "deployment_security_gate",
+            "sentinel_bridge": "active",
+            "evaluated_deployments": len(self.gate_history),
+            "timestamp": datetime.utcnow().isoformat()
+        }

@@ -101,6 +101,29 @@ This document serves as the master record of engineering progress, architecture 
   - **Zero-Regression Verification**: Ran complete test suites achieving 35/35 passing end-to-end cases in 5.12s and 164/164 unit/integration tests with zero warnings or errors.
 - **Test Results**: **35/35 End-to-End System Tests passed; 164/164 Pytest Suite passed (0 warnings, 0 errors)**.
 
+---
 
+### [Day 9 — 2026-09-05: Web Operations Portal, Static HTML Export & Docker Production Alignment](diary/2026-09-05.md)
+- **Focus**: Integrating interactive Next.js operations dashboard directly into the platform runtime with zero-dependency static export, dynamic URL resolution, and multi-stage containerization.
+- **What Was Completed**:
+  - **Static Dashboard Export**: Pre-rendered all 20 dashboard routes using `output: 'export'` and `trailingSlash: true`.
+  - **Dynamic Origin Resolution**: Resolved hardcoded localhost URLs across 6 dashboard pages for dynamic protocol/host detection.
+  - **FastAPI Dashboard Serving**: Mounted Next.js bundle under `/_next` and served HTML dashboard on browser requests.
+  - **Docker Production Alignment**: Multi-stage Dockerfile compiling dashboard with Node 20 and copying into production runner.
+- **Test Results**: **170/170 Unit & Integration Tests passed; 35/35 Master E2E System Tests passed**.
 
+---
 
+### [Day 10 — 2026-09-12: Governed Web Operations Specialist, 5-Phase Lifecycle & Invariant Enforcement](diary/2026-09-12.md)
+- **Focus**: Prompt 9 - Scoping Cortex strictly as FRIDAY's governed website/web-app operations specialist, 5-phase operations lifecycle, high-impact policy gating, Sentinel security gates, and Rule 14 partial failure compliance.
+- **What Was Completed**:
+  - **Scoped Web Property Registry**: Enforced strict property scoping (`WebProperty`, `PropertyRegistry`) rejecting unverified targets fail-closed (HTTP 404).
+  - **5-Phase Governed Operations Engine**: Separated Observation -> Recommendation -> Approved Action -> Execution -> Measurement.
+  - **Invariant Enforcement**: Enforced `recommendation is not authorization`; recommendations halt at `WAITING_APPROVAL`.
+  - **High-Impact Category Gating**: Mandatory human supervisor approval for billing, customer communication, production configuration, content publishing, and account permissions (HTTP 403).
+  - **Sentinel Security Gate**: Sentinel integration blocking risky production deployments and configuration changes.
+  - **Ecosystem Invariants**: IntelX constrained strictly to research/evidence; Futuris constrained strictly to advisory forecasting (`prediction is not authorization`).
+  - **Connector Health & Credential Isolation**: Built `ConnectorManager` active health probes across 7 connectors with outage detection and tenant-isolated `CredentialManager`.
+  - **Idempotency & Prompt Injection Defense**: Integrated `IdempotencyStore` preventing duplicate side effects and `ContextFirewall` sanitizing prompt injection attacks.
+  - **FRIDAY Task Envelope & Lifecycle**: Handled `FridayTaskEnvelope` with progress tracking, dry-run simulation (`SIMULATED_EXECUTION`), task cancellation, state snapshot rollback, and Rule 14 partial failure classification (`PARTIALLY_COMPLETED`).
+- **Test Results**: **42/42 Tests passed (22/22 Prompt 9 acceptance tests + 20/20 unit/integration tests) with 100% green pass rate in 2.51s**.

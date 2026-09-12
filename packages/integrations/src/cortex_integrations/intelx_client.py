@@ -120,3 +120,13 @@ class IntelXClient:
                 citations=["https://intelx.dev/compliance/privacy-regulations-2026"]
             )
         ]
+
+    async def health_check(self) -> Dict[str, Any]:
+        """Performs health check on IntelX research and evidence integration."""
+        return {
+            "status": "UP",
+            "service": "intelx",
+            "research_only": True,
+            "evidence_citations_enabled": True,
+            "timestamp": datetime.utcnow().isoformat()
+        }

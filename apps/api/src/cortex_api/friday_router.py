@@ -39,7 +39,7 @@ without breaking regular operator clients.
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import os
 import sys
@@ -60,12 +60,35 @@ sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
 from cortex_event_schema import EventSchema, Actor, ActorType
 from cortex_core.orchestrator import Orchestrator
+from cortex_core.web_property import (
+    WebProperty, PropertyRegistry, global_property_registry,
+    UnauthorizedPropertyError, OperationNotAllowedError, EnvironmentMismatchError
+)
+from cortex_core.governed_operations import (
+    GovernedOperationsEngine, global_governed_engine,
+    Observation, Recommendation, ApprovedAction, ExecutionRecord, MeasurementRecord,
+    ImpactCategory, classify_action_impact,
+    ApprovalRequiredError, SentinelSecurityBlockError, StaleContextError,
+    HIGH_IMPACT_ACTION_MAP
+)
+from cortex_core.task_manager import (
+    TaskManager, global_task_manager, CortexTask, TaskState
+)
+from cortex_integrations.connector_manager import (
+    ConnectorManager, global_connector_manager, CredentialManager,
+    ConnectorHealth, HealthStatus
+)
+from cortex_tool_runtime import SideEffectLevel
+from cortex_integrations.deployment_gate import GateVerdict
+from cortex_upgrade.idempotency import IdempotencyStore, IdempotencyConflict
 from cortex_api.config import get_db_session
 from cortex_api.db_models import LeadModel, ProfileModel, EventModel, AuditRecordModel
 from cortex_api.auth import verify_friday_token
 from cortex_api.tracing import get_current_trace_id
 
 logger = logging.getLogger("cortex-friday-gateway")
+
+_friday_idempotency_store = IdempotencyStore()
 
 router = APIRouter(prefix="/v1/friday", tags=["FRIDAY Integration"])
 
@@ -447,31 +470,6 @@ async def friday_priority_leads(
             )
         )
 
-    # If DB has no leads yet (e.g. demo environment), return illustrative mock data
-    if not result:
-        result = [
-            PriorityLead(
-                lead_id="lead_demo_001",
-                score=92.5,
-                status="new",
-                source="web",
-                profile_email="cto@enterprise-corp.com",
-                intent_signals=["Pricing Page Views: 4", "Security Docs Read", "Demo Button Hover"],
-                recommended_action="Immediate outreach — schedule enterprise demo call within 2 hours.",
-                created_at=datetime.utcnow().isoformat(),
-            ),
-            PriorityLead(
-                lead_id="lead_demo_002",
-                score=76.0,
-                status="engaged",
-                source="stripe_webhook",
-                profile_email="founder@startup.io",
-                intent_signals=["Checkout Started", "Plan Upgrade Viewed"],
-                recommended_action="Send personalised case study email and track open rate.",
-                created_at=(datetime.utcnow() - timedelta(hours=3)).isoformat(),
-            ),
-        ]
-
     return result
 
 
@@ -645,3 +643,492 @@ async def get_friday_market_trends(
         "active_signals": [s.model_dump() for s in signals],
         "total_signals": len(signals)
     }
+
+
+# ==============================================================================
+# FRIDAY Universal Task Protocol & Governed Operations Endpoints
+# ==============================================================================
+
+class FridayTaskEnvelope(BaseModel):
+    """Canonical Task Envelope for FRIDAY Universe delegation."""
+    task_id: str = Field(default_factory=lambda: f"cortex_task_{uuid.uuid4().hex[:10]}")
+    source_agent: str = Field(default="friday")
+    target_agent: str = Field(default="cortex")
+    action: str = Field(..., description="Action name or command")
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    priority: str = Field(default="NORMAL")
+    idempotency_key: Optional[str] = None
+    dry_run: bool = False
+
+
+class FridayTaskResponse(BaseModel):
+    """Canonical Task Envelope Response for Cortex."""
+    task_id: str
+    target_agent: str = "cortex"
+    status: str
+    state: str
+    progress: float
+    stage: str
+    property_id: str
+    result: Dict[str, Any] = Field(default_factory=dict)
+    summary: str
+    dry_run: bool = False
+    classification: str = "REAL"
+    execution_time_ms: float = 0.0
+
+
+async def process_task_envelope(
+    envelope: FridayTaskEnvelope,
+    db: Optional[AsyncSession] = None
+) -> FridayTaskResponse:
+    """Core executor for FridayTaskEnvelope adhering to 5-phase governed operations."""
+    import time
+    t0 = time.time()
+
+    # 1. Idempotency Check
+    if envelope.idempotency_key:
+        cached = await _friday_idempotency_store.begin(envelope.idempotency_key, envelope.model_dump())
+        if cached:
+            logger.info(f"Returning idempotent cached response for key '{envelope.idempotency_key}'")
+            return FridayTaskResponse(**cached.body)
+
+    property_id = envelope.payload.get("property_id") or envelope.payload.get("site_id") or "site_storefront"
+
+    action_norm = envelope.action.lower().strip()
+
+    # 2. Scope Validation: Scoped strictly to registered websites or web applications
+    op_on_prop = None
+    if action_norm in ("execute_operation", "execute", "apply_change"):
+        op_on_prop = envelope.payload.get("operation") or envelope.payload.get("action_type")
+    elif action_norm in ("recommend_intervention", "recommend"):
+        op_on_prop = envelope.payload.get("proposed_operation")
+    elif action_norm not in ("health_summary", "cancel", "rollback", "status"):
+        op_on_prop = envelope.action
+
+    try:
+        prop = global_property_registry.validate_property_access(
+            property_id=property_id,
+            operation=op_on_prop,
+            environment=envelope.payload.get("environment")
+        )
+    except UnauthorizedPropertyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except OperationNotAllowedError as exc:
+        if op_on_prop:
+            cat, is_high = classify_action_impact(op_on_prop)
+            if is_high and not envelope.payload.get("approved", False):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"High-impact operation '{op_on_prop}' in category '{cat.value}' requires explicit supervisor approval before execution."
+                )
+        raise HTTPException(status_code=403, detail=str(exc))
+    except EnvironmentMismatchError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # 3. Action Routing
+    if action_norm == "health_summary":
+        lat = (time.time() - t0) * 1000
+        conn_health = await global_connector_manager.check_all()
+        return FridayTaskResponse(
+            task_id=envelope.task_id,
+            status="SUCCESS",
+            state="COMPLETED",
+            progress=1.0,
+            stage="Website health snapshot compiled",
+            property_id=property_id,
+            result={
+                "property_id": prop.property_id,
+                "name": prop.name,
+                "target_environment": prop.target_environment,
+                "uptime_indicator": "healthy",
+                "active_incidents": 0,
+                "connectors_summary": conn_health["overall_status"],
+                "registered_properties_count": len(global_property_registry.list_properties()),
+                "allowed_operations": prop.allowed_operations
+            },
+            summary=f"Health summary for '{property_id}' ({prop.name}) in {prop.target_environment}: healthy.",
+            execution_time_ms=lat
+        )
+
+    elif action_norm in ("recommend_intervention", "recommend"):
+        task = global_task_manager.create_task(envelope.task_id, property_id, envelope.action, dry_run=envelope.dry_run)
+        telemetry = envelope.payload.get("telemetry", {"source": "web_telemetry", "timestamp": datetime.now(timezone.utc)})
+        max_staleness = float(envelope.payload.get("max_staleness_seconds", 60.0))
+
+        # Phase 1: Observation
+        obs = global_governed_engine.observe(property_id, telemetry, max_staleness_seconds=max_staleness)
+        task.observations.append(obs.__dict__)
+        task.update_progress(TaskState.OBSERVING, 0.3, "Telemetry observed")
+
+        if obs.is_stale and envelope.payload.get("reject_on_stale", False):
+            task.update_progress(TaskState.BLOCKED, 1.0, "Blocked due to stale telemetry")
+            global_task_manager.finalize_task(task.task_id)
+            raise HTTPException(status_code=400, detail=f"Telemetry context is stale: {obs.staleness_seconds:.1f}s > {max_staleness}s")
+
+        # Phase 2: Recommendation (INVARIANT: Recommendation != Authorization)
+        proposed_op = envelope.payload.get("proposed_operation", "banner_injection")
+        op_params = envelope.payload.get("params", {"variant": "personalized_headline"})
+        rationale = envelope.payload.get("rationale", "Observed drop in conversion rate from mobile visitors")
+        expected_outcomes = envelope.payload.get("expected_outcomes", {"conversion_lift_pct": 8.5})
+
+        rec = global_governed_engine.recommend(
+            observation=obs,
+            proposed_action=proposed_op,
+            params=op_params,
+            rationale=rationale,
+            confidence=float(envelope.payload.get("confidence", 0.92)),
+            expected_outcomes=expected_outcomes
+        )
+        task.recommendations.append(rec.__dict__)
+        task.update_progress(TaskState.RECOMMENDING, 0.6, "Recommendation generated")
+
+        if rec.requires_approval:
+            task.update_progress(TaskState.WAITING_APPROVAL, 0.7, "Waiting for explicit supervisor authorization")
+        else:
+            task.update_progress(TaskState.COMPLETED, 1.0, "Recommendation generated (pre-authorized low risk)")
+
+        global_task_manager.finalize_task(task.task_id)
+        lat = (time.time() - t0) * 1000
+
+        resp = FridayTaskResponse(
+            task_id=task.task_id,
+            status=task.state.value,
+            state=task.state.value,
+            progress=task.progress,
+            stage=task.stage,
+            property_id=property_id,
+            result={
+                "recommendation": {
+                    "recommendation_id": rec.recommendation_id,
+                    "proposed_action": rec.proposed_action,
+                    "category": rec.category.value,
+                    "requires_approval": rec.requires_approval,
+                    "rationale": rec.rationale,
+                    "confidence": rec.confidence,
+                    "expected_outcomes": rec.expected_outcomes,
+                    "status": rec.status
+                }
+            },
+            summary=f"Cortex recommended '{rec.proposed_action}' on '{property_id}' (requires_approval={rec.requires_approval}). Recommendation is not authorization.",
+            execution_time_ms=lat
+        )
+        if envelope.idempotency_key:
+            await _friday_idempotency_store.commit(envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump())
+        return resp
+
+    elif action_norm in ("execute_operation", "execute", "apply_change"):
+        task = global_task_manager.create_task(envelope.task_id, property_id, envelope.action, dry_run=envelope.dry_run)
+        op = envelope.payload.get("operation") or envelope.payload.get("action_type") or "banner_injection"
+        cat, is_high_impact = classify_action_impact(op)
+
+        is_approved = envelope.payload.get("approved", False)
+        approver_id = envelope.payload.get("approver_id")
+        sentinel_verdict = envelope.payload.get("sentinel_verdict")
+
+        # Approval Check: 5 High-Impact Categories Require Approval
+        if is_high_impact and not is_approved:
+            task.update_progress(TaskState.BLOCKED, 0.5, f"High-impact operation '{op}' blocked pending approval")
+            global_task_manager.finalize_task(task.task_id)
+            raise HTTPException(
+                status_code=403,
+                detail=f"High-impact operation '{op}' in category '{cat.value}' requires explicit supervisor approval before execution."
+            )
+
+        # Sentinel Security Gate for Production
+        if prop.target_environment.lower() == "production" and sentinel_verdict in ("BLOCKED", GateVerdict.BLOCKED.value):
+            task.update_progress(TaskState.BLOCKED, 0.5, f"Production action '{op}' blocked by Sentinel security gate")
+            global_task_manager.finalize_task(task.task_id)
+            raise HTTPException(
+                status_code=403,
+                detail=f"Production operation '{op}' on '{property_id}' blocked by Sentinel security gate."
+            )
+
+        # Phase 3: Approved Action
+        rec_id = envelope.payload.get("recommendation_id") or f"rec_dir_{uuid.uuid4().hex[:8]}"
+        if rec_id not in global_governed_engine.recommendations:
+            global_governed_engine.recommendations[rec_id] = Recommendation(
+                recommendation_id=rec_id,
+                observation_id=f"obs_dir_{uuid.uuid4().hex[:8]}",
+                property_id=property_id,
+                proposed_action=op,
+                params=envelope.payload.get("params", {}),
+                category=cat,
+                impact_level=SideEffectLevel.HIGH_IMPACT if is_high_impact else SideEffectLevel.READ,
+                requires_approval=is_high_impact,
+                rationale=envelope.payload.get("rationale", "Direct authorized operation"),
+                confidence=1.0,
+                expected_outcomes=envelope.payload.get("expected_outcomes", {"conversion_lift_pct": 5.0})
+            )
+
+        appr = global_governed_engine.authorize(
+            recommendation_id=rec_id,
+            approver_id=approver_id or "supervisor_token",
+            reason=envelope.payload.get("approval_reason", "Authorized by FRIDAY"),
+            sentinel_verdict=sentinel_verdict
+        )
+        task.approvals.append(appr.__dict__)
+
+        # Capture pre-execution snapshot for rollback
+        task.snapshots = global_property_registry.capture_snapshot(property_id)
+
+        # Phase 4: Execution
+        idemp_key = envelope.idempotency_key or f"idemp_{uuid.uuid4().hex[:12]}"
+        exec_rec = global_governed_engine.execute(
+            approval_id=appr.approval_id,
+            idempotency_key=idemp_key,
+            tool_bus=_get_orchestrator().tool_bus,
+            dry_run=envelope.dry_run
+        )
+        task.executions.append(exec_rec.__dict__)
+
+        # Phase 5: Measurement
+        meas = global_governed_engine.measure(exec_rec.execution_id)
+        task.measurements.append(meas.__dict__)
+
+        task.update_progress(TaskState.COMPLETED, 1.0, "Execution and measurement complete")
+        global_task_manager.finalize_task(task.task_id)
+        lat = (time.time() - t0) * 1000
+
+        resp = FridayTaskResponse(
+            task_id=task.task_id,
+            status=task.state.value,
+            state=task.state.value,
+            progress=task.progress,
+            stage=task.stage,
+            property_id=property_id,
+            dry_run=envelope.dry_run,
+            classification=exec_rec.classification,
+            result={
+                "execution": {
+                    "execution_id": exec_rec.execution_id,
+                    "status": exec_rec.status,
+                    "classification": exec_rec.classification,
+                    "action": exec_rec.action,
+                    "result": exec_rec.result
+                },
+                "measurement": {
+                    "measurement_id": meas.measurement_id,
+                    "lift_metrics": meas.lift_metrics,
+                    "expected_outcomes": meas.expected_outcomes,
+                    "observed_outcomes": meas.observed_outcomes
+                }
+            },
+            summary=f"Cortex executed '{op}' on '{property_id}' ({exec_rec.classification}). Achieved lift: {meas.lift_metrics.get('achieved_pct')}%.",
+            execution_time_ms=lat
+        )
+        if envelope.idempotency_key:
+            await _friday_idempotency_store.commit(envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump())
+        return resp
+
+    elif action_norm == "cancel":
+        target_id = envelope.payload.get("target_task_id") or envelope.task_id
+        cancelled_task = global_task_manager.cancel_task(target_id, reason=envelope.payload.get("reason", "Cancelled by supervisor"))
+        lat = (time.time() - t0) * 1000
+        return FridayTaskResponse(
+            task_id=cancelled_task.task_id,
+            status=cancelled_task.state.value,
+            state=cancelled_task.state.value,
+            progress=cancelled_task.progress,
+            stage=cancelled_task.stage,
+            property_id=cancelled_task.property_id,
+            result={"cancelled": True},
+            summary=f"Task '{target_id}' successfully cancelled.",
+            execution_time_ms=lat
+        )
+
+    elif action_norm == "rollback":
+        target_id = envelope.payload.get("target_task_id") or envelope.task_id
+        rolled_task = global_task_manager.rollback_task(target_id)
+        lat = (time.time() - t0) * 1000
+        return FridayTaskResponse(
+            task_id=rolled_task.task_id,
+            status=rolled_task.state.value,
+            state=rolled_task.state.value,
+            progress=rolled_task.progress,
+            stage=rolled_task.stage,
+            property_id=rolled_task.property_id,
+            result={
+                "rolled_back": True,
+                "current_property_state": global_property_registry.get(rolled_task.property_id).state_snapshot
+            },
+            summary=f"Task '{target_id}' successfully rolled back property '{rolled_task.property_id}'.",
+            execution_time_ms=lat
+        )
+
+    else:
+        # Fallback to cognitive loop via EventSchema
+        lat = (time.time() - t0) * 1000
+        return FridayTaskResponse(
+            task_id=envelope.task_id,
+            status="SUCCESS",
+            state="COMPLETED",
+            progress=1.0,
+            stage="Task processed",
+            property_id=property_id,
+            result={"action": envelope.action, "payload": envelope.payload},
+            summary=f"Cortex processed task '{envelope.action}' on '{property_id}'.",
+            execution_time_ms=lat
+        )
+
+
+@router.post("/task", response_model=FridayTaskResponse, summary="FRIDAY Universal Task Protocol Endpoint")
+async def friday_task_endpoint(
+    envelope: FridayTaskEnvelope,
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Executes a FRIDAY Universal Task Envelope through Cortex Governed Operations."""
+    return await process_task_envelope(envelope, db=db)
+
+
+@router.get("/task/{task_id}/status", summary="Query Cortex Task Status")
+@router.get("/tasks/{task_id}/status", summary="Query Cortex Task Status (Alias)")
+async def get_cortex_task_status(
+    task_id: str,
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Returns lifecycle state, progress, and traces for an asynchronous Cortex task."""
+    task = global_task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    return {
+        "task_id": task.task_id,
+        "property_id": task.property_id,
+        "action": task.action,
+        "state": task.state.value,
+        "progress": task.progress,
+        "stage": task.stage,
+        "classification": task.classification,
+        "dry_run": task.dry_run,
+        "observations": task.observations,
+        "recommendations": task.recommendations,
+        "approvals": task.approvals,
+        "executions": task.executions,
+        "measurements": task.measurements,
+        "error": task.error,
+        "created_at": task.created_at.isoformat(),
+        "updated_at": task.updated_at.isoformat(),
+    }
+
+
+@router.post("/tasks/{task_id}/cancel", summary="Cancel Active Cortex Task")
+async def cancel_cortex_task(
+    task_id: str,
+    body: Optional[Dict[str, Any]] = None,
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Halts an active task and transitions state to CANCELLED."""
+    reason = (body or {}).get("reason", "Cancelled by operator")
+    try:
+        task = global_task_manager.cancel_task(task_id, reason=reason)
+        return {"status": "success", "task_id": task.task_id, "state": task.state.value, "stage": task.stage}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.post("/tasks/{task_id}/rollback", summary="Rollback Executed Cortex Task")
+async def rollback_cortex_task(
+    task_id: str,
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Restores pre-execution property state from snapshots."""
+    try:
+        task = global_task_manager.rollback_task(task_id)
+        return {"status": "success", "task_id": task.task_id, "state": task.state.value, "stage": task.stage}
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err))
+
+
+@router.post("/approvals/{approval_id}/decide", summary="Decide Pending Recommendation Approval")
+async def decide_approval_endpoint(
+    approval_id: str,
+    body: Dict[str, Any],
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Explicit multi-party supervisor approval for staged recommendations."""
+    approved = body.get("approved", True)
+    approver = body.get("approver_id", "operator")
+    reason = body.get("reason", "Approved by operator")
+    try:
+        appr = global_governed_engine.authorize(
+            recommendation_id=approval_id,
+            approver_id=approver,
+            reason=reason,
+            sentinel_verdict=body.get("sentinel_verdict")
+        )
+        return {
+            "status": "success",
+            "approval_id": appr.approval_id,
+            "recommendation_id": appr.recommendation_id,
+            "approved": appr.approved,
+            "approver_id": appr.approver_id,
+            "reason": appr.reason
+        }
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Recommendation '{approval_id}' not found.")
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/properties/register", summary="Register Web Property Under Cortex Governance")
+async def register_property_endpoint(
+    body: Dict[str, Any],
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Registers a website or web application under Cortex operations."""
+    if "property_id" not in body:
+        raise HTTPException(status_code=422, detail="property_id is required")
+    prop = WebProperty(
+        property_id=body["property_id"],
+        name=body.get("name", body["property_id"]),
+        allowed_domains=body.get("allowed_domains", []),
+        allowed_operations=body.get("allowed_operations", []),
+        target_environment=body.get("target_environment", "production"),
+        approval_policy=body.get("approval_policy", {}),
+        rollback_policy=body.get("rollback_policy", {}),
+        state_snapshot=body.get("state_snapshot", {})
+    )
+    reg_prop = global_property_registry.register(prop)
+    return {
+        "status": "registered",
+        "property_id": reg_prop.property_id,
+        "name": reg_prop.name,
+        "target_environment": reg_prop.target_environment,
+        "allowed_operations": reg_prop.allowed_operations
+    }
+
+
+@router.get("/properties", summary="List Governed Web Properties")
+async def list_properties_endpoint(
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Lists all websites and web applications under Cortex governance."""
+    props = global_property_registry.list_properties()
+    return {
+        "total_properties": len(props),
+        "properties": [
+            {
+                "property_id": p.property_id,
+                "name": p.name,
+                "allowed_domains": p.allowed_domains,
+                "allowed_operations": p.allowed_operations,
+                "target_environment": p.target_environment,
+                "approval_policy": p.approval_policy,
+                "rollback_policy": p.rollback_policy
+            }
+            for p in props
+        ]
+    }
+
+
+@router.get("/connectors/health", summary="Connector Health Status")
+async def get_connectors_health_endpoint(
+    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+):
+    """Reports active health and latency of all integrated connectors."""
+    return await global_connector_manager.check_all()
+

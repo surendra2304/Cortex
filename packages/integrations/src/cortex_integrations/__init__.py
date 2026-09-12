@@ -1032,3 +1032,12 @@ from .intelx_client import IntelXClient, CompetitorProfile, MarketSignal
 
 # Futuris Predictive Operations Integration
 from .futuris_client import FuturisClient, TrafficForecast, ConversionTrendForecast, ChurnSegmentForecast
+
+# Connector Health & Credential Isolation
+from .connector_manager import (
+    ConnectorManager,
+    global_connector_manager,
+    CredentialManager,
+    ConnectorHealth,
+    HealthStatus
+)

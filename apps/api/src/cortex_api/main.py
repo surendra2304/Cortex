@@ -58,6 +58,33 @@ app.include_router(understand_router)
 app.include_router(production_router)
 app.include_router(streaming_router)
 
+
+from cortex_api.friday_router import FridayTaskEnvelope, process_task_envelope
+
+
+@app.post("/v1/task/execute", tags=["Universal Task Protocol"])
+async def execute_task(body: dict):
+    """Universal Task Protocol endpoint for Cortex with governed operations."""
+    import time
+    task_id = body.get("task_id", f"cortex_{int(time.time())}")
+    action = body.get("action", "command")
+    payload = body.get("payload") if isinstance(body.get("payload"), dict) else body
+    idempotency_key = body.get("idempotency_key")
+    dry_run = body.get("dry_run", False) or payload.get("dry_run", False)
+
+    envelope = FridayTaskEnvelope(
+        task_id=task_id,
+        source_agent=body.get("source_agent", "friday"),
+        target_agent="cortex",
+        action=action,
+        payload=payload,
+        priority=body.get("priority", "NORMAL"),
+        idempotency_key=idempotency_key,
+        dry_run=dry_run
+    )
+    resp = await process_task_envelope(envelope)
+    return resp.model_dump()
+
 # Resolve Dashboard static export directory
 DASHBOARD_CANDIDATES = [
     os.getenv("DASHBOARD_DIR", ""),

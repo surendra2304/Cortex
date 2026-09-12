@@ -458,8 +458,8 @@ def test_friday_health_summary_requires_friday_auth():
 # 4. GET /v1/friday/priority_leads
 # ===========================================================================
 
-def test_friday_priority_leads_empty_db_returns_demo_data():
-    """When no leads exist, priority_leads returns illustrative demo leads."""
+def test_friday_priority_leads_empty_db_returns_empty_list():
+    """When no leads exist, priority_leads returns a real empty list (no fabricated demo data)."""
     mock_db = _mock_db_empty()
     try:
         client = _client_with_auth_and_db(mock_db)
@@ -467,17 +467,7 @@ def test_friday_priority_leads_empty_db_returns_demo_data():
 
         assert res.status_code == 200, res.text
         leads = res.json()
-        assert len(leads) >= 1
-        first = leads[0]
-        assert "lead_id" in first
-        assert "score" in first
-        assert "recommended_action" in first
-        assert "intent_signals" in first
-        assert first["score"] >= 90.0
-        assert any(
-            kw in first["recommended_action"].lower()
-            for kw in ("immediate", "enterprise", "demo")
-        )
+        assert leads == []
     finally:
         app.dependency_overrides.clear()
 
