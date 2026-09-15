@@ -1,20 +1,76 @@
-﻿services:
+services:
   - type: web
-    name: cortex
-    runtime: docker
-    dockerfilePath: ./Dockerfile
+    name: friday-cortex
+    env: docker
     plan: free
     region: singapore
+    healthCheckPath: /health
     envVars:
       - key: PORT
-        value: 8000
-      - key: APP_ENV
-        value: production
+        value: "10000"
+      - key: HOST
+        value: "0.0.0.0"
+      - key: ENVIRONMENT
+        value: "production"
+      - key: AI_UNIVERSE_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_CORTEX_API_URL
+        sync: false
+      - key: FUTURIS_URL
+        sync: false
+      - key: SENTINEL_API_KEY
+        sync: false
+      - key: INFERENCE_API_KEY
+        sync: false
+      - key: FRIDAY_API_KEY
+        sync: false
+      - key: FORGE_URL
+        sync: false
+      - key: SENTINEL_URL
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: SENDGRID_API_KEY
+        sync: false
+      - key: ZENDESK_API_TOKEN
+        sync: false
+      - key: INTELX_API_KEY
+        sync: false
+      - key: JWT_SECRET
+        sync: false
       - key: DATABASE_URL
-        value: sqlite+aiosqlite:///./data/cortex.db
-      - key: CORS_ORIGINS
-        value: "*"
-      - key: ALLOW_DEMO_BYPASS
-        value: "true"
-      - key: CORTEX_URL
-        value: https://cortex-qifr.onrender.com
+        sync: false
+      - key: HUBSPOT_API_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: MEMORA_URL
+        sync: false
+      - key: CALENDLY_API_KEY
+        sync: false
+      - key: STRATEX_URL
+        sync: false
+      - key: AI_UNIVERSE_BASE_URL
+        sync: false
+      - key: INTELX_URL
+        sync: false
+      - key: INFERENCE_URL
+        sync: false
+      - key: FRIDAY_API_URL
+        sync: false
+      - key: FORGE_API_KEY
+        sync: false
+      - key: NEXT_PUBLIC_OPERATOR_TOKEN
+        sync: false
+      - key: MEMORA_API_KEY
+        sync: false
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: FUTURIS_API_KEY
+        sync: false
+      - key: CORTEX_API_KEY
+        sync: false
+      - key: REDIS_URL
+        sync: false
+      - key: STRATEX_API_KEY
+        sync: false
