@@ -1,76 +1,57 @@
-services:
+﻿services:
   - type: web
-    name: friday-cortex
+    name: cortex
     env: docker
     plan: free
     region: singapore
     healthCheckPath: /health
     envVars:
       - key: PORT
-        value: "10000"
+        value: "8000"
       - key: HOST
         value: "0.0.0.0"
-      - key: ENVIRONMENT
+      - key: APP_ENV
         value: "production"
-      - key: AI_UNIVERSE_API_KEY
-        sync: false
-      - key: NEXT_PUBLIC_CORTEX_API_URL
-        sync: false
-      - key: FUTURIS_URL
-        sync: false
-      - key: SENTINEL_API_KEY
-        sync: false
-      - key: INFERENCE_API_KEY
-        sync: false
-      - key: FRIDAY_API_KEY
-        sync: false
-      - key: FORGE_URL
-        sync: false
-      - key: SENTINEL_URL
-        sync: false
-      - key: TWILIO_AUTH_TOKEN
-        sync: false
-      - key: SENDGRID_API_KEY
-        sync: false
-      - key: ZENDESK_API_TOKEN
-        sync: false
-      - key: INTELX_API_KEY
-        sync: false
-      - key: JWT_SECRET
-        sync: false
       - key: DATABASE_URL
-        sync: false
-      - key: HUBSPOT_API_KEY
-        sync: false
-      - key: STRIPE_WEBHOOK_SECRET
-        sync: false
-      - key: MEMORA_URL
-        sync: false
-      - key: CALENDLY_API_KEY
-        sync: false
-      - key: STRATEX_URL
-        sync: false
-      - key: AI_UNIVERSE_BASE_URL
-        sync: false
-      - key: INTELX_URL
-        sync: false
-      - key: INFERENCE_URL
-        sync: false
-      - key: FRIDAY_API_URL
-        sync: false
-      - key: FORGE_API_KEY
-        sync: false
-      - key: NEXT_PUBLIC_OPERATOR_TOKEN
-        sync: false
-      - key: MEMORA_API_KEY
-        sync: false
-      - key: STRIPE_SECRET_KEY
-        sync: false
-      - key: FUTURIS_API_KEY
-        sync: false
+        value: "sqlite+aiosqlite:///./data/cortex.db"
+      - key: POSTGRES_DSN
+        value: "sqlite+aiosqlite:///./data/cortex.db"
+      - key: MOCK_MODE
+        value: "true"
+      - key: JWT_SECRET
+        value: "cortex_production_secret_key_998877"
       - key: CORTEX_API_KEY
-        sync: false
-      - key: REDIS_URL
-        sync: false
+        value: "cortex_api"
+      # Live Mesh Interconnects
+      - key: FRIDAY_URL
+        value: "https://friday-zw59.onrender.com"
+      - key: FRIDAY_API_KEY
+        value: "friday_api"
+      - key: INFERENCE_URL
+        value: "https://inference-r1sn.onrender.com"
+      - key: INFERENCE_API_KEY
+        value: "inference_api"
+      - key: STRATEX_URL
+        value: "https://stratex-8wj1.onrender.com"
       - key: STRATEX_API_KEY
-        sync: false
+        value: "stratex_api"
+      - key: MEMORA_URL
+        value: "https://memora-cavc.onrender.com"
+      - key: MEMORA_API_KEY
+        value: "memora_api"
+      - key: INTELX_URL
+        value: "https://intelx-3cz1.onrender.com"
+      - key: INTELX_API_KEY
+        value: "intelx_api"
+      - key: FUTURIS_URL
+        value: "https://futuris-th6f.onrender.com"
+      - key: FUTURIS_API_KEY
+        value: "futuris_api"
+      - key: FORGE_URL
+        value: "http://localhost:8001"
+      - key: FORGE_API_KEY
+        value: "forge_api"
+      - key: SENTINEL_URL
+        value: "http://localhost:8003"
+      - key: SENTINEL_API_KEY
+        value: "sentinel_api"
