@@ -34,3 +34,10 @@ data/
 Thumbs.db
 .system_generated/
 workspaces/
+
+# Temp venvs created during debugging
+.venv_docker/
+
+# Runtime data
+peer_mesh_cortex_results.json
+ask_inference_from_cortex.py
