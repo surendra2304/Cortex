@@ -49,7 +49,7 @@ This document serves as the master record of engineering progress, architecture 
   - **Platform & GitHub Renaming**: Renamed repository from `surendra2304/Cortex` to `surendra2304/Cortex`, updated `origin` remotes, pyproject.toml, package.json files, and README.md.
   - **CI/CD Pipeline Stabilization**: Resolved Hatchling wheel package discovery, added `aiosqlite` dependency, fixed npm cache in monorepos, and added `packages: write` permissions.
   - **GHCR Image Publishing**: Fixed lowercase container repository tagging (`ghcr.io/surendra2304/cortex-api:latest`), verified green checks on both CI and Production pipelines.
-  - **System Manifest Documentation**: Authored `SYSTEM_MANIFEST.md` detailing live cloud URL (`https://cortex-qifr.onrender.com`), authentication, and full 9-agent ecosystem connectivity.
+  - **System Manifest Documentation**: Authored `SYSTEM_MANIFEST.md` detailing live cloud URL (`https://cortex-0m7c.onrender.com`), authentication, and full 9-agent ecosystem connectivity.
 - **Test Results**: **128 passed / 0 failed** (100% green pass rate under pytest).
 
 ---

@@ -11,8 +11,8 @@
 
 | Attribute | Production Configuration |
 | :--- | :--- |
-| **Live Production URL** | [https://cortex-qifr.onrender.com](https://cortex-qifr.onrender.com) |
-| **Health Check Endpoint** | https://cortex-qifr.onrender.com/health |
+| **Live Production URL** | [https://cortex-0m7c.onrender.com](https://cortex-0m7c.onrender.com) |
+| **Health Check Endpoint** | https://cortex-0m7c.onrender.com/health |
 | **Master API Key Variable** | CORTEX_API_KEY=cortex_api |
 | **Authentication Header** | Authorization: Bearer cortex_api / X-API-KEY: cortex_api |
 | **Database Topology** | SQLite State DB / Connected to Memora |
@@ -63,7 +63,7 @@ FUTURIS_URL=https://futuris-x4f4.onrender.com
 FUTURIS_API_KEY=futuris_api
 
 # 6. 🌐 Cortex Autonomous Web Operations & Intelligence
-CORTEX_URL=https://cortex-qifr.onrender.com
+CORTEX_URL=https://cortex-0m7c.onrender.com
 CORTEX_API_KEY=cortex_api
 
 # 7. 🛠️ Forge Local Software Engineering Engine
@@ -85,7 +85,7 @@ FRIDAY_API_KEY=friday_api
 
 When opening this directory in **Antigravity AI**:
 * **Identity:** You are working inside **Cortex** (d:\FRIDAY Universe\Cortex).
-* **Live Service:** This service is deployed live at https://cortex-qifr.onrender.com.
+* **Live Service:** This service is deployed live at https://cortex-0m7c.onrender.com.
 * **Authentication:** Incoming requests use CORTEX_API_KEY=cortex_api.
 * **Never Fake Tests:** All tests and verifications must be executed against real code and real endpoints.
 * **No Unapproved Git Pushes:** Keep modifications local unless explicitly instructed to push.
