@@ -23,3 +23,12 @@ paths = [
 for p in paths:
     if p not in sys.path:
         sys.path.insert(0, p)
+
+import pytest
+from cortex_api.main import app
+
+@pytest.fixture(autouse=True)
+def clear_dependency_overrides():
+    yield
+    app.dependency_overrides.clear()
+
