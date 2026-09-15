@@ -48,7 +48,7 @@
       - key: FUTURIS_API_KEY
         value: "futuris_api"
       - key: FORGE_URL
-        value: "http://localhost:8001"
+        value: "https://forge-u98k.onrender.com"
       - key: FORGE_API_KEY
         value: "forge_api"
       - key: SENTINEL_URL
