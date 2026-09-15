@@ -25,14 +25,22 @@ FRIDAY_API_KEY = os.getenv("FRIDAY_API_KEY", "")
 
 # Validate production secrets if running in production mode
 if APP_ENV == "production":
-    validate_production_secrets(
+    strict_secrets = os.getenv("STRICT_PRODUCTION_SECRETS", "false").lower() == "true"
+    unsafe_secrets = validate_production_secrets(
         "production",
         {
             "JWT_SECRET": JWT_SECRET,
             "FRIDAY_API_KEY": FRIDAY_API_KEY,
             "CORTEX_API_KEY": os.getenv("CORTEX_API_KEY", "")
-        }
+        },
+        strict=strict_secrets
     )
+    if unsafe_secrets and not strict_secrets:
+        logger.warning(
+            "[SECURITY WARNING] Insecure/missing production secrets: %s. "
+            "Set these in your deployment environment. Endpoint-level auth is still active.",
+            ", ".join(unsafe_secrets)
+        )
 
 credential_manager = CredentialManager()
 

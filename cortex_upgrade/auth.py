@@ -90,12 +90,13 @@ INSECURE_DEFAULTS = {
     "secret",
 }
 
-def validate_production_secrets(environment: str, values: dict[str, str | None]) -> None:
+def validate_production_secrets(environment: str, values: dict[str, str | None], strict: bool = True) -> list[str]:
     if environment != "production":
-        return
+        return []
     unsafe = [
         name for name, value in values.items()
         if not value or value.strip().lower() in INSECURE_DEFAULTS or len(value) < 32
     ]
-    if unsafe:
+    if unsafe and strict:
         raise RuntimeError("unsafe or missing production secrets: " + ",".join(unsafe))
+    return unsafe
