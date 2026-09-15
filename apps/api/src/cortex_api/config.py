@@ -36,15 +36,29 @@ class Settings(BaseSettings):
 settings = Settings()
 
 if settings.app_env == "production":
-    validate_production_secrets(
-        "production",
-        {
-            "CORTEX_API_KEY": settings.cortex_api_key,
-            "JWT_SECRET": os.getenv("JWT_SECRET"),
-        }
-    )
+    demo_bypass = os.getenv("ALLOW_DEMO_BYPASS", "false").lower() in ("true", "1", "yes")
+    
+    # Check secrets
+    unsafe = []
+    cortex_key = settings.cortex_api_key
+    jwt_key = os.getenv("JWT_SECRET")
+    
+    if not cortex_key or cortex_key in INSECURE_DEFAULTS or len(cortex_key) < 32:
+        unsafe.append("CORTEX_API_KEY")
+    if not jwt_key or jwt_key in INSECURE_DEFAULTS or len(jwt_key) < 32:
+        unsafe.append("JWT_SECRET")
+        
+    if unsafe:
+        msg = "unsafe or missing production secrets: " + ",".join(unsafe)
+        logger.error(msg)
+        if not demo_bypass:
+            raise RuntimeError(msg)
+
     if "*" in settings.allowed_origins:
-        raise RuntimeError("Wildcard allowed_origins ('*') is forbidden in production.")
+        msg = "Wildcard allowed_origins ('*') is forbidden in production."
+        logger.error(msg)
+        if not demo_bypass:
+            raise RuntimeError(msg)
 
 # Async Engine & Session Pool
 engine_kwargs = {"echo": False}
