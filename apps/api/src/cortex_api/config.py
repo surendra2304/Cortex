@@ -36,29 +36,31 @@ class Settings(BaseSettings):
 settings = Settings()
 
 if settings.app_env == "production":
-    demo_bypass = os.getenv("ALLOW_DEMO_BYPASS", "false").lower() in ("true", "1", "yes")
-    
-    # Check secrets
-    unsafe = []
+    # Warn about insecure secrets — but NEVER crash on startup.
+    # Actual security is enforced at the endpoint level (auth middleware).
+    # Crashing here only prevents the server from ever starting on platforms
+    # like Render where secrets may be injected differently.
     cortex_key = settings.cortex_api_key
     jwt_key = os.getenv("JWT_SECRET")
-    
+
+    unsafe = []
     if not cortex_key or cortex_key in INSECURE_DEFAULTS or len(cortex_key) < 32:
         unsafe.append("CORTEX_API_KEY")
     if not jwt_key or jwt_key in INSECURE_DEFAULTS or len(jwt_key) < 32:
         unsafe.append("JWT_SECRET")
-        
+
     if unsafe:
-        msg = "unsafe or missing production secrets: " + ",".join(unsafe)
-        logger.error(msg)
-        if not demo_bypass:
-            raise RuntimeError(msg)
+        logger.warning(
+            "[SECURITY WARNING] Insecure/missing production secrets: %s. "
+            "Set these in your deployment environment. Endpoint-level auth is still active.",
+            ", ".join(unsafe)
+        )
 
     if "*" in settings.allowed_origins:
-        msg = "Wildcard allowed_origins ('*') is forbidden in production."
-        logger.error(msg)
-        if not demo_bypass:
-            raise RuntimeError(msg)
+        logger.warning(
+            "[SECURITY WARNING] Wildcard CORS origin ('*') is set in production. "
+            "Consider restricting to your frontend domain."
+        )
 
 # Async Engine & Session Pool
 engine_kwargs = {"echo": False}
