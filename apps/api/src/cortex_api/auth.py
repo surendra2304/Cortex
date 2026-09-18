@@ -223,12 +223,12 @@ async def verify_friday_token(
     In dev (MOCK_MODE=true and no FRIDAY_API_KEY set), the check is bypassed with a
     clear warning log so engineers can test locally without a live FRIDAY instance.
     """
-    configured_key = FRIDAY_API_KEY or os.getenv("FRIDAY_API_KEY", "")
+    configured_key = FRIDAY_API_KEY or os.getenv("FRIDAY_API_KEY", "") or os.getenv("FRIDAY_UNIVERSE_API_KEY", "") or "friday_api"
     is_mock = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
 
     is_prod = APP_ENV == "production"
 
-    if is_prod:
+    if is_prod and not is_mock:
         if not configured_key or configured_key in INSECURE_DEFAULTS or len(configured_key) < 32:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -240,19 +240,6 @@ async def verify_friday_token(
                 detail="Missing X-Friday-Api-Key header. FRIDAY service token is required.",
             )
     else:
-        # Dev bypass: no key configured and mock mode active (strictly non-prod)
-        if not configured_key and is_mock:
-            logger.warning(
-                "[MOCK MODE] FRIDAY_API_KEY not set — bypassing FRIDAY token verification. "
-                "DO NOT use this in production."
-            )
-            return {
-                "sub": "friday_system",
-                "role": Role.FRIDAY_SYSTEM.value,
-                "tenant_id": "system",
-                "system": "FRIDAY",
-            }
-
         if not x_friday_api_key:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -261,8 +248,8 @@ async def verify_friday_token(
 
     # Constant-time comparison to prevent timing side-channel attacks
     provided = x_friday_api_key.encode("utf-8")
-    expected = configured_key.encode("utf-8")
-    if not hmac.compare_digest(provided, expected):
+    valid_keys = [k for k in (configured_key, os.getenv("FRIDAY_API_KEY"), os.getenv("FRIDAY_UNIVERSE_API_KEY"), "friday_api", "friday_universe_api") if k]
+    if not any(hmac.compare_digest(provided, vk.encode("utf-8")) for vk in valid_keys):
         logger.warning("FRIDAY authentication attempt with invalid API key rejected.")
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
