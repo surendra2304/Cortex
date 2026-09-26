@@ -136,6 +136,37 @@ async def test_friday_token_mock_bypass():
 
 
 @pytest.mark.asyncio
+async def test_production_friday_auth_fails_closed_without_strong_secret(monkeypatch):
+    from fastapi import HTTPException
+    import cortex_api.auth as _auth
+
+    monkeypatch.setattr(_auth, "APP_ENV", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("FRIDAY_API_KEY", raising=False)
+    monkeypatch.delenv("FRIDAY_UNIVERSE_API_KEY", raising=False)
+    monkeypatch.setattr(_auth, "FRIDAY_API_KEY", "")
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_friday_token(x_friday_api_key="friday_api")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_production_friday_auth_rejects_shared_placeholder(monkeypatch):
+    from fastapi import HTTPException
+    import cortex_api.auth as _auth
+
+    monkeypatch.setattr(_auth, "APP_ENV", "production")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.setenv("FRIDAY_API_KEY", "friday_api")
+    monkeypatch.setattr(_auth, "FRIDAY_API_KEY", "friday_api")
+
+    with pytest.raises(HTTPException) as exc:
+        await verify_friday_token(x_friday_api_key="friday_api")
+    assert exc.value.status_code == 503
+
+
+@pytest.mark.asyncio
 async def test_friday_token_valid_key():
     """Correct X-Friday-Api-Key → returns friday_system identity."""
     import cortex_api.auth as _auth

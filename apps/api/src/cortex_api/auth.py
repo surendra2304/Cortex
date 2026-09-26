@@ -18,7 +18,7 @@ APP_ENV = os.getenv("APP_ENV", "development").lower()
 OIDC_JWKS_URL = os.getenv("OIDC_JWKS_URL")
 OIDC_ISSUER = os.getenv("OIDC_ISSUER")
 OIDC_AUDIENCE = os.getenv("OIDC_AUDIENCE", "cortex-api")
-JWT_SECRET = os.getenv("JWT_SECRET", "super_secret_jwt_signing_key_replace_in_production")
+JWT_SECRET = os.getenv("JWT_SECRET", "")
 
 # FRIDAY integration shared secret
 FRIDAY_API_KEY = os.getenv("FRIDAY_API_KEY", "")
@@ -89,7 +89,13 @@ async def verify_jwt_token(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
 ) -> Dict[str, Any]:
     """Validates RS256 JWT tokens via OIDC JWKS or fallback HS256 with fail-closed production semantics."""
-    is_prod = APP_ENV == "production"
+    is_prod = APP_ENV == "production" or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
+
+    if is_prod and not _has_secure_secret(JWT_SECRET):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="JWT authentication is unavailable until a unique JWT_SECRET is configured.",
+        )
 
     if not credentials:
         if is_prod:
@@ -223,15 +229,15 @@ async def verify_friday_token(
     In dev (MOCK_MODE=true and no FRIDAY_API_KEY set), the check is bypassed with a
     clear warning log so engineers can test locally without a live FRIDAY instance.
     """
-    configured_key = FRIDAY_API_KEY or os.getenv("FRIDAY_API_KEY", "") or os.getenv("FRIDAY_UNIVERSE_API_KEY", "") or "friday_api"
+    configured_key = FRIDAY_API_KEY or os.getenv("FRIDAY_API_KEY", "") or os.getenv("FRIDAY_UNIVERSE_API_KEY", "")
     is_mock = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
 
-    is_prod = APP_ENV == "production"
+    is_prod = APP_ENV == "production" or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
 
-    if is_prod and not is_mock:
-        if not configured_key or configured_key in INSECURE_DEFAULTS or len(configured_key) < 32:
+    if is_prod:
+        if not _has_secure_secret(configured_key):
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="FRIDAY service key is not configured securely for production."
             )
         if not x_friday_api_key:
@@ -239,16 +245,23 @@ async def verify_friday_token(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing X-Friday-Api-Key header. FRIDAY service token is required.",
             )
-    else:
-        if not x_friday_api_key:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing X-Friday-Api-Key header. FRIDAY service token is required.",
-            )
+    elif not configured_key and is_mock and not x_friday_api_key:
+        logger.warning("Local MOCK_MODE is enabled without a FRIDAY service key; allowing the development-only mock identity.")
+        return {
+            "sub": "friday_system",
+            "role": Role.FRIDAY_SYSTEM.value,
+            "tenant_id": "system",
+            "system": "FRIDAY",
+        }
+    elif not x_friday_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing X-Friday-Api-Key header. FRIDAY service token is required.",
+        )
 
     # Constant-time comparison to prevent timing side-channel attacks
     provided = x_friday_api_key.encode("utf-8")
-    valid_keys = [k for k in (configured_key, os.getenv("FRIDAY_API_KEY"), os.getenv("FRIDAY_UNIVERSE_API_KEY"), "friday_api", "friday_universe_api") if k]
+    valid_keys = [k for k in (configured_key, os.getenv("FRIDAY_API_KEY"), os.getenv("FRIDAY_UNIVERSE_API_KEY")) if k]
     if not any(hmac.compare_digest(provided, vk.encode("utf-8")) for vk in valid_keys):
         logger.warning("FRIDAY authentication attempt with invalid API key rejected.")
         raise HTTPException(
@@ -263,3 +276,10 @@ async def verify_friday_token(
         "tenant_id": "system",
         "system": "FRIDAY",
     }
+
+
+def _has_secure_secret(secret: str | None) -> bool:
+    """Reject absent, short, and published development credentials for production auth."""
+    if not secret or len(secret) < 32:
+        return False
+    return secret.strip().lower() not in INSECURE_DEFAULTS and not secret.strip().lower().endswith(("_dev", "_default", "_local"))

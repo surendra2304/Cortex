@@ -3,15 +3,29 @@ import sys
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
+import pytest
 
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
 from cortex_api.main import app
-from cortex_api.auth import JWT_SECRET, Role
+from cortex_api.auth import JWT_SECRET, Role, verify_jwt_token
 
 
 def generate_token(role: str, sub: str = "usr_test") -> str:
     return jwt.encode({"sub": sub, "role": role, "tenant_id": "tenant_test"}, JWT_SECRET, algorithm="HS256")
+
+
+@pytest.mark.asyncio
+async def test_production_jwt_auth_is_unavailable_without_secret(monkeypatch):
+    import cortex_api.auth as auth
+
+    monkeypatch.setattr(auth, "APP_ENV", "production")
+    monkeypatch.setattr(auth, "JWT_SECRET", "")
+    monkeypatch.delenv("RENDER", raising=False)
+
+    with pytest.raises(Exception) as exc:
+        await verify_jwt_token(credentials=None)
+    assert getattr(exc.value, "status_code", None) == 503
 
 
 def test_rbac_roles_enforcement():

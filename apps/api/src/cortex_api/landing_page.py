@@ -547,7 +547,7 @@ FALLBACK_WEBSITE_HTML = """<!DOCTYPE html>
 &lt;script
   src="https://cortex.dev/sdk/cortex.js"
   data-site-id="site_live_01"
-  data-api-key="cortex_api"
+  data-api-key="YOUR_PUBLIC_SITE_KEY"
   async&gt;
 &lt;/script&gt;</pre>
     </div>

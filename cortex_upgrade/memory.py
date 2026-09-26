@@ -37,21 +37,24 @@ class ScopedMemory:
             raise ValueError("importance out of range")
         expiry = None if expires_in_days is None else datetime.now(UTC) + timedelta(days=expires_in_days)
         record = Memory(self._id(tenant_id, text), tenant_id, user_id, agent_id, run_id, text, category, importance, expiry, metadata or {})
+        from cortex_upgrade.memora_client import memora_client
+        result = await asyncio.to_thread(
+            memora_client.record_fact,
+            agent_name="cortex",
+            fact_text=text,
+            category=category,
+            importance=importance,
+            entities=[category, tenant_id],
+        )
+        if not isinstance(result, dict) or result.get("status") in {
+            "error", "local_only", "blocked_missing_credentials", "failed_upstream"
+        } or result.get("cloud") is False:
+            reason = result.get("error") or result.get("message") or "Memora did not confirm a cloud write"
+            raise RuntimeError(f"Cortex memory was not stored in Memora Cloud: {reason}")
+
+        # The local map is a cache only; Memora's receipt is the acceptance point.
         async with self._lock:
             self._rows[record.memory_id] = record
-
-        # Forward persistent memory to Memora Knowledge Fabric
-        try:
-            from cortex_upgrade.memora_client import memora_client
-            memora_client.record_fact(
-                agent_name="cortex",
-                fact_text=text,
-                category=category,
-                importance=importance,
-                entities=[category, tenant_id]
-            )
-        except Exception:
-            pass
 
         return record
 

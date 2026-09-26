@@ -81,6 +81,16 @@ class CredentialManager:
 
 INSECURE_DEFAULTS = {
     "cortex_api",
+    "cortex_api_dev_local_only_key_1234567890",
+    "friday_api",
+    "friday_universe_api",
+    "inference_api",
+    "memora_api",
+    "stratex_api",
+    "intelx_api",
+    "futuris_api",
+    "forge_api",
+    "sentinel_api",
     "super_secret_jwt_signing_key_replace_in_production",
     "mock_operator_jwt_token_123",
     "friday_secret",

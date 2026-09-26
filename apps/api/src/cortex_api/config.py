@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     allowed_origins: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     
     # Master API Key
-    cortex_api_key: str = os.getenv("CORTEX_API_KEY", "cortex_api_dev_local_only_key_1234567890")
+    cortex_api_key: str | None = os.getenv("CORTEX_API_KEY")
     
     # Storage and queues (Defaults to local SQLite if no external DB provided)
     postgres_dsn: str = "sqlite+aiosqlite:///./data/cortex.db"
