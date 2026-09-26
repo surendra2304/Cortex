@@ -1,7 +1,7 @@
 services:
   - type: web
     name: cortex
-    env: docker
+    runtime: docker
     plan: free
     region: singapore
     healthCheckPath: /health
