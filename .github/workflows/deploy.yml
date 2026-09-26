@@ -1,4 +1,4 @@
-name: Production CI/CD Pipeline
+name: Cortex Production Image Build
 
 on:
   push:
@@ -70,23 +70,5 @@ jobs:
           push: true
           tags: ghcr.io/${{ env.REPO_LOWER }}-worker:latest
 
-  deploy-staging:
-    name: Deploy to Staging & Run Smoke Tests
-    needs: build-and-push
-    runs-on: ubuntu-latest
-    environment: staging
-    steps:
-      - name: Trigger Staging Rollout
-        run: echo "Deploying images to Staging ECS cluster..."
-
-      - name: Run Staging Smoke Tests
-        run: echo "Verifying /v1/health and /health/ready probes on Staging..."
-
-  deploy-production:
-    name: Deploy to Production (Rolling Update)
-    needs: deploy-staging
-    runs-on: ubuntu-latest
-    environment: production
-    steps:
-      - name: Production Rolling Update
-        run: echo "Performing zero-downtime rolling update on Production ECS cluster..."
+  # Render deploys the service from this repository via render.yaml.
+  # This workflow publishes GHCR images; it is not a production rollout.
