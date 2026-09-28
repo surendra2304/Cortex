@@ -50,10 +50,20 @@ def test_dashboard_route_serves_html(client):
 
 def test_spa_subpages_serve_html(client):
     """Subpages like /agents, /analytics, /visitors, /leads should serve HTML."""
-    for page in ["/agents", "/analytics", "/visitors", "/leads", "/settings", "/governance"]:
+    for page in ["/agents", "/activity", "/analytics", "/visitors", "/leads", "/settings", "/governance"]:
         response = client.get(page)
         assert response.status_code == 200, f"Failed for page {page}"
         assert "text/html" in response.headers.get("content-type", "")
+
+
+def test_live_dashboard_has_no_demo_metrics_or_contacts(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "Saved leads" in response.text
+    assert "Recent activity" in response.text
+    assert "48,900" not in response.text
+    assert "director@enterprise" not in response.text
+    assert "SaaSCo" not in response.text
 
 
 def test_fallback_landing_page_renders():

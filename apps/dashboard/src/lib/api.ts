@@ -12,11 +12,8 @@ const getBaseUrl = () => {
 };
 
 export const getOperatorToken = () => {
-  if (typeof window !== "undefined") {
-    const stored = localStorage.getItem("cortex_operator_token");
-    if (stored) return stored;
-  }
-  return process.env.NEXT_PUBLIC_OPERATOR_TOKEN || "mock_operator_jwt_token_123";
+  if (typeof window === "undefined") return "";
+  return localStorage.getItem("cortex_operator_token") || "";
 };
 
 export const apiClient = axios.create({
@@ -27,7 +24,7 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = getOperatorToken();
+  const token = getOperatorToken().replace(/^Bearer\s+/i, "");
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }

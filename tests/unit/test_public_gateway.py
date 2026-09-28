@@ -77,10 +77,21 @@ def test_public_gateway_leads():
     app.dependency_overrides[get_db_session] = override_db
     client = TestClient(app)
 
-    res = client.post("/v1/leads", json={"email": "lead@corp.com", "score": 90.0})
+    metadata = {"email": "lead@corp.com", "name": "Test Contact", "company": "Example"}
+    res = client.post("/v1/leads", json={
+        "profile_id": "profile_test_1",
+        "status": "new",
+        "source": "website",
+        "metadata": metadata,
+    })
     assert res.status_code == 200
     lead = res.json()["lead"]
-    assert lead["score"] == 90.0
+    assert lead["status"] == "new"
+    assert lead["score"] == 50.0
+    stored_lead = mock_db.add.call_args.args[0]
+    assert stored_lead.profile_id == "profile_test_1"
+    assert stored_lead.source == "website"
+    assert stored_lead.lead_metadata == metadata
 
     res_list = client.get("/v1/leads")
     assert res_list.status_code == 200

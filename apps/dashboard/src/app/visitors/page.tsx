@@ -1,191 +1,51 @@
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import { useMemo, useState } from "react";
 import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 
-export default function VisitorsPage() {
-  const [selectedVid, setSelectedVid] = useState<string>("vis_123");
-  const [isLiveMode, setIsLiveMode] = useState<boolean>(true);
-  const [wsEvents, setWsEvents] = useState<any[]>([]);
-  const [wsConnected, setWsConnected] = useState<boolean>(false);
-  const wsRef = useRef<WebSocket | null>(null);
+type EventRecord = { event_id: string; type?: string; actor_id?: string; actor_type?: string; site_id?: string; session_id?: string; occurred_at?: string | null; source?: string; data?: Record<string, unknown> | null };
 
-  // SWR fallback polling
-  const { data, error, isLoading } = useSWR("/v1/events?limit=20", fetcher, {
-    refreshInterval: isLiveMode ? 0 : 3000
-  });
-  const { data: profileData } = useSWR(selectedVid ? `/v1/visitors/${selectedVid}/profile` : null, fetcher);
+function describeError(error: any) {
+  if (error?.response?.status === 401) return "The API rejected the credentials. Add a valid operator token in the top bar.";
+  if (error?.response?.status === 403) return "This request needs a CORTEX viewer token.";
+  return error?.response?.data?.detail || error?.message || "The activity endpoint could not be reached.";
+}
 
-  useEffect(() => {
-    if (!isLiveMode) {
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-      setWsConnected(false);
-      return;
-    }
+export default function ActivityPage() {
+  const { data, error, isLoading, mutate } = useSWR<EventRecord[]>("/v1/events?limit=100", fetcher, { refreshInterval: 15000, revalidateOnFocus: true });
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<EventRecord | null>(null);
+  const events = Array.isArray(data) ? data : [];
+  const filtered = useMemo(() => events.filter((event) => `${event.type || ""} ${event.actor_id || ""} ${event.actor_type || ""} ${event.source || ""} ${event.site_id || ""}`.toLowerCase().includes(search.toLowerCase())), [events, search]);
+  const eventKinds = useMemo(() => {
+    const tally = new Map<string, number>();
+    for (const event of events) tally.set(event.type || "unknown", (tally.get(event.type || "unknown") || 0) + 1);
+    return Array.from(tally.entries()).sort((a, b) => b[1] - a[1]).slice(0, 5);
+  }, [events]);
+  const maxKind = Math.max(1, ...eventKinds.map((entry) => entry[1]));
 
-    try {
-      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-      const wsUrl = `${proto}//${window.location.host}/ws/v1/live?token=dev_operator`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
+  return <div className="page-stack">
+    <section className="page-heading"><div><span className="eyebrow">GROWTH WORKSPACE / ACTIVITY</span><h1>Product activity</h1><p>Inspect event rows stored for the current tenant. The list refreshes every 15 seconds while this page is open.</p></div><div className="heading-actions"><span className="live-label">15s refresh</span><button className="button-quiet" type="button" onClick={() => void mutate()}>↻ Refresh now</button></div></section>
 
-      ws.onopen = () => {
-        setWsConnected(true);
-        ws.send(JSON.stringify({ action: "subscribe", channel: "visitors" }));
-        ws.send(JSON.stringify({ action: "subscribe", channel: "events" }));
-      };
+    <section className="metric-grid">
+      <article className="card metric-card"><div className="metric-top"><span>Rows returned</span><span className="metric-mark">⌁</span></div><div className="metric-value">{isLoading ? "···" : error ? "—" : events.length}</div><div className="metric-detail">Latest records · API limit 100</div></article>
+      <article className="card metric-card"><div className="metric-top"><span>Event types</span><span className="metric-mark">#</span></div><div className="metric-value">{isLoading ? "···" : error ? "—" : new Set(events.map((event) => event.type).filter(Boolean)).size}</div><div className="metric-detail">Distinct types in returned rows</div></article>
+      <article className="card metric-card"><div className="metric-top"><span>Actors</span><span className="metric-mark">◎</span></div><div className="metric-value">{isLoading ? "···" : error ? "—" : new Set(events.map((event) => event.actor_id).filter(Boolean)).size}</div><div className="metric-detail">Distinct actor IDs in returned rows</div></article>
+      <article className="card metric-card"><div className="metric-top"><span>Data source</span><span className="metric-mark">↗</span></div><div className="metric-value" style={{ fontSize: 15, marginTop: 14 }}>CORTEX API</div><div className="metric-detail"><code>GET /v1/events?limit=100</code></div></article>
+    </section>
 
-      ws.onmessage = (event) => {
-        try {
-          const payload = JSON.parse(event.data);
-          if (payload.type && payload.data) {
-            setWsEvents((prev) => [
-              {
-                event_id: payload.data.event_id || payload.trace_id,
-                actor_id: payload.data.actor_id || "live_visitor",
-                type: payload.type,
-                source: payload.channel,
-                occurred_at: payload.timestamp
-              },
-              ...prev.slice(0, 30)
-            ]);
-          }
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        setWsConnected(false);
-      };
-
-      ws.onerror = () => {
-        setWsConnected(false);
-      };
-    } catch {
-      setWsConnected(false);
-    }
-
-    return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
-      }
-    };
-  }, [isLiveMode]);
-
-  const displayEvents = isLiveMode && wsEvents.length > 0 ? wsEvents : (data || []);
-
-  return (
-    <div className="space-y-6">
-      <div className="border-b border-slate-800 pb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Live Visitor Journeys &amp; Real-Time Operations</h1>
-          <p className="text-sm text-slate-400 mt-1">Real-time visitor telemetry stream, WebSocket push, and stitched identity graphs.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setIsLiveMode(!isLiveMode)}
-            className={`px-3 py-1 rounded text-xs font-semibold border transition ${
-              isLiveMode
-                ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-                : "bg-slate-800 text-slate-300 border-slate-700"
-            }`}
-          >
-            {isLiveMode ? "LIVE WEBSOCKET ON" : "POLLING (SWR)"}
-          </button>
-          <span className={`text-[10px] px-2 py-0.5 rounded border ${
-            wsConnected
-              ? "bg-emerald-950 text-emerald-400 border-emerald-800"
-              : "bg-amber-950 text-amber-400 border-amber-800"
-          }`}>
-            {wsConnected ? "STREAM CONNECTED (<50ms)" : "FALLBACK ACTIVE"}
-          </span>
-        </div>
+    <section className="content-grid">
+      <div className="card">
+        <div className="section-head"><div><h2>Event stream</h2><p>Stored events, newest first. Select a row to inspect its payload.</p></div><label className="search-field"><span aria-hidden="true">⌕</span><input aria-label="Filter activity events" placeholder="Filter type, actor, or source" value={search} onChange={(event) => setSearch(event.target.value)} /></label></div>
+        {isLoading ? <div className="state-panel"><div className="state-icon">···</div><h3>Loading activity</h3><p>Requesting the latest event rows from CORTEX.</p></div> : error ? <div className="state-panel state-error"><div className="state-icon">!</div><h3>Activity unavailable</h3><p>{describeError(error)}</p><button className="button-quiet" style={{ marginTop: 12 }} onClick={() => void mutate()}>Try again</button></div> : events.length === 0 ? <div className="state-panel"><div className="state-icon">⌁</div><h3>No events in this workspace</h3><p>The API returned an empty event list. New records will appear after event ingestion is configured.</p></div> : filtered.length === 0 ? <div className="state-panel"><div className="state-icon">⌕</div><h3>No matching events</h3><p>Try a different actor, type, or source search.</p></div> : <div className="table-wrap"><table className="data-table"><thead><tr><th>TIME</th><th>EVENT</th><th>ACTOR</th><th>SOURCE</th><th>SITE</th></tr></thead><tbody>{filtered.map((event) => <tr key={event.event_id} onClick={() => setSelected(event)} style={{ cursor: "pointer" }}><td>{event.occurred_at ? new Date(event.occurred_at).toLocaleString() : "—"}</td><td><strong>{event.type || "Unknown"}</strong></td><td><span className="lead-id">{event.actor_id || "—"}</span><small>{event.actor_type || "actor type not provided"}</small></td><td>{event.source || "—"}</td><td>{event.site_id || "—"}</td></tr>)}</tbody></table></div>}
       </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Stream Table */}
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow">
-          <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-slate-200">Real-Time Event Stream</h2>
-            <span className="text-xs text-slate-400">Channel: ws/v1/live (events)</span>
-          </div>
-
-          <table className="w-full text-left text-sm text-slate-300">
-            <thead className="bg-slate-950/60 text-xs uppercase text-slate-400 border-b border-slate-800">
-              <tr>
-                <th className="p-3">Actor / Visitor</th>
-                <th className="p-3">Event Type</th>
-                <th className="p-3">Source / Channel</th>
-                <th className="p-3">Time</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-800">
-              {displayEvents.length > 0 ? (
-                displayEvents.map((e: any, idx: number) => (
-                  <tr
-                    key={e.event_id || idx}
-                    onClick={() => setSelectedVid(e.actor_id)}
-                    className={`cursor-pointer transition hover:bg-slate-800/60 ${selectedVid === e.actor_id ? "bg-sky-950/40" : ""}`}
-                  >
-                    <td className="p-3 font-mono text-xs text-sky-400">{e.actor_id}</td>
-                    <td className="p-3">
-                      <span className="px-2 py-0.5 rounded bg-slate-800 text-slate-200 text-xs font-mono">
-                        {e.type}
-                      </span>
-                    </td>
-                    <td className="p-3 text-xs text-slate-400">{e.source || "live-ws"}</td>
-                    <td className="p-3 text-xs text-slate-500">
-                      {new Date(e.occurred_at || Date.now()).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td colSpan={4} className="p-8 text-center text-slate-500 text-xs italic">
-                    Awaiting live visitor events...
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Profile Details Panel */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
-          <h2 className="text-sm font-semibold text-slate-200 border-b border-slate-800 pb-2">
-            Stitched Identity Profile
-          </h2>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <span className="text-slate-500 block text-[10px] uppercase">Selected Visitor ID</span>
-              <span className="font-mono text-sky-400 break-all">{selectedVid}</span>
-            </div>
-
-            <div>
-              <span className="text-slate-500 block text-[10px] uppercase">Identified Status</span>
-              <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${
-                profileData?.is_identified ? "bg-emerald-950 text-emerald-400 border border-emerald-800" : "bg-slate-800 text-slate-400"
-              }`}>
-                {profileData?.is_identified ? "IDENTIFIED LEAD" : "PSEUDONYMOUS VISITOR"}
-              </span>
-            </div>
-
-            <div>
-              <span className="text-slate-500 block text-[10px] uppercase">Primary Email</span>
-              <span className="text-slate-200">{profileData?.primary_email || "Anonymous (No email attached)"}</span>
-            </div>
-
-            <div>
-              <span className="text-slate-500 block text-[10px] uppercase">Resolution Graph Links</span>
-              <span className="text-slate-300 font-mono">{profileData?.linked_identities_count || 1} identity keys linked</span>
-            </div>
-          </div>
-        </div>
+      <div className="card">
+        <div className="section-head"><div><h2>Event mix</h2><p>Counts calculated from these returned rows.</p></div></div>
+        {isLoading ? <div className="state-panel"><p>Loading event counts…</p></div> : error ? <div className="state-panel"><p>Counts unavailable until the event request succeeds.</p></div> : eventKinds.length === 0 ? <div className="state-panel"><p>No event types to summarize yet.</p></div> : <div className="card-pad" style={{ display: "grid", gap: 15 }}>{eventKinds.map(([kind, count]) => <div key={kind}><div className="metric-top" style={{ marginBottom: 7 }}><span>{kind}</span><strong style={{ color: "#506057", fontSize: 9 }}>{count}</strong></div><div style={{ height: 5, borderRadius: 9, background: "#edf1ec", overflow: "hidden" }}><div style={{ width: `${(count / maxKind) * 100}%`, height: "100%", borderRadius: 9, background: "#4e9869" }} /></div></div>)}</div>}
       </div>
-    </div>
-  );
+    </section>
+
+    {selected && <section className="card card-pad"><div className="card-header"><div><span className="eyebrow">EVENT DETAIL</span><h2>{selected.type || "Event"}</h2><p>{selected.event_id}</p></div><button className="button-quiet" type="button" onClick={() => setSelected(null)}>Close</button></div><div className="lead-detail-grid" style={{ marginTop: 15 }}><div><span className="small-label">Actor</span><span className="detail-value">{selected.actor_id || "—"}</span></div><div><span className="small-label">Session</span><span className="detail-value">{selected.session_id || "—"}</span></div><div><span className="small-label">Site</span><span className="detail-value">{selected.site_id || "—"}</span></div><div><span className="small-label">Source</span><span className="detail-value">{selected.source || "—"}</span></div></div><pre style={{ marginTop: 14, padding: 12, overflowX: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", border: "1px solid #e7ece6", borderRadius: 8, background: "#fbfcfa", color: "#435248", fontSize: 9 }}>{JSON.stringify(selected.data || {}, null, 2)}</pre></section>}
+  </div>;
 }

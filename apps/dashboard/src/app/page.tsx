@@ -1,208 +1,92 @@
 "use client";
 
-import React, { useState } from "react";
+import Link from "next/link";
 import useSWR from "swr";
 import { fetcher } from "@/lib/api";
 
-export default function ExecutiveOverviewPage() {
-  const [dateRange, setDateRange] = useState("today");
-  const { data: metrics } = useSWR("/v1/analytics/overview", fetcher, { refreshInterval: 5000 });
+type Lead = { id: string; score?: number | null; status?: string | null; source?: string | null; created_at?: string | null };
+type EventRecord = { event_id: string; type?: string; actor_id?: string; source?: string; occurred_at?: string | null };
 
-  const exportCSV = () => {
-    const headers = "Metric,Value,Trend\n";
-    const rows = [
-      `Active Visitors,${metrics?.active_visitors || 124},+14%`,
-      `Today Sessions,${metrics?.today_sessions || 3420},+8%`,
-      `High Intent Leads,${metrics?.leads_count || 48},+22%`,
-      `Conversions,${metrics?.conversions || 312},+5%`,
-      `Estimated Revenue,$${metrics?.revenue || "48,900"},+18%`,
-      `Pending Approvals,${metrics?.pending_approvals || 2},0`,
-      `Active Incidents,${metrics?.active_incidents || 0},-100%`
-    ].join("\n");
-    const blob = new Blob([headers + rows], { type: "text/csv" });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.setAttribute("href", url);
-    a.setAttribute("download", `cortex_executive_overview_${dateRange}.csv`);
-    a.click();
-  };
+function State({ title, body, error = false }: { title: string; body: string; error?: boolean }) {
+  return <div className={`state-panel${error ? " state-error" : ""}`}><div className="state-icon" aria-hidden="true">{error ? "!" : "···"}</div><h3>{title}</h3><p>{body}</p></div>;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+
+function downloadCsv(rows: Lead[]) {
+  const quote = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+  const csv = [["Lead ID", "Status", "Source", "Score", "Created at"], ...rows.map((lead) => [lead.id, lead.status, lead.source, lead.score, lead.created_at])]
+    .map((row) => row.map(quote).join(",")).join("\r\n");
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "cortex-leads.csv";
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function ExecutiveOverviewPage() {
+  const { data: health, error: healthError, isLoading: healthLoading, mutate: refreshHealth } = useSWR("/health", fetcher, { refreshInterval: 30000, revalidateOnFocus: true });
+  const { data: leadData, error: leadsError, isLoading: leadsLoading, mutate: refreshLeads } = useSWR("/v1/leads", fetcher, { refreshInterval: 30000, revalidateOnFocus: true });
+  const { data: events, error: eventsError, isLoading: eventsLoading, mutate: refreshEvents } = useSWR<EventRecord[]>("/v1/events?limit=8", fetcher, { refreshInterval: 20000, revalidateOnFocus: true });
+  const leads: Lead[] = Array.isArray(leadData?.leads) ? leadData.leads : [];
+  const recentEvents: EventRecord[] = Array.isArray(events) ? events : [];
+  const serverHealthy = health?.status === "healthy" || health?.status === "UP";
+  const uniqueSources = new Set(leads.map((lead) => lead.source).filter(Boolean)).size;
 
   return (
-    <div className="space-y-6">
-      {/* Top Header & Executive Toolbar */}
-      <div className="border-b border-slate-800 pb-4 flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Executive Overview &amp; Live Operations</h1>
-          <p className="text-sm text-slate-400 mt-1">Autonomous intelligence, cognitive loop telemetry, and conversion performance.</p>
+    <div className="page-stack">
+      <section className="page-heading">
+        <div><span className="eyebrow">GROWTH WORKSPACE / OVERVIEW</span><h1>Turn real signals into better leads.</h1><p>Your live CORTEX view for captured leads and recent product activity. Metrics only appear when the API returns them.</p></div>
+        <div className="heading-actions">
+          <button className="button-quiet" type="button" onClick={() => { void refreshHealth(); void refreshLeads(); void refreshEvents(); }}>↻ <span>Refresh</span></button>
+          <button className="button-outline" type="button" onClick={() => downloadCsv(leads)} disabled={leads.length === 0}>↓ Export leads</button>
         </div>
-        <div className="flex items-center gap-3">
-          <select
-            value={dateRange}
-            onChange={(e) => setDateRange(e.target.value)}
-            className="bg-slate-950 border border-slate-800 text-xs text-slate-300 rounded-lg px-3 py-2 font-mono"
-          >
-            <option value="today">Today (Real-time)</option>
-            <option value="7d">Last 7 Days</option>
-            <option value="30d">Last 30 Days</option>
-            <option value="quarter">This Quarter</option>
-          </select>
-          <button
-            onClick={exportCSV}
-            className="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold rounded-lg border border-slate-700 transition"
-          >
-            Export CSV
-          </button>
-        </div>
-      </div>
+      </section>
 
-      {/* FRIDAY Voice Summary Bar */}
-      <div className="p-4 bg-sky-950/40 border border-sky-800/60 rounded-xl flex items-start gap-3 shadow">
-        <span className="text-xl">🎙️</span>
-        <div className="flex-1">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-sky-400 font-bold block">FRIDAY Executive Briefing</span>
-          <p className="text-xs text-slate-200 mt-0.5">
-            {metrics?.voice_summary || "Operations healthy across all 4 sites. Conversion rate is up 5.2% following GrowthAgent CTA optimizations. 2 high-impact actions in approval queue with zero active reliability incidents."}
-          </p>
+      <section className="overview-grid" aria-label="Workspace status and lead capture">
+        <div className="hero-card">
+          <span className="eyebrow">LEAD WORKBENCH</span>
+          <h2>Make every inbound signal count.</h2>
+          <p>Capture a lead, keep its source and context together, then follow its record through the CORTEX API.</p>
+          <div className="hero-actions"><Link href="/leads?capture=1" className="button-primary">＋ Capture a lead</Link><Link href="/leads" className="button-quiet">Open lead workspace <span aria-hidden="true">↗</span></Link></div>
         </div>
-      </div>
+        <div className="card api-card">
+          <div>
+            <div className="api-card-top"><span className="api-icon" aria-hidden="true">⌁</span><span className={`status-tag ${healthLoading ? "neutral" : serverHealthy ? "good" : healthError ? "bad" : "warn"}`}>{healthLoading ? "Checking API" : serverHealthy ? "API responding" : healthError ? "API unavailable" : "Unexpected response"}</span></div>
+            <h3>Connected workspace</h3><p>Live liveness response from <code>/health</code>. This confirms the API process responds, not that every integration is ready.</p>
+          </div>
+          <div className="api-card-foot"><span>Service</span><strong>{health?.service || "CORTEX API"}</strong></div>
+        </div>
+      </section>
 
-      {/* 8-Card Executive Metric Grid */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Active Visitors</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-sky-400 font-mono">{metrics?.active_visitors || 124}</span>
-            <span className="text-xs font-semibold text-emerald-400">● Live</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">+14% vs baseline</span>
-        </div>
+      <section className="metric-grid" aria-label="Live workspace totals">
+        <article className="card metric-card"><div className="metric-top"><span>Saved leads</span><span className="metric-mark">◎</span></div><div className="metric-value">{leadsLoading ? "···" : leadsError ? "—" : leadData?.total ?? leads.length}</div><div className="metric-detail">Records returned by <code>/v1/leads</code></div></article>
+        <article className="card metric-card"><div className="metric-top"><span>Recent events</span><span className="metric-mark">⌁</span></div><div className="metric-value">{eventsLoading ? "···" : eventsError ? "—" : recentEvents.length}</div><div className="metric-detail">Latest {recentEvents.length ? "rows" : "query returned no rows"} · limit 8</div></article>
+        <article className="card metric-card"><div className="metric-top"><span>Lead sources</span><span className="metric-mark">↗</span></div><div className="metric-value">{leadsLoading ? "···" : leadsError ? "—" : uniqueSources}</div><div className="metric-detail">Distinct non-empty sources in returned leads</div></article>
+        <article className="card metric-card"><div className="metric-top"><span>Last API check</span><span className="metric-mark">◷</span></div><div className="metric-value" style={{ fontSize: 16, marginTop: 14 }}>{health?.timestamp ? formatDate(health.timestamp) : healthLoading ? "Checking" : "—"}</div><div className="metric-detail">Timestamp supplied by the API</div></article>
+      </section>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Today Sessions</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-slate-100 font-mono">{(metrics?.today_sessions || 3420).toLocaleString()}</span>
-            <span className="text-xs text-slate-400">98.2% healthy</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">+8% week-over-week</span>
+      <section className="content-grid">
+        <div className="card">
+          <div className="section-head"><div><h2>Recently captured leads</h2><p>Latest records returned by your tenant-scoped lead endpoint.</p></div><Link href="/leads" className="section-link">View all leads ↗</Link></div>
+          {leadsLoading ? <State title="Loading lead records" body="CORTEX is reading the lead list from your API." /> : leadsError ? <State error title="Could not load leads" body="Check the API connection and operator token, then retry from the lead workspace." /> : leads.length === 0 ? <State title="No lead records yet" body="When you capture a lead in this workspace, it will appear here. No example records are inserted." /> : (
+            <div className="table-wrap"><table className="data-table"><thead><tr><th>LEAD</th><th>STATUS</th><th>SOURCE</th><th>SCORE</th><th>CREATED</th></tr></thead><tbody>
+              {leads.slice(0, 6).map((lead) => <tr key={lead.id}><td><Link href={`/leads?id=${encodeURIComponent(lead.id)}`}><strong className="lead-id">{lead.id}</strong></Link></td><td><span className="source-pill">{lead.status || "Unspecified"}</span></td><td>{lead.source || "—"}</td><td className="score-pill">{lead.score ?? "—"}</td><td>{formatDate(lead.created_at)}</td></tr>)}
+            </tbody></table></div>
+          )}
         </div>
+        <div className="card">
+          <div className="section-head"><div><h2>Recent activity</h2><p>Event records from the CORTEX event store.</p></div><Link href="/activity" className="section-link">Activity log ↗</Link></div>
+          {eventsLoading ? <State title="Loading activity" body="Reading the latest event records." /> : eventsError ? <State error title="Activity unavailable" body="The event endpoint did not return data. Verify the API token and event store." /> : recentEvents.length === 0 ? <State title="Waiting for the first event" body="No event rows were returned for this workspace. Incoming events will be listed here." /> : <div className="activity-list">{recentEvents.slice(0, 6).map((event, index) => <div className="activity-item" key={event.event_id || `${event.type}-${index}`}><span className="activity-bullet" aria-hidden="true">↗</span><div className="activity-copy"><strong>{event.type || "Event"}</strong><span>{event.actor_id || "Unknown actor"} · {event.source || "source not provided"}</span></div><span className="activity-time">{formatDate(event.occurred_at)}</span></div>)}</div>}
+        </div>
+      </section>
 
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">High-Intent Leads</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-purple-400 font-mono">{metrics?.leads_count || 48}</span>
-            <span className="text-xs text-purple-400">Score &gt;0.70</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">12 routed to Enterprise tier</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Attributed Revenue</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-emerald-400 font-mono">${metrics?.revenue || "48,900"}</span>
-            <span className="text-xs text-emerald-400">+18%</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Multi-touch decay model</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Funnel Conversions</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-slate-100 font-mono">{metrics?.conversions || 312}</span>
-            <span className="text-xs text-emerald-400">4.8% CVR</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Pricing → Checkout</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Active Cognitive Loops</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-sky-400 font-mono">18</span>
-            <span className="text-xs text-sky-400 font-mono">10-Phase</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">Avg cycle: 42ms</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Pending Approvals</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-amber-400 font-mono">{metrics?.pending_approvals || 2}</span>
-            <span className="text-xs text-amber-400">HITL Queue</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">24h auto-expiry safe</span>
-        </div>
-
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow">
-          <span className="text-slate-500 block text-[10px] uppercase font-semibold">Active Incidents</span>
-          <div className="flex items-baseline justify-between mt-1">
-            <span className="text-2xl font-bold text-emerald-400 font-mono">0</span>
-            <span className="text-xs text-emerald-400">100% SLA</span>
-          </div>
-          <span className="text-[11px] text-slate-400 block mt-1">P99 Latency: 184ms</span>
-        </div>
-      </div>
-
-      {/* Live Cognitive Operations & Multi-Agent Activity Stream */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h2 className="text-sm font-semibold text-slate-200">Real-Time Cognitive Loop Activity</h2>
-            <span className="text-[10px] font-mono bg-sky-950 text-sky-400 px-2 py-0.5 rounded border border-sky-800">
-              Live Stream
-            </span>
-          </div>
-          <div className="space-y-2 text-xs">
-            <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
-              <div>
-                <span className="font-mono font-bold text-purple-400">GrowthAgent</span>
-                <span className="text-slate-400 ml-2">Evaluated pricing exit-intent → Proposed discount CTA banner</span>
-              </div>
-              <span className="font-mono text-emerald-400 font-semibold">Score: 0.88</span>
-            </div>
-            <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
-              <div>
-                <span className="font-mono font-bold text-sky-400">SalesAgent</span>
-                <span className="text-slate-400 ml-2">Identified `director@enterprise.com` → Routed to Enterprise Tier 1</span>
-              </div>
-              <span className="font-mono text-emerald-400 font-semibold">Score: 0.94</span>
-            </div>
-            <div className="p-3 bg-slate-950 border border-slate-800/80 rounded-lg flex items-center justify-between">
-              <div>
-                <span className="font-mono font-bold text-emerald-400">SupportAgent</span>
-                <span className="text-slate-400 ml-2">Checkout telemetry analyzed → 0 errors detected (Healthy)</span>
-              </div>
-              <span className="font-mono text-slate-500">No Action</span>
-            </div>
-          </div>
-        </div>
-
-        {/* Closed-Loop Strategy Learnings Card */}
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-3">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-            <h2 className="text-sm font-semibold text-slate-200">Strategy Performance</h2>
-            <span className="text-[10px] font-mono text-slate-400">48h Attribution</span>
-          </div>
-          <div className="space-y-2 text-xs">
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex justify-between items-center">
-              <div>
-                <span className="font-mono text-slate-200 font-semibold block">pricing_cta:banner_injection</span>
-                <span className="text-[11px] text-slate-400">Success Rate: 85% ($N=40$)</span>
-              </div>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">
-                PROVEN
-              </span>
-            </div>
-            <div className="p-3 bg-slate-950 border border-slate-800 rounded-lg flex justify-between items-center">
-              <div>
-                <span className="font-mono text-slate-200 font-semibold block">cold_exit:modal_popup</span>
-                <span className="text-[11px] text-slate-400">Success Rate: 22% ($N=18$)</span>
-              </div>
-              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800">
-                DEMOTED
-              </span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <div className="inline-notice"><strong>Outreach status:</strong> this console can create and read lead records. The current API does not expose a verified email-send or calling action, so those controls are not represented as active.</div>
     </div>
   );
 }

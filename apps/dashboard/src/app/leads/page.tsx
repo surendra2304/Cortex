@@ -1,200 +1,143 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import useSWR from "swr";
-import { fetcher } from "@/lib/api";
+import { apiClient, fetcher } from "@/lib/api";
 
-const STAGES = ["new", "qualified", "contacted", "opportunity", "customer"];
+type Lead = { id: string; score?: number | null; status?: string | null; source?: string | null; created_at?: string | null };
+type LeadDetail = Lead & { profile_id?: string | null; tenant_id?: string; metadata?: Record<string, unknown> | null };
+type LeadPayload = { id: string; score?: number | null; status?: string | null; source?: string | null; created_at?: string | null };
+
+function dateLabel(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "—" : date.toLocaleString();
+}
+
+function apiError(error: any) {
+  const detail = error?.response?.data?.detail;
+  if (typeof detail === "string") return detail;
+  if (error?.response?.status === 401) return "The API rejected the credentials. Add a valid operator token in the top bar.";
+  if (error?.response?.status === 403) return "This operation requires an operator token with lead-write access.";
+  return error?.message || "The API request failed. Check the service connection and try again.";
+}
 
 export default function LeadsPage() {
-  const [selectedLead, setSelectedLead] = useState<any>(null);
-  const { data: leadsData } = useSWR("/v1/leads", fetcher);
+  const { data, error, isLoading, mutate } = useSWR("/v1/leads", fetcher, { refreshInterval: 30000, revalidateOnFocus: true });
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [detail, setDetail] = useState<LeadDetail | null>(null);
+  const [detailError, setDetailError] = useState("");
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const leads: Lead[] = Array.isArray(data?.leads) ? data.leads : [];
 
-  const initialLeads = leadsData?.leads || [
-    {
-      id: "lead_ent_01",
-      email: "director@bigcorp.com",
-      company: "BigCorp",
-      stage: "qualified",
-      score: 0.88,
-      breakdown: { behavior: 0.38, firmographic: 0.30, engagement: 0.12, source: 0.08 },
-      evidence: ["pricing_views=3", "demo_views=1", "is_enterprise_domain=True"],
-      ai_consultation: { mode: "REVIEW", confidence: 0.92, decision: "ROUTE_ENTERPRISE_LEAD" },
-      next_best_action: "Schedule technical executive demo with Solutions Architect"
-    },
-    {
-      id: "lead_mid_02",
-      email: "growth@saasco.io",
-      company: "SaaSCo",
-      stage: "new",
-      score: 0.65,
-      breakdown: { behavior: 0.28, firmographic: 0.20, engagement: 0.10, source: 0.07 },
-      evidence: ["pricing_views=1", "doc_depth=4"],
-      ai_consultation: { mode: "FAST", confidence: 0.78, decision: "ROUTE_MIDMARKET_LEAD" },
-      next_best_action: "Send personalized automated follow-up email via SendGrid"
-    },
-    {
-      id: "lead_opp_03",
-      email: "vp@cloudinfra.net",
-      company: "CloudInfra",
-      stage: "opportunity",
-      score: 0.94,
-      breakdown: { behavior: 0.40, firmographic: 0.30, engagement: 0.16, source: 0.08 },
-      evidence: ["pricing_views=5", "demo_requested=True", "enterprise_security_page=True"],
-      ai_consultation: { mode: "DEBATE", confidence: 0.96, decision: "PRIORITY_CLOSING" },
-      next_best_action: "Dispatch security compliance whitepaper and pricing custom contract"
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("capture") === "1") {
+      setCaptureOpen(true);
+      window.history.replaceState({}, "", window.location.pathname);
     }
-  ];
+  }, []);
 
-  const [pipeline, setPipeline] = useState<any[]>(initialLeads);
+  const filtered = useMemo(() => leads.filter((lead) => {
+    const matchesQuery = `${lead.id} ${lead.source || ""} ${lead.status || ""}`.toLowerCase().includes(query.toLowerCase());
+    const matchesStatus = statusFilter === "all" || (lead.status || "unspecified").toLowerCase() === statusFilter;
+    return matchesQuery && matchesStatus;
+  }), [leads, query, statusFilter]);
 
-  const moveStage = (leadId: string, direction: "left" | "right") => {
-    setPipeline((prev) =>
-      prev.map((l) => {
-        if (l.id !== leadId) return l;
-        const currIdx = STAGES.indexOf(l.stage);
-        const nextIdx = direction === "right" ? Math.min(currIdx + 1, STAGES.length - 1) : Math.max(currIdx - 1, 0);
-        return { ...l, stage: STAGES[nextIdx] };
-      })
-    );
+  const openDetail = async (leadId: string) => {
+    setSelectedId(leadId);
+    setDetail(null);
+    setDetailError("");
+    setDetailLoading(true);
+    try {
+      const response = await apiClient.get(`/v1/leads/${encodeURIComponent(leadId)}`);
+      setDetail(response.data?.lead || null);
+    } catch (requestError) {
+      setDetailError(apiError(requestError));
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
+  const createLead = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    const email = String(form.get("email") || "").trim();
+    const name = String(form.get("name") || "").trim();
+    const company = String(form.get("company") || "").trim();
+    const source = String(form.get("source") || "website").trim();
+    const profileId = String(form.get("profileId") || "").trim();
+    const notes = String(form.get("notes") || "").trim();
+    setSaving(true);
+    setFormError("");
+    try {
+      const response = await apiClient.post("/v1/leads", {
+        ...(profileId ? { profile_id: profileId } : {}),
+        status: "new",
+        source,
+        metadata: { ...(email ? { email } : {}), ...(name ? { name } : {}), ...(company ? { company } : {}), ...(notes ? { notes } : {}) },
+      });
+      const created: LeadPayload | undefined = response.data?.lead;
+      setCaptureOpen(false);
+      formElement.reset();
+      await mutate();
+      if (created?.id) await openDetail(created.id);
+    } catch (requestError) {
+      setFormError(apiError(requestError));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const statuses = Array.from(new Set(leads.map((lead) => (lead.status || "unspecified").toLowerCase()))).sort();
+
   return (
-    <div className="space-y-6">
-      <div className="border-b border-slate-800 pb-4 flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-100">Predictive Lead Intelligence &amp; Pipeline Board</h1>
-          <p className="text-sm text-slate-400 mt-1">Autonomous 4-factor scoring, next-best-action routing, and lifecycle stage progression.</p>
-        </div>
-        <span className="text-xs font-mono bg-purple-950 text-purple-400 px-3 py-1 rounded border border-purple-800">
-          Pipeline Leads: {pipeline.length}
-        </span>
-      </div>
+    <div className="page-stack">
+      <section className="page-heading">
+        <div><span className="eyebrow">GROWTH WORKSPACE / LEADS</span><h1>Lead records</h1><p>Capture contact context and review the records actually stored for this tenant. Nothing here is sample data.</p></div>
+        <div className="heading-actions"><button className="button-quiet" type="button" onClick={() => void mutate()}>↻ Refresh</button><button className="button-primary" type="button" onClick={() => { setFormError(""); setCaptureOpen(true); }}>＋ Capture lead</button></div>
+      </section>
 
-      {/* 5-Column Interactive Pipeline Board */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
-        {STAGES.map((stg) => {
-          const inStage = pipeline.filter((l) => l.stage === stg);
-          return (
-            <div key={stg} className="bg-slate-900 border border-slate-800 rounded-xl p-3 space-y-3 flex flex-col min-h-[300px]">
-              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
-                <span className="text-xs font-mono uppercase font-bold text-slate-300">{stg}</span>
-                <span className="text-[10px] font-mono bg-slate-950 text-slate-400 px-1.5 py-0.5 rounded border border-slate-800">
-                  {inStage.length}
-                </span>
-              </div>
+      <div className="inline-notice"><strong>Available today:</strong> CORTEX exposes lead create, list, and detail endpoints. Contact metadata is stored with the lead; no email-send or voice-call endpoint is currently wired into this console.</div>
 
-              <div className="space-y-2 flex-1">
-                {inStage.map((lead) => (
-                  <div
-                    key={lead.id}
-                    onClick={() => setSelectedLead(lead)}
-                    className={`p-3 bg-slate-950 border rounded-lg cursor-pointer transition space-y-2 ${
-                      selectedLead?.id === lead.id ? "border-sky-500 shadow-md shadow-sky-950" : "border-slate-800 hover:border-slate-700"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-200 truncate">{lead.company || lead.email}</span>
-                      <span className="text-xs font-mono font-bold text-emerald-400">{(lead.score * 100).toFixed(0)}</span>
-                    </div>
-
-                    <div className="flex justify-between items-center pt-1 text-[10px]">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveStage(lead.id, "left");
-                        }}
-                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
-                      >
-                        ◀
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          moveStage(lead.id, "right");
-                        }}
-                        className="px-2 py-0.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded"
-                      >
-                        ▶
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Selected Lead Detail & AI Reasoning Drawer */}
-      {selectedLead && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 shadow space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-            <div>
-              <h2 className="text-base font-bold text-slate-100">{selectedLead.company || selectedLead.email}</h2>
-              <span className="text-xs text-slate-400 font-mono">Lead ID: {selectedLead.id}</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-mono bg-emerald-950 text-emerald-400 px-3 py-1 rounded border border-emerald-800 font-bold">
-                Overall Lead Score: {selectedLead.score}
-              </span>
-              <button onClick={() => setSelectedLead(null)} className="text-slate-500 hover:text-slate-300 text-sm">
-                ✕
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-            {/* 4-Factor Scoring Breakdown */}
-            <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
-              <span className="text-[10px] font-mono uppercase text-slate-400 font-bold block">4-Factor Scoring Weights</span>
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span>Behavior (40%):</span>
-                  <span className="font-mono text-emerald-400">{selectedLead.breakdown?.behavior}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Firmographic (30%):</span>
-                  <span className="font-mono text-sky-400">{selectedLead.breakdown?.firmographic}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Engagement (20%):</span>
-                  <span className="font-mono text-purple-400">{selectedLead.breakdown?.engagement}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Source (10%):</span>
-                  <span className="font-mono text-amber-400">{selectedLead.breakdown?.source}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* AI Universe Consultation History */}
-            <div className="p-4 bg-slate-950 border border-slate-800 rounded-lg space-y-2">
-              <span className="text-[10px] font-mono uppercase text-purple-400 font-bold block">AI Universe Deliberation</span>
-              <div className="space-y-1">
-                <div className="flex justify-between">
-                  <span>Mode:</span>
-                  <span className="font-mono text-purple-400 font-bold">{selectedLead.ai_consultation?.mode}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Confidence:</span>
-                  <span className="font-mono text-emerald-400">{selectedLead.ai_consultation?.confidence}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span>Decision:</span>
-                  <span className="font-mono text-sky-400">{selectedLead.ai_consultation?.decision}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Next Best Action */}
-            <div className="p-4 bg-sky-950/30 border border-sky-800/60 rounded-lg space-y-2">
-              <span className="text-[10px] font-mono uppercase text-sky-400 font-bold block">Autonomous Next-Best-Action</span>
-              <p className="text-slate-200 text-xs">{selectedLead.next_best_action}</p>
-            </div>
+      <section className="card">
+        <div className="section-head">
+          <div><h2>Lead list <span className="small-label">{isLoading ? "· loading" : error ? "· unavailable" : `· ${data?.total ?? leads.length} records`}</span></h2><p>Tenant-scoped list from <code>GET /v1/leads</code>; selecting a row requests its detail record.</p></div>
+          <div className="toolbar">
+            <label className="search-field"><span aria-hidden="true">⌕</span><input aria-label="Search lead records" placeholder="Search id, source, or status" value={query} onChange={(e) => setQuery(e.target.value)} /></label>
+            <select className="select-field" aria-label="Filter leads by status" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}><option value="all">All statuses</option>{statuses.map((status) => <option key={status} value={status}>{status}</option>)}</select>
           </div>
         </div>
-      )}
+
+        {isLoading ? <div className="state-panel"><div className="state-icon">···</div><h3>Loading lead records</h3><p>Reading tenant-scoped leads from CORTEX.</p></div> : error ? <div className="state-panel state-error"><div className="state-icon">!</div><h3>Could not load leads</h3><p>{apiError(error)}</p><button className="button-quiet" style={{ marginTop: 12 }} onClick={() => void mutate()}>Try again</button></div> : leads.length === 0 ? <div className="state-panel"><div className="state-icon">＋</div><h3>This lead list is empty</h3><p>Capture a real lead to create the first record. The page will not fill in sample contacts.</p><button className="button-primary" style={{ marginTop: 12 }} onClick={() => setCaptureOpen(true)}>Capture a lead</button></div> : filtered.length === 0 ? <div className="state-panel"><div className="state-icon">⌕</div><h3>No matches</h3><p>Change the search text or status filter to see more records.</p></div> : (
+          <div className="table-wrap"><table className="data-table"><thead><tr><th>LEAD ID</th><th>STATUS</th><th>SOURCE</th><th>STORED SCORE</th><th>CREATED</th><th></th></tr></thead><tbody>{filtered.map((lead) => <tr key={lead.id} onClick={() => void openDetail(lead.id)} style={{ cursor: "pointer" }}><td><strong className="lead-id">{lead.id}</strong></td><td><span className="source-pill">{lead.status || "Unspecified"}</span></td><td>{lead.source || "—"}</td><td className="score-pill">{lead.score ?? "—"}</td><td>{dateLabel(lead.created_at)}</td><td><button className="button-quiet" type="button" aria-label={`Open lead ${lead.id}`} onClick={(event) => { event.stopPropagation(); void openDetail(lead.id); }}>Details ↗</button></td></tr>)}</tbody></table></div>
+        )}
+      </section>
+
+      {selectedId && <section className="card card-pad">
+        <div className="card-header"><div><span className="eyebrow">LEAD DETAIL</span><h2>{selectedId}</h2><p>Loaded from <code>GET /v1/leads/{"{lead_id}"}</code>.</p></div><button className="button-quiet" type="button" onClick={() => { setSelectedId(null); setDetail(null); }}>Close</button></div>
+        {detailLoading ? <div className="state-panel"><h3>Loading lead detail</h3><p>Requesting the record from CORTEX.</p></div> : detailError ? <div className="form-error" role="alert">{detailError}</div> : detail ? <div className="lead-detail" style={{ marginTop: 15 }}><div className="lead-detail-grid"><div><span className="small-label">Status</span><span className="detail-value">{detail.status || "—"}</span></div><div><span className="small-label">Source</span><span className="detail-value">{detail.source || "—"}</span></div><div><span className="small-label">Profile ID</span><span className="detail-value">{detail.profile_id || "—"}</span></div><div><span className="small-label">Created</span><span className="detail-value">{dateLabel(detail.created_at)}</span></div></div><div style={{ marginTop: 14 }}><span className="small-label">Contact metadata stored on this record</span><pre style={{ margin: "6px 0 0", overflowX: "auto", whiteSpace: "pre-wrap", overflowWrap: "anywhere", color: "#435248", fontSize: 10 }}>{JSON.stringify(detail.metadata || {}, null, 2)}</pre></div></div> : null}
+      </section>}
+
+      {captureOpen && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !saving) setCaptureOpen(false); }}><form className="lead-dialog" onSubmit={createLead} role="dialog" aria-modal="true" aria-labelledby="capture-title">
+        <button className="dialog-close" type="button" aria-label="Close" disabled={saving} onClick={() => setCaptureOpen(false)}>×</button>
+        <span className="eyebrow">NEW LEAD RECORD</span><h2 id="capture-title">Capture a lead</h2><p>This creates a tenant-scoped record via <code>POST /v1/leads</code>. CORTEX stores these details as record metadata; it does not send outreach.</p>
+        <div className="form-grid">
+          <div className="form-field"><label htmlFor="lead-name">Contact name</label><input id="lead-name" name="name" autoComplete="name" placeholder="Name (optional)" /></div>
+          <div className="form-field"><label htmlFor="lead-email">Email</label><input id="lead-email" name="email" type="email" autoComplete="email" placeholder="name@company.com" /></div>
+          <div className="form-field"><label htmlFor="lead-company">Company</label><input id="lead-company" name="company" autoComplete="organization" placeholder="Company (optional)" /></div>
+          <div className="form-field"><label htmlFor="lead-source">Source</label><input id="lead-source" name="source" defaultValue="website" required /></div>
+          <div className="form-field form-full"><label htmlFor="lead-profile">Existing profile ID <span className="small-label">optional</span></label><input id="lead-profile" name="profileId" placeholder="Link an existing CORTEX profile" /></div>
+          <div className="form-field form-full"><label htmlFor="lead-notes">Context</label><textarea id="lead-notes" name="notes" placeholder="What prompted this capture?" /><span className="form-hint">The current lead API stores contact/context fields in metadata and returns them in lead detail.</span></div>
+        </div>
+        {formError && <div className="form-error" role="alert">{formError}</div>}
+        <div className="dialog-actions"><button className="button-quiet" type="button" disabled={saving} onClick={() => setCaptureOpen(false)}>Cancel</button><button className="button-primary" type="submit" disabled={saving}>{saving ? "Saving…" : "Create lead record"}</button></div>
+      </form></div>}
     </div>
   );
 }

@@ -1,46 +1,48 @@
-import React from "react";
-import Link from "next/link";
+"use client";
 
-export const NAV_ITEMS = [
-  { name: "Overview", href: "/" },
-  { name: "Analytics", href: "/analytics" },
-  { name: "Visitors", href: "/visitors" },
-  { name: "Leads", href: "/leads" },
-  { name: "Funnels", href: "/funnels" },
-  { name: "Memory", href: "/memory" },
-  { name: "Customers", href: "/customers" },
-  { name: "Conversations", href: "/conversations" },
-  { name: "Agents", href: "/agents" },
-  { name: "Intelligence", href: "/intelligence" },
-  { name: "Automation", href: "/automation" },
-  { name: "Experiments", href: "/experiments" },
-  { name: "Incidents", href: "/incidents" },
-  { name: "Integrations", href: "/integrations" },
-  { name: "Connectors", href: "/connectors" },
-  { name: "Governance", href: "/governance" },
-  { name: "Settings", href: "/settings" }
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+
+const NAV_ITEMS = [
+  { name: "Overview", href: "/", mark: "⌂" },
+  { name: "Leads", href: "/leads", mark: "◎" },
+  { name: "Activity", href: "/activity", mark: "⌁" },
 ];
 
 export default function Sidebar() {
+  const pathname = usePathname();
+
   return (
-    <aside className="w-64 bg-slate-900 text-slate-200 border-r border-slate-800 flex flex-col h-screen fixed left-0 top-0">
-      <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-        <h1 className="text-xl font-bold tracking-wider text-sky-400">CORTEX</h1>
-        <span className="text-xs bg-sky-950 text-sky-400 px-2 py-0.5 rounded border border-sky-800">Ops Intel</span>
-      </div>
-      <nav className="flex-1 overflow-y-auto p-4 space-y-1">
-        {NAV_ITEMS.map((item) => (
-          <Link
-            key={item.name}
-            href={item.href}
-            className="flex items-center px-3 py-2 text-sm font-medium rounded-md hover:bg-slate-800 hover:text-white transition-colors"
-          >
-            {item.name}
-          </Link>
-        ))}
+    <aside className="sidebar">
+      <Link href="/" className="brand" aria-label="Cortex home">
+        <span className="brand-mark">C</span>
+        <span className="brand-name">cortex<span>.</span></span>
+      </Link>
+
+      <div className="workspace-label">WORKSPACE</div>
+      <nav className="main-nav" aria-label="Main navigation">
+        {NAV_ITEMS.map((item) => {
+          const active = item.href === "/" ? pathname === "/" : pathname.startsWith(item.href);
+          return (
+            <Link key={item.href} href={item.href} className={`nav-link${active ? " active" : ""}`} aria-current={active ? "page" : undefined}>
+              <span className="nav-mark" aria-hidden="true">{item.mark}</span>
+              <span>{item.name}</span>
+              {item.name === "Leads" && <span className="nav-arrow">↗</span>}
+            </Link>
+          );
+        })}
       </nav>
-      <div className="p-4 border-t border-slate-800 text-xs text-slate-500">
-        Connected to: <span className="text-emerald-400">api.cortex.dev</span>
+
+      <div className="sidebar-bottom">
+        <div className="sidebar-note">
+          <span className="note-icon">i</span>
+          <p>Activity and lead totals come from the connected CORTEX API.</p>
+        </div>
+        <div className="operator-card">
+          <div className="operator-avatar">S</div>
+          <div className="operator-copy"><strong>Workspace</strong><span>Operator console</span></div>
+          <span className="operator-menu">···</span>
+        </div>
       </div>
     </aside>
   );
