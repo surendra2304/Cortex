@@ -1,3 +1,13 @@
+# Build the browser workspace inside the image. The checked-in export is ignored
+# by .dockerignore so Render and CI must produce it from the dashboard source.
+FROM node:20-alpine AS dashboard-builder
+
+WORKDIR /dashboard
+COPY apps/dashboard/package.json apps/dashboard/package-lock.json ./
+RUN npm ci
+COPY apps/dashboard/ ./
+RUN npm run build
+
 # Multi-stage Dockerfile for CORTEX Operations Platform
 FROM python:3.11-slim AS builder
 
@@ -27,6 +37,7 @@ RUN mkdir -p /app/data
 
 COPY packages/ ./packages/
 COPY apps/ ./apps/
+COPY --from=dashboard-builder /dashboard/out ./apps/dashboard/out
 COPY infra/ ./infra/
 COPY cortex_upgrade/ ./cortex_upgrade/
 
