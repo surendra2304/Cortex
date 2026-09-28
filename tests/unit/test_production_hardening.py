@@ -67,3 +67,29 @@ def test_readiness_probe_success():
     assert data["dependencies"]["redis"] == "UP"
 
     app.dependency_overrides.clear()
+
+
+def test_readiness_probe_fails_when_required_redis_is_unavailable():
+    mock_db = AsyncMock()
+    mock_db.execute.return_value = MagicMock()
+    mock_redis = AsyncMock()
+    mock_redis.ping.side_effect = ConnectionError("Redis is unavailable")
+
+    async def override_db():
+        yield mock_db
+
+    async def override_redis():
+        return mock_redis
+
+    app.dependency_overrides[get_db_session] = override_db
+    app.dependency_overrides[get_redis_client] = override_redis
+
+    try:
+        res = TestClient(app).get("/health/ready")
+        assert res.status_code == 503
+        data = res.json()
+        assert data["status"] == "NOT_READY"
+        assert data["dependencies"]["postgres"] == "UP"
+        assert data["dependencies"]["redis"].startswith("DOWN:")
+    finally:
+        app.dependency_overrides.clear()
