@@ -1,5 +1,6 @@
 import time
 import json
+from urllib.parse import urlparse
 import uuid
 import logging
 from typing import Dict, Any, Optional, List
@@ -162,7 +163,14 @@ async def readiness_probe(
         ping = await redis_client.ping()
         checks["redis"] = "UP" if ping else "DOWN"
     except Exception as exc:
-        checks["redis"] = f"DOWN: {str(exc)[:50]}"
+        redis_host = urlparse(settings.redis_url).hostname
+        if redis_host in {"localhost", "127.0.0.1", "::1"}:
+            checks["redis"] = (
+                "DOWN: REDIS_URL points to localhost; set REDIS_URL to the "
+                "reachable Redis service in the deployment environment."
+            )
+        else:
+            checks["redis"] = f"DOWN: {str(exc)[:120]}"
 
     all_ok = all(v == "UP" or v == "READY" for v in checks.values())
     status_code = status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE
