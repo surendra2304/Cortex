@@ -52,7 +52,17 @@ SUPPORTED_STRIPE_EVENTS = {
 
 
 def _is_mock_mode() -> bool:
-    return os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
+    # Never let a deployment-wide MOCK_MODE flag disable webhook signature
+    # checks in production. Render sets RENDER=true; APP_ENV covers other hosts.
+    is_production = (
+        os.getenv("APP_ENV", "development").lower() == "production"
+        or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
+    )
+    return not is_production and os.getenv("MOCK_MODE", "true").lower() in (
+        "true",
+        "1",
+        "yes",
+    )
 
 
 def _get_webhook_secret() -> Optional[str]:

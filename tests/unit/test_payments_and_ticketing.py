@@ -272,6 +272,25 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
     assert cortex_event["source"] == "stripe_webhook"
 
 
+def test_production_mock_mode_never_bypasses_stripe_signature(monkeypatch):
+    """Production must reject unsigned Stripe webhooks even if mock mode is set."""
+    from fastapi import HTTPException
+
+    import cortex_api.stripe_webhook_router as stripe_webhook
+
+    monkeypatch.setenv("APP_ENV", "production")
+    monkeypatch.setenv("MOCK_MODE", "true")
+    monkeypatch.delenv("RENDER", raising=False)
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+
+    assert stripe_webhook._is_mock_mode() is False
+    with pytest.raises(HTTPException) as error:
+        stripe_webhook._verify_stripe_signature(
+            b'{"type":"checkout.session.completed"}', None, None
+        )
+    assert error.value.status_code == 500
+
+
 @pytest.mark.asyncio
 async def test_stripe_webhook_ignored_event_type():
     """
