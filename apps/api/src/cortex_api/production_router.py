@@ -145,10 +145,12 @@ async def readiness_probe(
     checks = {
         "postgres": "UNKNOWN",
         "redis": "UNKNOWN",
-        "ai_universe": "READY",
-        "sentinel": "READY",
-        "intelx": "READY",
-        "futuris": "READY"
+        # These integrations do not have live readiness probes wired here.
+        # Keep their state explicit instead of claiming availability.
+        "ai_universe": "UNKNOWN: no live readiness probe configured",
+        "sentinel": "UNKNOWN: no live readiness probe configured",
+        "intelx": "UNKNOWN: no live readiness probe configured",
+        "futuris": "UNKNOWN: no live readiness probe configured"
     }
 
     # 1. PostgreSQL check

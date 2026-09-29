@@ -60,11 +60,13 @@ def test_readiness_probe_success():
 
     client = TestClient(app)
     res = client.get("/health/ready")
-    assert res.status_code == 200
+    assert res.status_code == 503
     data = res.json()
-    assert data["status"] == "READY"
+    assert data["status"] == "NOT_READY"
     assert data["dependencies"]["postgres"] == "UP"
     assert data["dependencies"]["redis"] == "UP"
+    for dependency in ("ai_universe", "sentinel", "intelx", "futuris"):
+        assert data["dependencies"][dependency].startswith("UNKNOWN:")
 
     app.dependency_overrides.clear()
 
