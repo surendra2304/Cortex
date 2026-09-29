@@ -3,7 +3,6 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Dict, List, Optional
-import time
 import logging
 import copy
 
@@ -14,13 +13,14 @@ class HealthStatus(str, Enum):
     UP = "UP"
     DOWN = "DOWN"
     DEGRADED = "DEGRADED"
+    UNKNOWN = "UNKNOWN"
 
 
 @dataclass
 class ConnectorHealth:
     name: str
     status: HealthStatus
-    latency_ms: float
+    latency_ms: Optional[float]
     details: Dict[str, Any] = field(default_factory=dict)
     checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
@@ -71,54 +71,38 @@ class ConnectorManager:
         """Simulates an outage for testing resilience."""
         self.mock_outages[connector_name] = outage
 
+    def _health(self, name: str, provider: str) -> ConnectorHealth:
+        """Report unknown until an actual provider probe is configured."""
+        if self.mock_outages.get(name):
+            return ConnectorHealth(
+                name, HealthStatus.DOWN, None,
+                {"error": f"Simulated {provider} outage", "simulated": True},
+            )
+        return ConnectorHealth(
+            name, HealthStatus.UNKNOWN, None,
+            {"provider": provider, "reason": "No live health probe is configured"},
+        )
+
     async def check_email(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("email"):
-            return ConnectorHealth("email", HealthStatus.DOWN, 1500.0, {"error": "Simulated SendGrid SMTP outage"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("email", HealthStatus.UP, max(1.0, lat), {"provider": "SendGrid", "mock_supported": True})
+        return self._health("email", "SendGrid")
 
     async def check_crm(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("crm"):
-            return ConnectorHealth("crm", HealthStatus.DOWN, 2000.0, {"error": "HubSpot API unreachable"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("crm", HealthStatus.UP, max(1.0, lat), {"provider": "HubSpot", "rate_limit_remaining": 98})
+        return self._health("crm", "HubSpot")
 
     async def check_sms(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("sms"):
-            return ConnectorHealth("sms", HealthStatus.DOWN, 1000.0, {"error": "Twilio SMS gateway timeout"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("sms", HealthStatus.UP, max(1.0, lat), {"provider": "Twilio", "queue_latency_ms": 12.0})
+        return self._health("sms", "Twilio")
 
     async def check_payments(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("payments"):
-            return ConnectorHealth("payments", HealthStatus.DOWN, 2500.0, {"error": "Stripe payment gateway outage detected"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("payments", HealthStatus.UP, max(1.0, lat), {"provider": "Stripe", "webhook_signing": "active"})
+        return self._health("payments", "Stripe")
 
     async def check_futuris(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("futuris"):
-            return ConnectorHealth("futuris", HealthStatus.DOWN, 3000.0, {"error": "Futuris forecasting service offline"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("futuris", HealthStatus.UP, max(1.0, lat), {"role": "advisory_forecasting", "invariant": "prediction_is_not_authorization"})
+        return self._health("futuris", "Futuris")
 
     async def check_intelx(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("intelx"):
-            return ConnectorHealth("intelx", HealthStatus.DOWN, 3000.0, {"error": "IntelX evidence service unreachable"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("intelx", HealthStatus.UP, max(1.0, lat), {"role": "research_and_evidence", "citations_enabled": True})
+        return self._health("intelx", "IntelX")
 
     async def check_sentinel(self) -> ConnectorHealth:
-        t0 = time.time()
-        if self.mock_outages.get("sentinel"):
-            return ConnectorHealth("sentinel", HealthStatus.DOWN, 1500.0, {"error": "Sentinel security gate unreachable"})
-        lat = (time.time() - t0) * 1000
-        return ConnectorHealth("sentinel", HealthStatus.UP, max(1.0, lat), {"role": "deployment_security_gate", "policy": "critical_blocks"})
+        return self._health("sentinel", "Sentinel")
 
     async def check_all(self) -> Dict[str, Any]:
         """Runs health checks on all registered connectors and returns aggregated status."""
@@ -133,17 +117,24 @@ class ConnectorManager:
         ]
         all_up = all(c.status == HealthStatus.UP for c in checks)
         any_down = any(c.status == HealthStatus.DOWN for c in checks)
-        overall = HealthStatus.UP if all_up else (HealthStatus.DOWN if any_down else HealthStatus.DEGRADED)
+        any_degraded = any(c.status == HealthStatus.DEGRADED for c in checks)
+        overall = (
+            HealthStatus.UP if all_up else
+            HealthStatus.DOWN if any_down else
+            HealthStatus.DEGRADED if any_degraded else
+            HealthStatus.UNKNOWN
+        )
 
         return {
             "overall_status": overall.value,
             "total_connectors": len(checks),
             "healthy_count": sum(1 for c in checks if c.status == HealthStatus.UP),
-            "unhealthy_count": sum(1 for c in checks if c.status != HealthStatus.UP),
+            "unhealthy_count": sum(1 for c in checks if c.status in {HealthStatus.DOWN, HealthStatus.DEGRADED}),
+            "unverified_count": sum(1 for c in checks if c.status == HealthStatus.UNKNOWN),
             "connectors": {
                 c.name: {
                     "status": c.status.value,
-                    "latency_ms": round(c.latency_ms, 2),
+                    "latency_ms": round(c.latency_ms, 2) if c.latency_ms is not None else None,
                     "details": c.details,
                     "checked_at": c.checked_at.isoformat()
                 }

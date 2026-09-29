@@ -309,8 +309,14 @@ async def test_connector_health_checks_and_outage_detection():
     """Verifies connector health checks, active monitoring, and outage detection."""
     mgr = ConnectorManager()
     initial_health = await mgr.check_all()
-    assert initial_health["overall_status"] == "UP"
-    assert initial_health["healthy_count"] >= 7
+    assert initial_health["overall_status"] == "UNKNOWN"
+    assert initial_health["healthy_count"] == 0
+    assert initial_health["unverified_count"] == 7
+    assert initial_health["unhealthy_count"] == 0
+    assert all(
+        connector["status"] == "UNKNOWN" and connector["latency_ms"] is None
+        for connector in initial_health["connectors"].values()
+    )
 
     # Simulate outage on payments connector
     mgr.set_mock_outage("payments", True)
