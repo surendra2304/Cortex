@@ -414,11 +414,34 @@ def test_friday_health_summary_empty_db():
         assert body["uptime_indicator"] == "healthy"
         assert body["active_incidents"] == 0
         assert len(body["active_agents"]) == 4
-        assert all(a["status"] == "active" for a in body["active_agents"])
+        assert all(a["status"] == "unverified" for a in body["active_agents"])
         assert body["recent_errors_24h"] == 0
         assert body["total_events_24h"] == 0
         assert body["cognitive_loops_today"] == 0
         assert "last_checked" in body
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_friday_health_summary_database_failure_is_unknown_not_healthy():
+    mock_db = AsyncMock()
+    mock_db.execute.side_effect = RuntimeError("database unavailable")
+    mock_db.add = MagicMock()
+    mock_db.commit = AsyncMock()
+    mock_db.rollback = AsyncMock()
+
+    try:
+        client = _client_with_auth_and_db(mock_db)
+        response = client.get("/v1/friday/health_summary")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["uptime_indicator"] == "unknown"
+        assert body["active_incidents"] is None
+        assert body["recent_errors_24h"] is None
+        assert body["total_events_24h"] is None
+        assert body["cognitive_loops_today"] is None
+        assert all(agent["status"] == "unverified" for agent in body["active_agents"])
     finally:
         app.dependency_overrides.clear()
 

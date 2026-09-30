@@ -177,11 +177,11 @@ class HealthSummary(BaseModel):
     """Compact operational health snapshot for FRIDAY consumption."""
     status: str
     uptime_indicator: str
-    active_incidents: int
+    active_incidents: Optional[int]
     active_agents: List[Dict[str, str]]
-    recent_errors_24h: int
-    total_events_24h: int
-    cognitive_loops_today: int
+    recent_errors_24h: Optional[int]
+    total_events_24h: Optional[int]
+    cognitive_loops_today: Optional[int]
     last_checked: str
 
 
@@ -363,8 +363,8 @@ async def friday_health_summary(
     since = datetime.utcnow() - timedelta(hours=24)
 
     # Count error/incident events in last 24 h
-    error_count = 0
-    total_events_24h = 0
+    error_count: Optional[int] = None
+    total_events_24h: Optional[int] = None
     try:
         err_stmt = select(EventModel).where(
             EventModel.server_received_at >= since,
@@ -380,7 +380,7 @@ async def friday_health_summary(
         logger.warning(f"DB query for health summary failed: {exc}")
 
     # Count cognitive loops run today (audit records with 'cognitive_loop:' prefix)
-    loops_today = 0
+    loops_today: Optional[int] = None
     today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
         audit_stmt = select(AuditRecordModel).where(
@@ -392,17 +392,22 @@ async def friday_health_summary(
     except Exception as exc:
         logger.warning(f"DB query for audit records failed: {exc}")
 
-    uptime_indicator = "healthy" if error_count == 0 else ("degraded" if error_count < 10 else "critical")
+    uptime_indicator = (
+        "unknown" if error_count is None
+        else "healthy" if error_count == 0
+        else "degraded" if error_count < 10
+        else "critical"
+    )
 
     return HealthSummary(
         status="ok",
         uptime_indicator=uptime_indicator,
         active_incidents=error_count,
         active_agents=[
-            {"id": "agent_growth", "domain": "growth", "status": "active"},
-            {"id": "agent_sales", "domain": "sales", "status": "active"},
-            {"id": "agent_support", "domain": "support", "status": "active"},
-            {"id": "agent_reliability", "domain": "reliability", "status": "active"},
+            {"id": "agent_growth", "domain": "growth", "status": "unverified"},
+            {"id": "agent_sales", "domain": "sales", "status": "unverified"},
+            {"id": "agent_support", "domain": "support", "status": "unverified"},
+            {"id": "agent_reliability", "domain": "reliability", "status": "unverified"},
         ],
         recent_errors_24h=error_count,
         total_events_24h=total_events_24h,

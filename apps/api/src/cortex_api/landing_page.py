@@ -102,42 +102,42 @@ FALLBACK_WEBSITE_HTML = """<!DOCTYPE html>
         </a>
       </div>
 
-      <!-- Live Operations Telemetry Cards (Dynamic) -->
+      <!-- Runtime telemetry is not available on this fallback page. -->
       <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-5xl mx-auto pt-10 text-left">
         <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl shadow">
           <span class="text-slate-400 block text-[11px] font-semibold uppercase tracking-wider">Cognitive Engine Status</span>
           <div class="flex items-baseline justify-between mt-1">
-            <span class="text-2xl font-bold text-emerald-400 mono" id="stat-engine">ACTIVE</span>
-            <span class="text-xs text-emerald-400">100% SLA</span>
+            <span class="text-2xl font-bold text-slate-300 mono" id="stat-engine">UNKNOWN</span>
+            <span class="text-xs text-slate-400">SLA not measured</span>
           </div>
-          <span class="text-xs text-slate-500 block mt-0.5">10-Phase reasoning nominal</span>
+          <span class="text-xs text-slate-500 block mt-0.5">Runtime status is not connected on this page</span>
         </div>
 
         <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl shadow">
           <span class="text-slate-400 block text-[11px] font-semibold uppercase tracking-wider">Specialist Agents</span>
           <div class="flex items-baseline justify-between mt-1">
-            <span class="text-2xl font-bold text-sky-400 mono" id="stat-agents">7 Active</span>
-            <span class="text-xs text-sky-400">Multi-Agent</span>
+            <span class="text-2xl font-bold text-slate-300 mono" id="stat-agents">UNKNOWN</span>
+            <span class="text-xs text-slate-400">Not measured</span>
           </div>
-          <span class="text-xs text-slate-500 block mt-0.5">Growth, Sales, Support, Security</span>
+          <span class="text-xs text-slate-500 block mt-0.5">Agent runtime status is not connected on this page</span>
         </div>
 
         <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl shadow">
           <span class="text-slate-400 block text-[11px] font-semibold uppercase tracking-wider">Live Ingestion Latency</span>
           <div class="flex items-baseline justify-between mt-1">
-            <span class="text-2xl font-bold text-purple-400 mono" id="stat-latency">34 ms</span>
-            <span class="text-xs text-purple-400">P99 &lt; 50ms</span>
+            <span class="text-2xl font-bold text-slate-300 mono" id="stat-latency">UNKNOWN</span>
+            <span class="text-xs text-slate-400">Not measured</span>
           </div>
-          <span class="text-xs text-slate-500 block mt-0.5">Event hash-chained audit</span>
+          <span class="text-xs text-slate-500 block mt-0.5">Live latency data is not connected on this page</span>
         </div>
 
         <div class="p-4 bg-slate-900/80 border border-slate-800 rounded-xl shadow">
           <span class="text-slate-400 block text-[11px] font-semibold uppercase tracking-wider">Security &amp; Policy Gates</span>
           <div class="flex items-baseline justify-between mt-1">
-            <span class="text-2xl font-bold text-amber-400 mono">FAIL-CLOSED</span>
-            <span class="text-xs text-emerald-400">0 Critical</span>
+            <span class="text-2xl font-bold text-slate-300 mono">UNKNOWN</span>
+            <span class="text-xs text-slate-400">Not verified</span>
           </div>
-          <span class="text-xs text-slate-500 block mt-0.5">Sentinel DevSecOps enforced</span>
+          <span class="text-xs text-slate-500 block mt-0.5">Security posture is not connected on this page</span>
         </div>
       </div>
     </div>

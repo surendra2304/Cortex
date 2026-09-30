@@ -72,3 +72,12 @@ def test_fallback_landing_page_renders():
     assert "10-Phase" in FALLBACK_WEBSITE_HTML
     assert "GrowthAgent" in FALLBACK_WEBSITE_HTML
     assert "/docs" in FALLBACK_WEBSITE_HTML
+
+
+def test_fallback_landing_page_does_not_claim_unmeasured_runtime_metrics():
+    assert "100% SLA" not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-engine">ACTIVE<' not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-agents">7 Active<' not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-latency">34 ms<' not in FALLBACK_WEBSITE_HTML
+    assert "SLA not measured" in FALLBACK_WEBSITE_HTML
+    assert "Runtime status is not connected on this page" in FALLBACK_WEBSITE_HTML
