@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from datetime import datetime
+from datetime import datetime, timezone
 import sys
 import os
 
@@ -107,15 +107,21 @@ if DASHBOARD_DIR:
         app.mount("/_next", StaticFiles(directory=next_static_dir), name="dashboard_next")
 
 
-@app.api_route("/health", methods=["GET", "HEAD"], tags=["System"])
 @app.api_route("/v1/health", methods=["GET", "HEAD"], tags=["System"])
 async def health_check():
-    """Health check endpoint returning JSON status for probes, load balancers, and orchestrators."""
+    """Versioned health check for probes, load balancers, and orchestrators.
+
+    The unversioned GET /health is owned by production_router.liveness_probe and is
+    registered first, so it answers /health; this handler answers /v1/health.
+    """
+    observed_at = datetime.now(timezone.utc).isoformat()
     return {
         "status": "healthy",
+        "evidence_class": "process_liveness",
+        "observed_at": observed_at,
         "service": settings.app_name,
         "environment": settings.app_env,
-        "timestamp": datetime.utcnow().isoformat()
+        "timestamp": observed_at
     }
 
 
@@ -127,11 +133,14 @@ async def root(request: Request):
     """
     accept = request.headers.get("accept", "")
     if "application/json" in accept and "text/html" not in accept:
+        observed_at = datetime.now(timezone.utc).isoformat()
         return JSONResponse({
             "status": "healthy",
+            "evidence_class": "process_liveness",
+            "observed_at": observed_at,
             "service": settings.app_name,
             "environment": settings.app_env,
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": observed_at
         })
 
     if DASHBOARD_DIR:

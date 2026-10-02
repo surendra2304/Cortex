@@ -130,13 +130,24 @@ async def prometheus_metrics():
 
 # ── 2. HEALTH & READINESS PROBES ─────────────────────────────────────────────
 
-@router.get("/health")
+@router.api_route("/health", methods=["GET", "HEAD"])
 async def liveness_probe():
-    """Liveness probe: verifies process is alive."""
-    return {"status": "UP", "timestamp": datetime.utcnow().isoformat(), "service": settings.app_name}
+    """Liveness probe: verifies the process is alive and answering requests.
+
+    This is the canonical health endpoint (render.yaml healthCheckPath=/health).
+    It is registered before main.py's /v1/health, so it answers first for /health.
+    """
+    observed_at = datetime.now(timezone.utc).isoformat()
+    return {
+        "status": "UP",
+        "evidence_class": "process_liveness",
+        "observed_at": observed_at,
+        "service": settings.app_name,
+        "timestamp": observed_at,
+    }
 
 
-@router.get("/health/ready")
+@router.api_route("/health/ready", methods=["GET", "HEAD"])
 async def readiness_probe(
     db: AsyncSession = Depends(get_db_session),
     redis_client: aioredis.Redis = Depends(get_redis_client)
@@ -178,7 +189,12 @@ async def readiness_probe(
     status_code = status.HTTP_200_OK if all_ok else status.HTTP_503_SERVICE_UNAVAILABLE
 
     return Response(
-        content=json.dumps({"status": "READY" if all_ok else "NOT_READY", "dependencies": checks}),
+        content=json.dumps({
+            "status": "READY" if all_ok else "NOT_READY",
+            "evidence_class": "dependency_readiness",
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "dependencies": checks,
+        }),
         status_code=status_code,
         media_type="application/json"
     )

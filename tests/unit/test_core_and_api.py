@@ -45,6 +45,8 @@ def test_event_schema_and_api():
     res_health = client.get("/v1/health")
     assert res_health.status_code == 200
     assert res_health.json()["status"] == "healthy"
+    assert res_health.json()["evidence_class"] == "process_liveness"
+    assert "observed_at" in res_health.json()
 
     evt_schema = EventSchema(
         event_id="evt_123",

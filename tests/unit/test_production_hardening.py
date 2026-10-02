@@ -30,6 +30,24 @@ def test_liveness_probe():
     res = client.get("/health")
     assert res.status_code == 200
     assert res.json()["status"] == "UP"
+    # Evidence contract: a liveness answer must say what it proves and when.
+    assert res.json()["evidence_class"] == "process_liveness"
+    assert res.json()["observed_at"]
+    assert res.json()["timestamp"] == res.json()["observed_at"]
+
+
+def test_liveness_probe_answers_head_request():
+    res = TestClient(app).head("/health")
+    assert res.status_code == 200
+
+
+def test_versioned_health_probe_carries_evidence_fields():
+    res = TestClient(app).get("/v1/health")
+    assert res.status_code == 200
+    body = res.json()
+    assert body["status"] == "healthy"
+    assert body["evidence_class"] == "process_liveness"
+    assert body["observed_at"]
 
 
 def test_prometheus_metrics_endpoint():
@@ -67,6 +85,8 @@ def test_readiness_probe_success():
     assert data["dependencies"]["redis"] == "UP"
     for dependency in ("ai_universe", "sentinel", "intelx", "futuris"):
         assert data["dependencies"][dependency].startswith("UNKNOWN:")
+    assert data["evidence_class"] == "dependency_readiness"
+    assert data["observed_at"]
 
     app.dependency_overrides.clear()
 
