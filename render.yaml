@@ -12,10 +12,15 @@ services:
         value: "0.0.0.0"
       - key: APP_ENV
         value: "production"
-      - key: DATABASE_URL
-        value: "sqlite+aiosqlite:///./data/cortex.db"
+      # Cortex reads `postgres_dsn` (env var POSTGRES_DSN) in
+      # apps/api/src/cortex_api/config.py -- there is no DATABASE_URL setting.
+      # The previous DATABASE_URL entry was dead config that looked load-bearing.
+      #
+      # The path is absolute because the container's WORKDIR is /app; a relative
+      # "./data" path silently resolves against whatever cwd uvicorn happens to
+      # inherit and can create the database outside /app/data.
       - key: POSTGRES_DSN
-        value: "sqlite+aiosqlite:///./data/cortex.db"
+        value: "sqlite+aiosqlite:////app/data/cortex.db"
       - key: MOCK_MODE
         value: "false"
       - key: JWT_SECRET
