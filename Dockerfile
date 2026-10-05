@@ -3,9 +3,13 @@
 FROM node:20-alpine AS dashboard-builder
 
 WORKDIR /dashboard
-COPY apps/dashboard/package.json apps/dashboard/package-lock.json ./
-RUN npm ci
-COPY apps/dashboard/ ./
+# Copy the root workspace manifests (npm workspaces — lock lives at the root)
+COPY package.json package-lock.json ./
+# Copy the dashboard source and any other workspace packages referenced
+COPY apps/dashboard/ ./apps/dashboard/
+# Install only dashboard deps (workspace install from root)
+RUN npm ci --workspace=apps/dashboard
+WORKDIR /dashboard/apps/dashboard
 RUN npm run build
 
 # Multi-stage Dockerfile for CORTEX Operations Platform
@@ -37,7 +41,7 @@ RUN mkdir -p /app/data
 
 COPY packages/ ./packages/
 COPY apps/ ./apps/
-COPY --from=dashboard-builder /dashboard/out ./apps/dashboard/out
+COPY --from=dashboard-builder /dashboard/apps/dashboard/out ./apps/dashboard/out
 COPY infra/ ./infra/
 COPY cortex_upgrade/ ./cortex_upgrade/
 
