@@ -1,7 +1,7 @@
 """
 Universal Memora Client for Cortex Autonomous Web Operations
 """
-import os
+
 import sys
 from pathlib import Path
 

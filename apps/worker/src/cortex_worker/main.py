@@ -3,38 +3,40 @@ import json
 import logging
 import os
 import sys
+from datetime import UTC, datetime
+
 import redis.asyncio as aioredis
-from typing import Optional
-from datetime import datetime
 
-# Setup package paths
-sys.path.insert(0, os.path.abspath("packages/core/src"))
-sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
-sys.path.insert(0, os.path.abspath("packages/agents/src"))
-sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
-sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
-sys.path.insert(0, os.path.abspath("packages/integrations/src"))
-sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
-sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
-sys.path.insert(0, os.path.abspath("packages/identity/src"))
-sys.path.insert(0, os.path.abspath("packages/analytics/src"))
-sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
-sys.path.insert(0, os.path.abspath("packages/memory/src"))
-sys.path.insert(0, os.path.abspath("apps/api/src"))
+# Resolve packages relative to the repository root, not the current directory,
+# so the worker starts the same way from a container, a cron entrypoint or a
+# developer shell (audit defect H5).
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..")))
+try:  # the monorepo root may not exist when the worker runs from an installed wheel
+    from cortex_upgrade.paths import ensure_workspace_paths  # noqa: E402
 
-from cortex_event_schema import EventSchema
-from cortex_core.orchestrator import Orchestrator, build_default_tool_bus
-from cortex_api.config import AsyncSessionLocal
+    ROOT = ensure_workspace_paths()
+    sys.path.insert(0, os.path.join(str(ROOT), "apps", "api", "src"))
+except ImportError:  # pragma: no cover - installed-wheel layout
+    pass
+
+from cortex_api.config import AsyncSessionLocal, settings
 from cortex_api.db_models import ApprovalQueueModel
+from cortex_core.orchestrator import Orchestrator, build_default_tool_bus
+from cortex_event_schema import EventSchema
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
-)
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("cortex-worker")
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
-STREAM_NAME = os.getenv("REDIS_EVENT_STREAM", "cortex:events:stream")
+# The API publishes to settings.redis_event_stream; defaulting the worker to the
+# same value keeps the producer/consumer contract in one place.
+STREAM_NAME = os.getenv("REDIS_EVENT_STREAM") or settings.redis_event_stream
 CONSUMER_GROUP = os.getenv("REDIS_CONSUMER_GROUP", "cortex-worker-group")
 CONSUMER_NAME = os.getenv("REDIS_CONSUMER_NAME", f"worker-{os.getpid()}")
 
@@ -51,11 +53,7 @@ async def init_stream_group(redis_client: aioredis.Redis) -> None:
             logger.warning(f"Error initializing stream group: {exc}")
 
 
-async def process_event(
-    event_id: str,
-    payload_str: str,
-    orchestrator: Orchestrator
-) -> Optional[dict]:
+async def process_event(event_id: str, payload_str: str, orchestrator: Orchestrator) -> dict | None:
     """Decode event, execute 10-phase Cognitive Loop, and record outcomes."""
     try:
         event_dict = json.loads(payload_str)
@@ -93,20 +91,18 @@ async def run_scheduled_maintenance_tasks() -> None:
         try:
             await asyncio.sleep(60)  # Runs every minute
             async with AsyncSessionLocal() as db:
-                from sqlalchemy import select, and_
+                from sqlalchemy import and_, select
+
                 # Auto-expire overdue approvals
                 stmt = select(ApprovalQueueModel).where(
-                    and_(
-                        ApprovalQueueModel.status == "pending",
-                        ApprovalQueueModel.expires_at <= datetime.utcnow()
-                    )
+                    and_(ApprovalQueueModel.status == "pending", ApprovalQueueModel.expires_at <= _utcnow())
                 )
                 res = await db.execute(stmt)
                 expired_items = res.scalars().all()
                 for item in expired_items:
                     item.status = "expired"
                     item.decision_reason = "Auto-rejected by platform safe-default policy upon 24h expiry."
-                    item.decided_at = datetime.utcnow()
+                    item.decided_at = _utcnow()
                     logger.info(f"Auto-expired pending approval item: {item.id}")
                 if expired_items:
                     await db.commit()
@@ -137,11 +133,11 @@ async def run_worker() -> None:
                     consumername=CONSUMER_NAME,
                     streams={STREAM_NAME: ">"},
                     count=10,
-                    block=2000
+                    block=2000,
                 )
 
                 if response:
-                    for stream, messages in response:
+                    for _stream, messages in response:
                         for message_id, fields in messages:
                             payload_str = fields.get("payload", "{}")
                             await process_event(message_id, payload_str, orchestrator)

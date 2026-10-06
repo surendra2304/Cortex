@@ -1,7 +1,8 @@
-import pytest
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -13,8 +14,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
-from cortex_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
+from cortex_ai_universe_adapter import AIMode, RequestClassification, RequestClassifier
+from cortex_workflow_engine import WorkflowState, WorkflowStateMachine
 
 
 @pytest.mark.asyncio
@@ -40,7 +41,7 @@ async def test_conversion_drop_diagnosis_workflow_e2e():
     ctx = await sm.start_workflow(
         workflow_name="CONVERSION_DROP_DIAGNOSIS",
         trigger_event={"type": event_type, "drop_pct": 34.5, "step": "checkout"},
-        context_data={"funnel_id": "main_checkout_funnel"}
+        context_data={"funnel_id": "main_checkout_funnel"},
     )
 
     # 3. Execute multi-agent diagnosis workflow

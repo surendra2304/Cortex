@@ -1,6 +1,6 @@
-import pytest
 import os
 import sys
+
 from fastapi.testclient import TestClient
 
 for p in [
@@ -21,7 +21,9 @@ for p in [
     sys.path.insert(0, os.path.abspath(p))
 
 from cortex_api.main import app
-from cortex_core import Tenant, Site
+from cortex_core import Tenant
+
+from tests.conftest import auth_headers
 
 
 def test_multi_tenant_isolation_e2e():
@@ -30,22 +32,28 @@ def test_multi_tenant_isolation_e2e():
     Two distinct tenants onboarded -> verified separate credentials and scoped isolation.
     """
     client = TestClient(app)
+    headers = auth_headers()
+
+    # Audit C4: tenant onboarding is an administrative operation.
+    assert (
+        client.post("/v1/tenants", json={"tenant_name": "x", "admin_email": "x@y.z", "plan": "pro"}).status_code == 401
+    )
 
     # 1. Onboard Tenant Alpha
-    res_a = client.post("/v1/tenants", json={
-        "tenant_name": "Tenant Alpha Corp",
-        "admin_email": "admin@alpha.com",
-        "plan": "pro"
-    })
+    res_a = client.post(
+        "/v1/tenants",
+        headers=headers,
+        json={"tenant_name": "Tenant Alpha Corp", "admin_email": "admin@alpha.com", "plan": "pro"},
+    )
     assert res_a.status_code == 201
     tenant_a = res_a.json()
 
     # 2. Onboard Tenant Beta
-    res_b = client.post("/v1/tenants", json={
-        "tenant_name": "Tenant Beta LLC",
-        "admin_email": "admin@beta.com",
-        "plan": "enterprise"
-    })
+    res_b = client.post(
+        "/v1/tenants",
+        headers=headers,
+        json={"tenant_name": "Tenant Beta LLC", "admin_email": "admin@beta.com", "plan": "enterprise"},
+    )
     assert res_b.status_code == 201
     tenant_b = res_b.json()
 

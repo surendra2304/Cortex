@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
+
 from .models import Principal
+
 
 class TenantBoundaryError(PermissionError):
     pass
+
 
 @dataclass(frozen=True)
 class TenantScope:
@@ -16,6 +20,7 @@ class TenantScope:
     def require_resource(self, resource_tenant_id: str, principal: Principal) -> None:
         if resource_tenant_id != principal.tenant_id:
             raise TenantBoundaryError("resource belongs to another tenant")
+
 
 def scoped_key(tenant_id: str, resource: str) -> str:
     if not tenant_id or not resource:

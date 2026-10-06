@@ -1,7 +1,8 @@
 import os
 import sys
+from datetime import UTC, datetime
+
 import pytest
-from datetime import datetime
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
@@ -11,10 +12,10 @@ sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
+from cortex_agents import AgentRegistry, GrowthAgent, ReliabilityAgent, SalesAgent, SupportAgent
 from cortex_core import Orchestrator
-from cortex_event_schema import EventSchema, Actor, ActorType
-from cortex_agents import AgentRegistry, GrowthAgent, SalesAgent, SupportAgent, ReliabilityAgent
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowContext, WorkflowState
+from cortex_event_schema import Actor, ActorType, EventSchema
+from cortex_workflow_engine import WorkflowState, WorkflowStateMachine
 
 
 @pytest.mark.asyncio
@@ -29,10 +30,7 @@ async def test_agent_registry_routing():
 @pytest.mark.asyncio
 async def test_workflow_state_machine():
     sm = WorkflowStateMachine(db=None)
-    ctx = await sm.start_workflow(
-        workflow_name="HIGH_INTENT_FOLLOWUP",
-        trigger_event={"type": "lead_created"}
-    )
+    ctx = await sm.start_workflow(workflow_name="HIGH_INTENT_FOLLOWUP", trigger_event={"type": "lead_created"})
     await sm.transition(ctx, WorkflowState.PLANNING, "PLAN")
     await sm.transition(ctx, WorkflowState.EXECUTING, "EXECUTE")
     await sm.transition(ctx, WorkflowState.COMPLETED, "COMPLETE")
@@ -51,10 +49,10 @@ async def test_cognitive_loop_orchestrator():
         tenant_id="tenant_alpha",
         site_id="site_beta",
         type="pricing_view",
-        occurred_at=datetime.utcnow(),
+        occurred_at=datetime.now(UTC),
         actor=Actor(type=ActorType.VISITOR, id="vis_123"),
         source="web-sdk",
-        data={"plan": "enterprise"}
+        data={"plan": "enterprise"},
     )
 
     result = await orchestrator.run_cognitive_loop(evt)

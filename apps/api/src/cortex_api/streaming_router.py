@@ -1,10 +1,12 @@
-import asyncio
 import json
 import logging
 import uuid
-from typing import Dict, Any, List, Set, Optional
-from datetime import datetime
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query, status
+from datetime import UTC, datetime
+from typing import Any
+
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
+
+from cortex_api.ws_auth import authenticate_websocket
 
 logger = logging.getLogger("cortex-streaming")
 router = APIRouter(tags=["Live Streaming"])
@@ -23,20 +25,22 @@ class ChannelSubscriptionManager:
     def __init__(self, max_connections_per_tenant: int = 100):
         self.max_connections_per_tenant = max_connections_per_tenant
         # tenant_id -> {websocket: set_of_channels}
-        self.tenant_subscriptions: Dict[str, Dict[WebSocket, Set[str]]] = {}
+        self.tenant_subscriptions: dict[str, dict[WebSocket, set[str]]] = {}
         # tenant_id -> {channel: list_of_messages}
-        self.tenant_buffers: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
+        self.tenant_buffers: dict[str, dict[str, list[dict[str, Any]]]] = {}
         # Keep channel_buffers for backward compatibility in unit tests
-        self.channel_buffers: Dict[str, List[Dict[str, Any]]] = {
+        self.channel_buffers: dict[str, list[dict[str, Any]]] = {
             "events": [],
             "visitors": [],
             "leads": [],
             "incidents": [],
             "agent_activity": [],
-            "approvals": []
+            "approvals": [],
         }
 
-    async def connect(self, websocket: WebSocket, tenant_id: str = "tenant_default", initial_channels: Optional[List[str]] = None) -> bool:
+    async def connect(
+        self, websocket: WebSocket, tenant_id: str = "tenant_default", initial_channels: list[str] | None = None
+    ) -> bool:
         tenant_conns = self.tenant_subscriptions.setdefault(tenant_id, {})
         if len(tenant_conns) >= self.max_connections_per_tenant:
             await websocket.close(code=1008)
@@ -56,11 +60,11 @@ class ChannelSubscriptionManager:
                     pass
         return True
 
-    def disconnect(self, websocket: WebSocket, tenant_id: Optional[str] = None):
+    def disconnect(self, websocket: WebSocket, tenant_id: str | None = None):
         if tenant_id and tenant_id in self.tenant_subscriptions:
             self.tenant_subscriptions[tenant_id].pop(websocket, None)
         else:
-            for t_id, conns in list(self.tenant_subscriptions.items()):
+            for _tenant_id, conns in list(self.tenant_subscriptions.items()):
                 if websocket in conns:
                     del conns[websocket]
 
@@ -78,9 +82,9 @@ class ChannelSubscriptionManager:
         self,
         channel: str,
         event_type: str,
-        data: Dict[str, Any],
-        trace_id: Optional[str] = None,
-        tenant_id: str = "tenant_default"
+        data: dict[str, Any],
+        trace_id: str | None = None,
+        tenant_id: str = "tenant_default",
     ):
         payload = {
             "channel": channel,
@@ -88,7 +92,7 @@ class ChannelSubscriptionManager:
             "tenant_id": tenant_id,
             "data": data,
             "trace_id": trace_id or f"ws_trc_{uuid.uuid4().hex[:10]}",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
         # Store in tenant channel ring buffer (capped at 50)
@@ -119,25 +123,16 @@ stream_manager = ChannelSubscriptionManager()
 
 
 @router.websocket("/ws/v1/live")
-async def websocket_live_stream(
-    websocket: WebSocket,
-    token: Optional[str] = Query(None)
-):
+async def websocket_live_stream(websocket: WebSocket, token: str | None = Query(None)):
     """
     Multiplexed Real-Time WebSocket Operations Center Gateway:
     - Authenticated query param with tenant derivation
     - Dynamic subscribe / unsubscribe protocol
     - Channel updates streamed in < 100ms with strict tenant isolation
     """
-    tenant_id = "tenant_default"
-    if token and token != "dev_test":
-        try:
-            from jose import jwt
-            from cortex_api.auth import JWT_SECRET
-            claims = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"verify_signature": False})
-            tenant_id = claims.get("tenant_id", "tenant_default")
-        except Exception:
-            pass
+    tenant_id = await authenticate_websocket(websocket, token)
+    if tenant_id is None:
+        return
 
     connected = await stream_manager.connect(websocket, tenant_id=tenant_id)
     if not connected:
@@ -158,7 +153,7 @@ async def websocket_live_stream(
                     stream_manager.unsubscribe(websocket, channel, tenant_id=tenant_id)
                     await websocket.send_text(json.dumps({"status": "unsubscribed", "channel": channel}))
                 elif action == "ping":
-                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.utcnow().isoformat()}))
+                    await websocket.send_text(json.dumps({"type": "pong", "timestamp": datetime.now(UTC).isoformat()}))
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:

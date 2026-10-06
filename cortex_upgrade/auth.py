@@ -1,11 +1,14 @@
 from __future__ import annotations
+
 import base64
 import hashlib
 import hmac
 import secrets
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+
 from .models import Principal
+
 
 @dataclass(frozen=True)
 class ApiCredential:
@@ -19,8 +22,10 @@ class ApiCredential:
     expires_at: datetime | None = None
     revoked_at: datetime | None = None
 
+
 class CredentialManager:
     """PBKDF2-backed API-key verification; never persist plaintext secrets."""
+
     def __init__(self, iterations: int = 310_000) -> None:
         if iterations < 100_000:
             raise ValueError("iterations too low")
@@ -40,10 +45,15 @@ class CredentialManager:
         digest = hashlib.pbkdf2_hmac("sha256", secret.encode(), salt, self.iterations, 32)
         expires = None if expires_in_days is None else datetime.now(UTC) + timedelta(days=expires_in_days)
         return ApiCredential(
-            credential_id, principal_id, tenant_id,
+            credential_id,
+            principal_id,
+            tenant_id,
             base64.urlsafe_b64encode(salt).decode(),
             base64.urlsafe_b64encode(digest).decode(),
-            self.iterations, datetime.now(UTC), expires, None,
+            self.iterations,
+            datetime.now(UTC),
+            expires,
+            None,
         )
 
     def verify(self, secret: str, credential: ApiCredential, now: datetime | None = None) -> bool:
@@ -79,6 +89,7 @@ class CredentialManager:
             credential_id=credential.credential_id,
         )
 
+
 INSECURE_DEFAULTS = {
     "cortex_api",
     "cortex_api_dev_local_only_key_1234567890",
@@ -100,11 +111,13 @@ INSECURE_DEFAULTS = {
     "secret",
 }
 
+
 def validate_production_secrets(environment: str, values: dict[str, str | None], strict: bool = True) -> list[str]:
     if environment != "production":
         return []
     unsafe = [
-        name for name, value in values.items()
+        name
+        for name, value in values.items()
         if not value or value.strip().lower() in INSECURE_DEFAULTS or len(value) < 32
     ]
     if unsafe and strict:

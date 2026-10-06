@@ -21,21 +21,32 @@ Environment variables:
   MOCK_MODE               Set "true" to bypass signature verification locally
 """
 
-from fastapi import APIRouter, Request, HTTPException, status, Depends
-from typing import Optional
 import json
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 import redis.asyncio as aioredis
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from cortex_api.config import get_redis_client, settings
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
+
+def _aware_utc_from_ts(timestamp: float) -> datetime:
+    """Timezone-aware conversion for epoch seconds."""
+    return datetime.fromtimestamp(timestamp, tz=UTC)
+
 
 # Stripe SDK — graceful degradation if not installed
 try:
     import stripe as _stripe_sdk
+
     HAVE_STRIPE = True
 except ImportError:
     HAVE_STRIPE = False
@@ -51,25 +62,33 @@ SUPPORTED_STRIPE_EVENTS = {
 }
 
 
-def _is_mock_mode() -> bool:
-    # Never let a deployment-wide MOCK_MODE flag disable webhook signature
-    # checks in production. Render sets RENDER=true; APP_ENV covers other hosts.
-    is_production = (
-        os.getenv("APP_ENV", "development").lower() == "production"
-        or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
-    )
-    return not is_production and os.getenv("MOCK_MODE", "true").lower() in (
-        "true",
+def _is_production() -> bool:
+    return os.getenv("APP_ENV", "development").lower() == "production" or os.getenv("RENDER", "").lower() in {
         "1",
+        "true",
         "yes",
-    )
+    }
 
 
-def _get_webhook_secret() -> Optional[str]:
+def _is_mock_mode() -> bool:
+    """True only when *unsigned* Stripe webhooks are explicitly enabled locally.
+
+    Historically this keyed off the deployment-wide ``MOCK_MODE`` flag, which
+    defaults to ``true`` — so a default checkout of CORTEX accepted anonymous
+    POSTs to a payment endpoint. Signature verification is now skipped only when
+    the operator opts in with ``CORTEX_ALLOW_UNSIGNED_WEBHOOKS=true`` and the
+    process is not running in production (audit defect C2).
+    """
+    if _is_production():
+        return False
+    return os.getenv("CORTEX_ALLOW_UNSIGNED_WEBHOOKS", "false").lower() in ("true", "1", "yes")
+
+
+def _get_webhook_secret() -> str | None:
     return os.getenv("STRIPE_WEBHOOK_SECRET")
 
 
-def _verify_stripe_signature(payload: bytes, sig_header: Optional[str], secret: Optional[str]) -> dict:
+def _verify_stripe_signature(payload: bytes, sig_header: str | None, secret: str | None) -> dict:
     """
     Verify the Stripe-Signature header and return the parsed event dict.
     Raises HTTPException(400) if signature verification fails.
@@ -78,33 +97,29 @@ def _verify_stripe_signature(payload: bytes, sig_header: Optional[str], secret: 
     if not secret:
         if _is_mock_mode():
             logger.warning(
-                "[MOCK MODE] STRIPE_WEBHOOK_SECRET not set — skipping signature verification. "
-                "DO NOT use this in production."
+                "CORTEX_ALLOW_UNSIGNED_WEBHOOKS is enabled: STRIPE_WEBHOOK_SECRET is not set, so the "
+                "signature of this webhook was NOT verified. Never enable this outside local development."
             )
             try:
                 return json.loads(payload)
             except json.JSONDecodeError as exc:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid JSON payload: {exc}"
-                )
-        else:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="STRIPE_WEBHOOK_SECRET is not configured."
-            )
+                    status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid JSON payload: {exc}"
+                ) from exc
+        logger.error("Rejected Stripe webhook: STRIPE_WEBHOOK_SECRET is not configured.")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Stripe webhooks are disabled until STRIPE_WEBHOOK_SECRET is configured.",
+        )
 
     if not HAVE_STRIPE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="stripe SDK is not installed. Run: pip install stripe"
+            detail="stripe SDK is not installed. Run: pip install stripe",
         )
 
     if not sig_header:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Stripe-Signature header."
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Stripe-Signature header.")
 
     try:
         event = _stripe_sdk.Webhook.construct_event(
@@ -116,15 +131,13 @@ def _verify_stripe_signature(payload: bytes, sig_header: Optional[str], secret: 
     except _stripe_sdk.error.SignatureVerificationError as exc:
         logger.warning(f"Stripe webhook signature verification failed: {exc}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid Stripe webhook signature."
-        )
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid Stripe webhook signature."
+        ) from exc
     except Exception as exc:
         logger.error(f"Unexpected error parsing Stripe event: {exc}")
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Could not parse Stripe webhook payload: {exc}"
-        )
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Could not parse Stripe webhook payload: {exc}"
+        ) from exc
 
 
 def _build_cortex_event(stripe_event: dict) -> dict:
@@ -138,10 +151,7 @@ def _build_cortex_event(stripe_event: dict) -> dict:
 
     # Extract the most useful identifiers from the Stripe object
     customer_id = stripe_data.get("customer")
-    customer_email = (
-        stripe_data.get("customer_details", {}).get("email")
-        or stripe_data.get("customer_email")
-    )
+    customer_email = stripe_data.get("customer_details", {}).get("email") or stripe_data.get("customer_email")
     amount_total = stripe_data.get("amount_total") or stripe_data.get("amount")
     currency = stripe_data.get("currency", "usd")
     subscription_id = stripe_data.get("subscription") or stripe_data.get("id")
@@ -153,9 +163,7 @@ def _build_cortex_event(stripe_event: dict) -> dict:
         "site_id": os.getenv("CORTEX_DEFAULT_SITE_ID", "stripe"),
         "session_id": customer_id or f"stripe_session_{uuid.uuid4().hex[:8]}",
         "type": cortex_type,
-        "occurred_at": datetime.utcfromtimestamp(
-            stripe_event.get("created", datetime.utcnow().timestamp())
-        ).isoformat(),
+        "occurred_at": _aware_utc_from_ts(stripe_event.get("created", _utcnow().timestamp())).isoformat(),
         "source": "stripe_webhook",
         "trace_id": f"stripe_trace_{uuid.uuid4().hex[:12]}",
         "actor": {
@@ -203,9 +211,7 @@ async def receive_stripe_webhook(
     stripe_event_type = stripe_event.get("type", "")
     stripe_event_id = stripe_event.get("id", "unknown")
 
-    logger.info(
-        f"Stripe webhook received: type='{stripe_event_type}' id='{stripe_event_id}'"
-    )
+    logger.info(f"Stripe webhook received: type='{stripe_event_type}' id='{stripe_event_id}'")
 
     # 2. Filter — only forward event types we care about
     if stripe_event_type not in SUPPORTED_STRIPE_EVENTS:
@@ -227,9 +233,7 @@ async def receive_stripe_webhook(
             f"pushed to stream '{settings.redis_event_stream}'."
         )
     except Exception as exc:
-        logger.error(
-            f"Failed to push Stripe event '{stripe_event_id}' to Redis stream: {exc}"
-        )
+        logger.error(f"Failed to push Stripe event '{stripe_event_id}' to Redis stream: {exc}")
         # Return 200 to Stripe regardless — otherwise Stripe retries indefinitely.
         # The failure is logged and can be replayed from Stripe's dashboard.
         return {
@@ -243,5 +247,5 @@ async def receive_stripe_webhook(
         "cortex_event_type": cortex_event["type"],
         "cortex_event_id": cortex_event["event_id"],
         "stripe_event_id": stripe_event_id,
-        "queued_at": datetime.utcnow().isoformat(),
+        "queued_at": _utcnow().isoformat(),
     }

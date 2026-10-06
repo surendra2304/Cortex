@@ -1,12 +1,15 @@
 from __future__ import annotations
+
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Awaitable, Callable
+
 
 @dataclass(frozen=True)
 class DependencyHealth:
     name: str
     ok: bool
     detail: str
+
 
 class Readiness:
     def __init__(self, checks: dict[str, Callable[[], Awaitable[bool]]]) -> None:

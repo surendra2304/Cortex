@@ -2,12 +2,13 @@
 Unit tests for Stripe PaymentsTool and Zendesk TicketingTool (mock mode),
 and for the Stripe webhook receiver endpoint.
 """
-import sys
-import os
+
 import json
+import os
+import sys
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime
 
 # ── Package paths ─────────────────────────────────────────────────────────────
 for _p in [
@@ -25,16 +26,16 @@ for _p in [
 
 from cortex_integrations import (
     PaymentsToolExecutor,
-    create_payments_tool,
     TicketingToolExecutor,
+    create_payments_tool,
     create_ticketing_tool,
 )
-from cortex_tool_runtime import ToolBus, ToolCapability, SideEffectLevel
-
+from cortex_tool_runtime import SideEffectLevel, ToolBus, ToolCapability
 
 # =============================================================================
 # 1. Stripe PaymentsTool — Mock Mode
 # =============================================================================
+
 
 @pytest.mark.asyncio
 async def test_payments_tool_create_payment_link_mock():
@@ -125,6 +126,7 @@ def test_payments_tool_contract():
 # 2. Zendesk TicketingTool — Mock Mode
 # =============================================================================
 
+
 @pytest.mark.asyncio
 async def test_ticketing_tool_create_ticket_mock():
     """TicketingTool should return a mock ticket when MOCK_MODE=true."""
@@ -201,20 +203,21 @@ def test_ticketing_tool_contract():
 # 3. Stripe Webhook Endpoint
 # =============================================================================
 
+
 @pytest.mark.asyncio
 async def test_stripe_webhook_checkout_completed_mock_mode():
     """
     POST /v1/webhooks/stripe should accept a checkout.session.completed event
     in mock mode (no STRIPE_WEBHOOK_SECRET set) and push it to the Redis stream.
     """
-    from fastapi.testclient import TestClient
     from fastapi import FastAPI
-    from unittest.mock import AsyncMock
+    from fastapi.testclient import TestClient
 
     # Build a minimal app with only the stripe webhook router
     sys.path.insert(0, os.path.abspath("apps/api/src"))
     os.environ["MOCK_MODE"] = "true"
     os.environ.pop("STRIPE_WEBHOOK_SECRET", None)
+    os.environ["CORTEX_ALLOW_UNSIGNED_WEBHOOKS"] = "true"  # explicit local opt-in (audit C2)
 
     from cortex_api.stripe_webhook_router import router
 
@@ -227,24 +230,27 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
         return mock_redis
 
     from cortex_api.config import get_redis_client
+
     mini_app.dependency_overrides[get_redis_client] = _get_redis_override
     mini_app.include_router(router)
 
-    stripe_payload = json.dumps({
-        "id": "evt_test_checkout_001",
-        "type": "checkout.session.completed",
-        "created": 1700000000,
-        "data": {
-            "object": {
-                "id": "cs_test_001",
-                "customer": "cus_test_12345",
-                "customer_details": {"email": "buyer@enterprise.com"},
-                "amount_total": 49900,
-                "currency": "usd",
-                "subscription": None,
-            }
-        },
-    }).encode()
+    stripe_payload = json.dumps(
+        {
+            "id": "evt_test_checkout_001",
+            "type": "checkout.session.completed",
+            "created": 1700000000,
+            "data": {
+                "object": {
+                    "id": "cs_test_001",
+                    "customer": "cus_test_12345",
+                    "customer_details": {"email": "buyer@enterprise.com"},
+                    "amount_total": 49900,
+                    "currency": "usd",
+                    "subscription": None,
+                }
+            },
+        }
+    ).encode()
 
     client = TestClient(mini_app, raise_server_exceptions=True)
     response = client.post(
@@ -262,8 +268,8 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
     # Verify Redis xadd was called with the mapped CORTEX event
     mock_redis.xadd.assert_called_once()
     call_args = mock_redis.xadd.call_args
-    stream_name = call_args[0][0]
-    stream_fields = call_args[0][1]
+    stream_name, stream_fields = call_args[0][0], call_args[0][1]
+    assert stream_name, "the Stripe handler must publish to a Redis stream"
     cortex_event = json.loads(stream_fields["payload"])
 
     assert cortex_event["type"] == "checkout.completed"
@@ -274,21 +280,21 @@ async def test_stripe_webhook_checkout_completed_mock_mode():
 
 def test_production_mock_mode_never_bypasses_stripe_signature(monkeypatch):
     """Production must reject unsigned Stripe webhooks even if mock mode is set."""
-    from fastapi import HTTPException
-
     import cortex_api.stripe_webhook_router as stripe_webhook
+    from fastapi import HTTPException
 
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("MOCK_MODE", "true")
     monkeypatch.delenv("RENDER", raising=False)
     monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    monkeypatch.setenv("CORTEX_ALLOW_UNSIGNED_WEBHOOKS", "true")
 
     assert stripe_webhook._is_mock_mode() is False
     with pytest.raises(HTTPException) as error:
-        stripe_webhook._verify_stripe_signature(
-            b'{"type":"checkout.session.completed"}', None, None
-        )
-    assert error.value.status_code == 500
+        stripe_webhook._verify_stripe_signature(b'{"type":"checkout.session.completed"}', None, None)
+    # 500 -> 503: a missing signing secret is a service-availability problem,
+    # not an internal error, and the endpoint must never be silently open.
+    assert error.value.status_code == 503
 
 
 @pytest.mark.asyncio
@@ -297,16 +303,18 @@ async def test_stripe_webhook_ignored_event_type():
     POST /v1/webhooks/stripe with an unsupported event type should return
     status='acknowledged', action='ignored' without touching Redis.
     """
-    from fastapi.testclient import TestClient
     from fastapi import FastAPI
-    from unittest.mock import AsyncMock
+    from fastapi.testclient import TestClient
 
     os.environ["MOCK_MODE"] = "true"
     os.environ.pop("STRIPE_WEBHOOK_SECRET", None)
+    os.environ["CORTEX_ALLOW_UNSIGNED_WEBHOOKS"] = "true"  # explicit local opt-in (audit C2)
 
     # Re-import to pick up fresh env
     import importlib
+
     import cortex_api.stripe_webhook_router as _mod
+
     importlib.reload(_mod)
 
     mini_app = FastAPI()
@@ -316,15 +324,18 @@ async def test_stripe_webhook_ignored_event_type():
         return mock_redis
 
     from cortex_api.config import get_redis_client
+
     mini_app.dependency_overrides[get_redis_client] = _get_redis_override
     mini_app.include_router(_mod.router)
 
-    stripe_payload = json.dumps({
-        "id": "evt_test_unknown",
-        "type": "payment_method.attached",
-        "created": 1700000000,
-        "data": {"object": {}},
-    }).encode()
+    stripe_payload = json.dumps(
+        {
+            "id": "evt_test_unknown",
+            "type": "payment_method.attached",
+            "created": 1700000000,
+            "data": {"object": {}},
+        }
+    ).encode()
 
     client = TestClient(mini_app)
     response = client.post(

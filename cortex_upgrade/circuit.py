@@ -1,15 +1,19 @@
 from __future__ import annotations
+
 import asyncio
 import time
 from dataclasses import dataclass
 
+
 class CircuitOpen(RuntimeError):
     pass
+
 
 @dataclass
 class CircuitState:
     consecutive_failures: int = 0
     opened_until: float = 0.0
+
 
 class CircuitBreaker:
     def __init__(self, threshold: int = 3, reset_seconds: float = 15.0) -> None:

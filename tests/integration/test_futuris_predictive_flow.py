@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -20,8 +21,8 @@ for p in [
     sys.path.insert(0, os.path.abspath(p))
 
 from cortex_integrations import FuturisClient
-from cortex_workflow_engine import CapacityPlanningWorkflow
 from cortex_intelligence import PredictionInformedPersonalization
+from cortex_workflow_engine import CapacityPlanningWorkflow
 
 
 @pytest.mark.asyncio

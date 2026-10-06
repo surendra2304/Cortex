@@ -1,7 +1,7 @@
-import pytest
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
+
 from fastapi.testclient import TestClient
 
 for p in [
@@ -21,8 +21,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_api.main import app
 from cortex_api.config import get_db_session, get_redis_client
+from cortex_api.main import app
 
 
 def test_liveness_probe():
@@ -61,7 +61,19 @@ def test_prometheus_metrics_endpoint():
     assert "strategy_performance_gauge" in text
 
 
-def test_readiness_probe_success():
+def test_readiness_probe_success(monkeypatch):
+    """Required dependencies up ⇒ READY, and unconfigured optional probes are reported.
+
+    The schema probe is stubbed: it inspects the process-wide engine, so this test asserts
+    the readiness *decision* rather than whatever schema happens to exist next to the
+    checkout (a missing data/ directory made it fail for the wrong reason).
+    """
+
+    async def _no_missing_tables(engine):  # noqa: ANN001 - signature of the real probe
+        return []
+
+    monkeypatch.setattr("cortex_api.schema.missing_tables", _no_missing_tables)
+
     mock_db = AsyncMock()
     mock_db.execute.return_value = MagicMock()
     mock_redis = AsyncMock()
@@ -78,13 +90,15 @@ def test_readiness_probe_success():
 
     client = TestClient(app)
     res = client.get("/health/ready")
-    assert res.status_code == 503
+    assert res.status_code == 200, res.text
     data = res.json()
-    assert data["status"] == "NOT_READY"
+    assert data["status"] == "READY"
+    assert data["required_dependencies"] == ["postgres", "schema", "redis"]
     assert data["dependencies"]["postgres"] == "UP"
     assert data["dependencies"]["redis"] == "UP"
     for dependency in ("ai_universe", "sentinel", "intelx", "futuris"):
         assert data["dependencies"][dependency].startswith("UNKNOWN:")
+        assert dependency in data["degraded"]
     assert data["evidence_class"] == "dependency_readiness"
     assert data["observed_at"]
 

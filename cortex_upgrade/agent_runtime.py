@@ -1,9 +1,13 @@
 from __future__ import annotations
+
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
+
 from .models import JobState
 from .workflow import WorkflowStateMachine
+
 
 @dataclass(frozen=True)
 class AgentResult:
@@ -12,14 +16,18 @@ class AgentResult:
     steps: int
     error: str | None = None
 
+
 class CancellationToken:
     def __init__(self) -> None:
         self._event = asyncio.Event()
+
     def cancel(self) -> None:
         self._event.set()
+
     def throw_if_cancelled(self) -> None:
         if self._event.is_set():
             raise asyncio.CancelledError()
+
 
 class BoundedAgent:
     def __init__(self, max_steps: int = 12) -> None:

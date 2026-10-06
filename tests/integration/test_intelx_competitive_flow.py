@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -19,8 +20,8 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_agents import AgentInput, CompetitiveIntelligenceAgent, GrowthAgent
 from cortex_integrations import IntelXClient
-from cortex_agents import CompetitiveIntelligenceAgent, AgentInput, GrowthAgent
 
 
 @pytest.mark.asyncio
@@ -33,15 +34,17 @@ async def test_full_intelx_competitive_intelligence_flow_e2e():
     intelx = IntelXClient()
     comp_agent = CompetitiveIntelligenceAgent(intelx_client=intelx)
     growth_agent = GrowthAgent()
+    # The growth agent consumes the battlecard downstream; assert it is wired up.
+    assert growth_agent.agent_id == "agent_growth"
 
     # Step 1: Competitor query in event stream
     inp = AgentInput(
         goal="Competitor alternative evaluation",
         events=[
             {"type": "page_view", "data": {"url": "https://company.com/compare/dynatrace"}},
-            {"type": "pricing.viewed", "data": {"tier": "enterprise"}}
+            {"type": "pricing.viewed", "data": {"tier": "enterprise"}},
         ],
-        context={"competitor_name": "Dynatrace"}
+        context={"competitor_name": "Dynatrace"},
     )
 
     # Step 2: CompetitiveIntelligenceAgent executes IntelX research

@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -27,7 +28,7 @@ async def test_deployment_gate_scenarios_e2e():
         deployment_id="dep_scen_01",
         asset_id="site_main",
         endpoints=["/checkout"],
-        simulated_findings=[{"severity": "critical", "title": "SQLi in payment form"}]
+        simulated_findings=[{"severity": "critical", "title": "SQLi in payment form"}],
     )
     assert res_crit.verdict == GateVerdict.BLOCKED
     assert res_crit.requires_human_override is False
@@ -37,7 +38,7 @@ async def test_deployment_gate_scenarios_e2e():
         deployment_id="dep_scen_02",
         asset_id="site_main",
         endpoints=["/api/v1/search"],
-        simulated_findings=[{"severity": "high", "title": "XSS in search params"}]
+        simulated_findings=[{"severity": "high", "title": "XSS in search params"}],
     )
     assert res_high.verdict == GateVerdict.NEEDS_APPROVAL
     assert res_high.requires_human_override is True
@@ -47,7 +48,7 @@ async def test_deployment_gate_scenarios_e2e():
         deployment_id="dep_scen_03",
         asset_id="site_main",
         endpoints=["/docs"],
-        simulated_findings=[{"severity": "low", "title": "Missing security header"}]
+        simulated_findings=[{"severity": "low", "title": "Missing security header"}],
     )
     assert res_low.verdict == GateVerdict.APPROVED
     assert res_low.requires_human_override is False

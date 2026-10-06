@@ -1,16 +1,16 @@
 import os
 import sys
-import pytest
 from unittest.mock import AsyncMock, patch
-import httpx
+
+import pytest
 
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 
-from cortex_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient, RecommendedAction
-from cortex_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision, ToolCapability, IdempotencyStrategy
+from cortex_ai_universe_adapter import AIUniverseClient, IntelligenceRequest, IntelligenceResponse
 from cortex_policy_engine import PolicyEngine
+from cortex_tool_runtime import Execution, SideEffectLevel, Tool, ToolCapability
 
 
 @pytest.mark.asyncio
@@ -24,7 +24,7 @@ async def test_ai_universe_client_fallback_and_confidence():
         evidence=[{"metric": "bounce_rate", "value": 0.85}],
         trust_labels={"site_id": "system_fact", "bounce_rate": "verified_telemetry"},
         provenance={"trace_id": "trc_test_123"},
-        constraints=["no_destructive_actions"]
+        constraints=["no_destructive_actions"],
     )
     res = await client.evaluate(req)
     assert isinstance(res, IntelligenceResponse)
@@ -43,7 +43,7 @@ async def test_ai_universe_client_success_and_dissent():
         goal="Score visitor",
         context={"user_id": "usr_999"},
         evidence=[],
-        trust_labels={"user_id": "verified_telemetry"}
+        trust_labels={"user_id": "verified_telemetry"},
     )
 
     mock_response_data = {
@@ -55,7 +55,7 @@ async def test_ai_universe_client_success_and_dissent():
         "provenance": {"model": "universe-v4"},
         "unresolved_disagreements": ["variant_allocation_dispute"],
         "recommended_actions": [],
-        "safety_notes": ["Approved for sensitive tool dispatch."]
+        "safety_notes": ["Approved for sensitive tool dispatch."],
     }
 
     mock_httpx_resp = AsyncMock()
@@ -78,7 +78,7 @@ def test_tool_runtime_and_policy_engine():
         version="1.0.0",
         capabilities=[ToolCapability.SESSION_INSPECT],
         side_effect_level=SideEffectLevel.READ,
-        rate_limit=100
+        rate_limit=100,
     )
 
     high_impact_tool = Tool(
@@ -86,7 +86,7 @@ def test_tool_runtime_and_policy_engine():
         version="1.0.0",
         capabilities=[ToolCapability.BANNER_INJECTION],
         side_effect_level=SideEffectLevel.HIGH_IMPACT,
-        rate_limit=10
+        rate_limit=10,
     )
 
     dangerous_tool = Tool(
@@ -94,28 +94,28 @@ def test_tool_runtime_and_policy_engine():
         version="1.0.0",
         capabilities=[],
         side_effect_level=SideEffectLevel.DANGEROUS,
-        rate_limit=1
+        rate_limit=1,
     )
 
     exec_read = Execution(
         request_id="exec_1",
         tool_name=read_tool.name,
         actor={"type": "agent", "id": "diagnostics_agent"},
-        reason="Check visitor drop-off path"
+        reason="Check visitor drop-off path",
     )
 
     exec_impact = Execution(
         request_id="exec_2",
         tool_name=high_impact_tool.name,
         actor={"type": "agent", "id": "ops_agent"},
-        reason="Publish incident alert banner"
+        reason="Publish incident alert banner",
     )
 
     exec_danger = Execution(
         request_id="exec_3",
         tool_name=dangerous_tool.name,
         actor={"type": "agent", "id": "test_agent"},
-        reason="E2E test teardown"
+        reason="E2E test teardown",
     )
 
     # Test READ policy

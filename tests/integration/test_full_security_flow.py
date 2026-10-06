@@ -1,7 +1,7 @@
-import pytest
 import os
 import sys
-from fastapi.testclient import TestClient
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -20,8 +20,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_api.main import app
-from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
+from cortex_integrations import SentinelEventListener, SentinelFinding, SentinelPayload
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import SecurityIncidentWorkflow
 
@@ -48,9 +47,9 @@ async def test_full_security_finding_to_resolution_flow_e2e():
                 title="Remote Code Execution on Webhook Endpoint",
                 description="Unsanitized command execution via serialized payload.",
                 attack_vector="api_injection",
-                affected_endpoint="/v1/webhooks/incoming"
+                affected_endpoint="/v1/webhooks/incoming",
             )
-        ]
+        ],
     )
 
     ingest_res = await listener.handle_findings(payload)
@@ -61,10 +60,7 @@ async def test_full_security_finding_to_resolution_flow_e2e():
     finding_dict["asset_id"] = payload.asset_id
     exposure = monitor.evaluate_exposure(payload.asset_id, "/v1/webhooks/incoming")
 
-    incident = await workflow.execute_security_incident_triage(
-        finding=finding_dict,
-        asset_exposure=exposure
-    )
+    incident = await workflow.execute_security_incident_triage(finding=finding_dict, asset_exposure=exposure)
 
     assert incident["severity"] == "critical"
     assert incident["status"] == "active_monitoring"

@@ -1,0 +1,35 @@
+# Flake8 mirrors the ruff configuration in pyproject.toml so both linters agree.
+# Run: python -m flake8 apps packages cortex_upgrade scripts tests
+[flake8]
+max-line-length = 120
+# E501 is enforced by the formatter (black, line-length 120); E203/W503 are
+# black-compatibility exclusions; E402/F401 are justified per-file below.
+extend-ignore = E203, W503, E501
+exclude =
+    .venv,
+    node_modules,
+    apps/dashboard/out,
+    infra/alembic/versions,
+    build,
+    dist
+
+per-file-ignores =
+    # Package entry points intentionally re-export their public surface. F811 is
+    # included because a module-level re-export may repeat a name imported
+    # locally inside a function.
+    */__init__.py: F401, E402, F811
+    # Test modules prepend package paths before importing.
+    tests/*: E402
+    tests/**/*: E402, F401
+    # Late imports after module-level singletons break import cycles on purpose.
+    apps/api/src/cortex_api/friday_router.py: E402
+    apps/api/src/cortex_api/production_router.py: E402
+    apps/api/src/cortex_api/main.py: E402
+    # Scripts are entry points that configure sys.path first.
+    scripts/*: E402, F401
+    # These modules must import cortex_upgrade.paths before third-party imports.
+    packages/core/src/cortex_core/orchestrator.py: E402
+    packages/core/src/cortex_core/task_manager.py: E402
+    apps/api/src/cortex_api/public_gateway.py: E402
+    apps/api/src/cortex_api/auth.py: E402
+    apps/worker/src/cortex_worker/main.py: E402

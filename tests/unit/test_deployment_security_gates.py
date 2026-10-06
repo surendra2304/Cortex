@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 for p in [
@@ -20,9 +21,11 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_analytics import SecurityBaselineTracker
 from cortex_api.main import app
 from cortex_integrations import DeploymentSecurityGate, GateVerdict
-from cortex_analytics import SecurityBaselineTracker
+
+from tests.conftest import auth_headers, friday_headers
 
 
 @pytest.mark.asyncio
@@ -34,9 +37,7 @@ async def test_deployment_security_gate_critical_blocks():
         deployment_id="dep_001",
         asset_id="site_main",
         endpoints=["/checkout"],
-        simulated_findings=[
-            {"severity": "critical", "title": "RCE on webhook parser"}
-        ]
+        simulated_findings=[{"severity": "critical", "title": "RCE on webhook parser"}],
     )
     assert res_crit.verdict == GateVerdict.BLOCKED
     assert "CRITICAL" in res_crit.block_reason
@@ -47,9 +48,7 @@ async def test_deployment_security_gate_critical_blocks():
         deployment_id="dep_002",
         asset_id="site_main",
         endpoints=["/api/v1/search"],
-        simulated_findings=[
-            {"severity": "high", "title": "Reflected XSS"}
-        ]
+        simulated_findings=[{"severity": "high", "title": "Reflected XSS"}],
     )
     assert res_high.verdict == GateVerdict.NEEDS_APPROVAL
     assert res_high.requires_human_override is True
@@ -60,9 +59,7 @@ async def test_deployment_security_gate_critical_blocks():
         deployment_id="dep_003",
         asset_id="site_main",
         endpoints=["/pricing"],
-        simulated_findings=[
-            {"severity": "medium", "title": "Missing HSTS Header"}
-        ]
+        simulated_findings=[{"severity": "medium", "title": "Missing HSTS Header"}],
     )
     assert res_med.verdict == GateVerdict.APPROVED
     assert res_med.block_reason is None
@@ -71,11 +68,7 @@ async def test_deployment_security_gate_critical_blocks():
 @pytest.mark.asyncio
 async def test_forge_delivery_integration():
     gate = DeploymentSecurityGate()
-    manifest = {
-        "asset_id": "site_main",
-        "deployed_endpoints": ["/v1/checkout", "/v1/pay"],
-        "security_findings": []
-    }
+    manifest = {"asset_id": "site_main", "deployed_endpoints": ["/v1/checkout", "/v1/pay"], "security_findings": []}
     delivery_res = await gate.process_forge_delivery("forge_task_77", manifest)
     assert delivery_res["traffic_routed"] is True
     assert delivery_res["gate_result"]["verdict"] == "APPROVED"
@@ -97,20 +90,31 @@ def test_security_baseline_and_compliance_report():
     assert len(report["posture_trajectory"]) > 0
 
 
-def test_deployment_gate_and_compliance_api_endpoints():
+def test_deployment_gate_and_compliance_api_endpoints(monkeypatch):
     client = TestClient(app)
 
     # 1. POST /v1/security/deployment-gate/evaluate
-    res = client.post("/v1/security/deployment-gate/evaluate", json={
-        "deployment_id": "dep_api_test_01",
-        "asset_id": "site_main",
-        "endpoints": ["/api/v1/auth"],
-        "simulated_findings": [{"severity": "critical", "title": "Auth Bypass"}]
-    })
+    assert (
+        client.post(
+            "/v1/security/deployment-gate/evaluate",
+            json={"deployment_id": "dep_probe", "asset_id": "site_main", "endpoints": []},
+        ).status_code
+        == 401
+    )
+    res = client.post(
+        "/v1/security/deployment-gate/evaluate",
+        headers=friday_headers(monkeypatch),
+        json={
+            "deployment_id": "dep_api_test_01",
+            "asset_id": "site_main",
+            "endpoints": ["/api/v1/auth"],
+            "simulated_findings": [{"severity": "critical", "title": "Auth Bypass"}],
+        },
+    )
     assert res.status_code == 200
     assert res.json()["verdict"] == "BLOCKED"
 
     # 2. GET /v1/security/compliance-report
-    comp_res = client.get("/v1/security/compliance-report")
+    comp_res = client.get("/v1/security/compliance-report", headers=auth_headers())
     assert comp_res.status_code == 200
     assert "compliance_readiness_score" in comp_res.json()

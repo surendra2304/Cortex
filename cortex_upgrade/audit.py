@@ -1,10 +1,13 @@
 from __future__ import annotations
+
 import asyncio
 from datetime import UTC, datetime
 from uuid import uuid4
+
 from .models import AuditEvent
 
 SECRET_WORDS = {"authorization", "api_key", "token", "secret", "password", "cookie", "credential"}
+
 
 def redact(value):
     if isinstance(value, dict):
@@ -13,14 +16,25 @@ def redact(value):
         return [redact(v) for v in value]
     return value
 
+
 class AuditLog:
     def __init__(self) -> None:
         self._rows: list[AuditEvent] = []
         self._lock = asyncio.Lock()
 
     async def append(self, tenant_id, principal_id, request_id, action, resource, outcome, reason="", metadata=None):
-        record = AuditEvent(uuid4(), tenant_id, principal_id, action, resource, outcome, request_id,
-                            reason, redact(metadata or {}), datetime.now(UTC))
+        record = AuditEvent(
+            uuid4(),
+            tenant_id,
+            principal_id,
+            action,
+            resource,
+            outcome,
+            request_id,
+            reason,
+            redact(metadata or {}),
+            datetime.now(UTC),
+        )
         async with self._lock:
             self._rows.append(record)
         return record

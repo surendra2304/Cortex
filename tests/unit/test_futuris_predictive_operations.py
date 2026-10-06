@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 for p in [
@@ -24,6 +25,8 @@ from cortex_api.main import app
 from cortex_integrations import FuturisClient
 from cortex_intelligence import PredictionInformedPersonalization
 from cortex_workflow_engine import CapacityPlanningWorkflow
+
+from tests.conftest import auth_headers
 
 
 @pytest.mark.asyncio
@@ -82,23 +85,27 @@ async def test_capacity_planning_workflow_auto_scaling():
 
 def test_futuris_predictive_api_endpoints():
     client = TestClient(app)
+    headers = auth_headers()
+
+    # Audit C4: forecasts expose tenant load and capacity plans — never anonymous.
+    assert client.get("/v1/predictive/traffic-forecast").status_code == 401
 
     # 1. GET /v1/predictive/traffic-forecast
-    res_trf = client.get("/v1/predictive/traffic-forecast?site_id=site_main")
+    res_trf = client.get("/v1/predictive/traffic-forecast?site_id=site_main", headers=headers)
     assert res_trf.status_code == 200
     assert "peak_predicted_rps" in res_trf.json()
 
     # 2. GET /v1/predictive/capacity-plan
-    res_cap = client.get("/v1/predictive/capacity-plan?site_id=site_main")
+    res_cap = client.get("/v1/predictive/capacity-plan?site_id=site_main", headers=headers)
     assert res_cap.status_code == 200
     assert "auto_scaling_replica_target" in res_cap.json()
 
     # 3. GET /v1/predictive/conversion-trends
-    res_cvr = client.get("/v1/predictive/conversion-trends?segment_id=checkout_segment")
+    res_cvr = client.get("/v1/predictive/conversion-trends?segment_id=checkout_segment", headers=headers)
     assert res_cvr.status_code == 200
     assert "drop_probability" in res_cvr.json()
 
     # 4. GET /v1/predictive/churn-risk
-    res_chn = client.get("/v1/predictive/churn-risk?tenant_id=default")
+    res_chn = client.get("/v1/predictive/churn-risk?tenant_id=default", headers=headers)
     assert res_chn.status_code == 200
     assert len(res_chn.json()) >= 2

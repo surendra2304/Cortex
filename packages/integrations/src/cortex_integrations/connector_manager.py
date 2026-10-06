@@ -1,10 +1,11 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Dict, List, Optional
-import logging
+
 import copy
+import logging
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
 
 logger = logging.getLogger("cortex-connector-manager")
 
@@ -20,9 +21,9 @@ class HealthStatus(str, Enum):
 class ConnectorHealth:
     name: str
     status: HealthStatus
-    latency_ms: Optional[float]
-    details: Dict[str, Any] = field(default_factory=dict)
-    checked_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    latency_ms: float | None
+    details: dict[str, Any] = field(default_factory=dict)
+    checked_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 class CredentialManager:
@@ -30,15 +31,16 @@ class CredentialManager:
     Isolates connector credentials per tenant and property.
     Scrubs credentials from logs, error messages, and responses.
     """
-    def __init__(self) -> None:
-        self._credentials: Dict[str, Dict[str, str]] = {}
 
-    def set_credentials(self, scope_id: str, connector: str, credentials: Dict[str, str]) -> None:
+    def __init__(self) -> None:
+        self._credentials: dict[str, dict[str, str]] = {}
+
+    def set_credentials(self, scope_id: str, connector: str, credentials: dict[str, str]) -> None:
         """Stores credentials securely for a tenant/property scope."""
         key = f"{scope_id}:{connector}"
         self._credentials[key] = copy.deepcopy(credentials)
 
-    def get_credentials(self, scope_id: str, connector: str) -> Dict[str, str]:
+    def get_credentials(self, scope_id: str, connector: str) -> dict[str, str]:
         """Retrieves credentials for a specific tenant/property scope."""
         key = f"{scope_id}:{connector}"
         return copy.deepcopy(self._credentials.get(key, {}))
@@ -63,9 +65,10 @@ class ConnectorManager:
     """
     Manages health checks, circuit breakers, and status reporting for all Cortex connectors.
     """
-    def __init__(self, credential_manager: Optional[CredentialManager] = None) -> None:
+
+    def __init__(self, credential_manager: CredentialManager | None = None) -> None:
         self.credential_mgr = credential_manager or CredentialManager()
-        self.mock_outages: Dict[str, bool] = {}
+        self.mock_outages: dict[str, bool] = {}
 
     def set_mock_outage(self, connector_name: str, outage: bool) -> None:
         """Simulates an outage for testing resilience."""
@@ -75,11 +78,15 @@ class ConnectorManager:
         """Report unknown until an actual provider probe is configured."""
         if self.mock_outages.get(name):
             return ConnectorHealth(
-                name, HealthStatus.DOWN, None,
+                name,
+                HealthStatus.DOWN,
+                None,
                 {"error": f"Simulated {provider} outage", "simulated": True},
             )
         return ConnectorHealth(
-            name, HealthStatus.UNKNOWN, None,
+            name,
+            HealthStatus.UNKNOWN,
+            None,
             {"provider": provider, "reason": "No live health probe is configured"},
         )
 
@@ -95,16 +102,37 @@ class ConnectorManager:
     async def check_payments(self) -> ConnectorHealth:
         return self._health("payments", "Stripe")
 
+    async def _peer_health(self, name: str, provider: str) -> ConnectorHealth:
+        """Probe a FRIDAY-Universe peer through its real client.
+
+        These three connectors used to answer UNKNOWN ("no live health probe is configured")
+        even when the peer was deployed and answering, which made ``/connectors/health``
+        useless for exactly the peers Cortex depends on.
+        """
+        if self.mock_outages.get(name):
+            return ConnectorHealth(
+                name, HealthStatus.DOWN, None, {"error": f"Simulated {provider} outage", "simulated": True}
+            )
+
+        from cortex_integrations.futuris_client import FuturisClient
+        from cortex_integrations.intelx_client import IntelXClient
+        from cortex_integrations.sentinel_client import SentinelClient
+
+        client = {"futuris": FuturisClient, "intelx": IntelXClient, "sentinel": SentinelClient}[name]()
+        detail = await client.health_check()
+        status_map = {"UP": HealthStatus.UP, "DOWN": HealthStatus.DOWN, "NOT_CONFIGURED": HealthStatus.UNKNOWN}
+        return ConnectorHealth(name, status_map.get(detail["status"], HealthStatus.UNKNOWN), None, detail)
+
     async def check_futuris(self) -> ConnectorHealth:
-        return self._health("futuris", "Futuris")
+        return await self._peer_health("futuris", "Futuris")
 
     async def check_intelx(self) -> ConnectorHealth:
-        return self._health("intelx", "IntelX")
+        return await self._peer_health("intelx", "IntelX")
 
     async def check_sentinel(self) -> ConnectorHealth:
-        return self._health("sentinel", "Sentinel")
+        return await self._peer_health("sentinel", "Sentinel")
 
-    async def check_all(self) -> Dict[str, Any]:
+    async def check_all(self) -> dict[str, Any]:
         """Runs health checks on all registered connectors and returns aggregated status."""
         checks = [
             await self.check_email(),
@@ -119,10 +147,9 @@ class ConnectorManager:
         any_down = any(c.status == HealthStatus.DOWN for c in checks)
         any_degraded = any(c.status == HealthStatus.DEGRADED for c in checks)
         overall = (
-            HealthStatus.UP if all_up else
-            HealthStatus.DOWN if any_down else
-            HealthStatus.DEGRADED if any_degraded else
-            HealthStatus.UNKNOWN
+            HealthStatus.UP
+            if all_up
+            else HealthStatus.DOWN if any_down else HealthStatus.DEGRADED if any_degraded else HealthStatus.UNKNOWN
         )
 
         return {
@@ -136,11 +163,11 @@ class ConnectorManager:
                     "status": c.status.value,
                     "latency_ms": round(c.latency_ms, 2) if c.latency_ms is not None else None,
                     "details": c.details,
-                    "checked_at": c.checked_at.isoformat()
+                    "checked_at": c.checked_at.isoformat(),
                 }
                 for c in checks
             },
-            "timestamp": datetime.now(timezone.utc).isoformat()
+            "timestamp": datetime.now(UTC).isoformat(),
         }
 
 

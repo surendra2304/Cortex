@@ -1,8 +1,8 @@
 import logging
-from typing import Dict, Any, List, Optional
 
-from cortex_agents import SpecialistAgent, AgentInput, AgentOutput, ProposedAction
-from cortex_integrations.intelx_client import IntelXClient, CompetitorProfile
+from cortex_integrations.intelx_client import IntelXClient
+
+from cortex_agents import AgentInput, AgentOutput, ProposedAction, SpecialistAgent
 
 logger = logging.getLogger("cortex-competitive-agent")
 
@@ -21,11 +21,9 @@ class CompetitiveIntelligenceAgent(SpecialistAgent):
       - Personalization Engine: Competitor-aware messaging variants
     """
 
-    def __init__(self, intelx_client: Optional[IntelXClient] = None):
+    def __init__(self, intelx_client: IntelXClient | None = None):
         super().__init__(
-            agent_id="agent_competitive",
-            domain="competitive",
-            capabilities=["account_update", "banner_injection"]
+            agent_id="agent_competitive", domain="competitive", capabilities=["account_update", "banner_injection"]
         )
         self.intelx_client = intelx_client or IntelXClient()
 
@@ -60,28 +58,28 @@ class CompetitiveIntelligenceAgent(SpecialistAgent):
                     "competitor": profile.competitor_name,
                     "battlecard": profile.battlecard_summary,
                     "feature_gaps": profile.feature_gaps,
-                    "citations": profile.evidence_citations
+                    "citations": profile.evidence_citations,
                 },
                 rationale=f"Identified interest comparing against {profile.competitor_name}. Synthesized positioning battlecard.",
-                side_effect_level="SENSITIVE"
+                side_effect_level="SENSITIVE",
             ),
             ProposedAction(
                 action_type="banner_injection",
                 target="comparison_banner",
                 params={
                     "variant": f"vs_{competitor_name.lower()}_callout",
-                    "copy": f"Switch from {profile.competitor_name} to Cortex for zero-latency autonomous operations and 60% lower TCO."
+                    "copy": f"Switch from {profile.competitor_name} to Cortex for zero-latency autonomous operations and 60% lower TCO.",
                 },
                 rationale=f"Surface competitor-aware comparison banner targeting {profile.competitor_name} feature gaps.",
-                side_effect_level="READ"
-            )
+                side_effect_level="READ",
+            ),
         ]
 
         evidence_refs = [
             f"competitor_identified={profile.competitor_name}",
             f"market_share_tier={profile.market_share_tier}",
             f"gap_count={len(profile.feature_gaps)}",
-            *profile.evidence_citations
+            *profile.evidence_citations,
         ]
 
         return AgentOutput(
@@ -90,5 +88,5 @@ class CompetitiveIntelligenceAgent(SpecialistAgent):
             confidence=0.92,
             reasoning_summary=f"Analyzed competitive positioning vs {profile.competitor_name}. Found {len(profile.feature_gaps)} key feature gaps. Generated sales battlecard and personalized comparison banner.",
             proposed_actions=proposed_actions,
-            evidence_refs=evidence_refs
+            evidence_refs=evidence_refs,
         )

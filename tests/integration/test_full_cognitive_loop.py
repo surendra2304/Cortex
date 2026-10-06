@@ -1,8 +1,9 @@
-import pytest
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -22,15 +23,7 @@ for p in [
     sys.path.insert(0, os.path.abspath(p))
 
 from cortex_core import Orchestrator
-from cortex_event_schema import EventSchema, Actor, ActorType
-from cortex_agents import AgentRegistry
-from cortex_ai_universe_adapter import AIUniverseClient
-from cortex_policy_engine import PolicyEngine
-from cortex_tool_runtime import ToolBus
-from cortex_identity import IdentityResolver
-from cortex_analytics import ScoringEngine
-from cortex_intelligence import ContextBuilder
-from cortex_memory import MemoryStore
+from cortex_event_schema import Actor, ActorType, EventSchema
 
 
 @pytest.mark.asyncio
@@ -55,13 +48,13 @@ async def test_full_cognitive_loop_end_to_end():
         tenant_id="ten_enterprise",
         site_id="site_main",
         type="demo.requested",
-        occurred_at=datetime.utcnow(),
+        occurred_at=datetime.now(UTC),
         actor=Actor(type=ActorType.VISITOR, id="vis_e2e_100"),
         session_id="ses_e2e_200",
         source="web-sdk",
         data={"company_size": "500+", "role": "VP Engineering"},
         consent={"analytics": True},
-        trace_id="trc_e2e_full_loop_999"
+        trace_id="trc_e2e_full_loop_999",
     )
 
     # 3. Execute full 10-phase cognitive loop

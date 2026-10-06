@@ -1,8 +1,8 @@
-import pytest
 import os
 import sys
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -21,11 +21,10 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_analytics import FunnelEngine, ScoringEngine
 from cortex_identity import IdentityResolver
-from cortex_analytics import ScoringEngine, FunnelEngine, CohortEngine
 from cortex_intelligence import ContextBuilder
-from cortex_memory import MemoryStore, MemoryScope, TrustLabel
-from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel, IdentityLinkModel, MemoryEntryModel
+from cortex_memory import MemoryScope, MemoryStore, TrustLabel
 
 
 @pytest.mark.asyncio
@@ -42,10 +41,7 @@ async def test_identity_resolution_chain_and_consent_policy():
 
     # Case A: Anonymous Visitor without Consent -> Pseudonymous tracking only
     res_no_consent = await resolver.resolve_identity(
-        db=mock_db,
-        visitor_id="vis_anon_99",
-        email="lead@company.com",
-        consent_granted=False
+        db=mock_db, visitor_id="vis_anon_99", email="lead@company.com", consent_granted=False
     )
     assert res_no_consent["is_identified"] is False
     assert res_no_consent["lifecycle_stage"] == "anonymous"
@@ -56,7 +52,7 @@ async def test_identity_resolution_chain_and_consent_policy():
         visitor_id="vis_anon_99",
         email="lead@enterprise.com",
         consent_granted=True,
-        traits={"company": "Enterprise Corp"}
+        traits={"company": "Enterprise Corp"},
     )
     assert res_identified["is_identified"] is True
     assert res_identified["primary_email"] == "lead@enterprise.com"
@@ -74,11 +70,7 @@ def test_scoring_engine_explainable_breakdown():
         {"type": "demo.requested", "data": {"size": "500+"}},
         {"type": "email.opened", "data": {}},
     ]
-    traits = {
-        "email": "director@bigcorp.com",
-        "company": "BigCorp",
-        "source": "linkedin"
-    }
+    traits = {"email": "director@bigcorp.com", "company": "BigCorp", "source": "linkedin"}
 
     score_res = scoring.compute_score(events, traits, session_summary={"pricing_view_count": 2, "demo_view_count": 1})
 
@@ -86,7 +78,7 @@ def test_scoring_engine_explainable_breakdown():
     assert score_res.total > 0.60
     assert score_res.behavior > 0.20
     assert score_res.firmographic == 0.30  # Corporate domain max firmographic
-    assert score_res.source == 0.10        # LinkedIn max source
+    assert score_res.source == 0.10  # LinkedIn max source
     assert score_res.details["is_corp_domain"] is True
     assert score_res.details["pricing_views"] == 2
 
@@ -99,10 +91,8 @@ def test_funnel_engine_conversion_and_anomaly_detection():
         {"session_id": "s1", "type": "page_view", "data": {"path": "/pricing"}},
         {"session_id": "s1", "type": "demo.viewed", "data": {"path": "/demo"}},
         {"session_id": "s1", "type": "checkout.completed", "data": {"path": "/checkout"}},
-
         {"session_id": "s2", "type": "page_view", "data": {"path": "/pricing"}},
         {"session_id": "s2", "type": "demo.viewed", "data": {"path": "/demo"}},
-
         {"session_id": "s3", "type": "page_view", "data": {"path": "/pricing"}},
     ]
 
@@ -137,7 +127,7 @@ def test_context_builder_intent_levels_and_anomaly_flags():
         session_events=session_events,
         actor_events=[],
         visitor_attributes={"country": "US"},
-        profile_traits={"email": "lead@corp.com"}
+        profile_traits={"email": "lead@corp.com"},
     )
 
     assert ctx.intent_level == "HIGH_INTENT"
@@ -157,7 +147,7 @@ async def test_memory_store_put_get_and_strategy_learnings():
         context_features={"intent_score": 0.85, "pricing_views": 3},
         action_taken="banner_injection",
         outcome_lift_pct=14.5,
-        sample_size=50
+        sample_size=50,
     )
     assert recorded.scope == MemoryScope.STRATEGY.value
     assert recorded.trust_label == TrustLabel.VERIFIED_TELEMETRY.value

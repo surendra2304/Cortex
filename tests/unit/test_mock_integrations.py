@@ -1,16 +1,20 @@
 import os
 import sys
+
 import pytest
 
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 
-from cortex_tool_runtime import ToolBus
 from cortex_integrations import (
-    EmailToolExecutor, create_email_tool,
-    CRMToolExecutor, create_crm_tool,
-    WebhookToolExecutor, create_webhook_tool
+    CRMToolExecutor,
+    EmailToolExecutor,
+    WebhookToolExecutor,
+    create_crm_tool,
+    create_email_tool,
+    create_webhook_tool,
 )
+from cortex_tool_runtime import ToolBus
 
 
 @pytest.mark.asyncio

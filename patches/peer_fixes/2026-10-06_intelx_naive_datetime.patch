@@ -1,0 +1,59 @@
+diff --git a/intelx/api/v1/friday.py b/intelx/api/v1/friday.py
+index b12d788..a5da0a7 100644
+--- a/intelx/api/v1/friday.py
++++ b/intelx/api/v1/friday.py
+@@ -25,6 +25,7 @@ from intelx.db.models import (
+     ResearchRun,
+     Source,
+     Task,
++    ensure_utc,
+ )
+ from intelx.db.repos import RunRepo
+ from intelx.db.session import get_db_session, get_sessionmaker
+@@ -403,7 +404,7 @@ async def delegate_research_from_friday(
+                 intelx_run_id=existing_run.id,
+                 friday_request_id=payload.friday_request_id,
+                 status=existing_run.status.value,
+-                estimated_completion=existing_run.completed_at
++                estimated_completion=ensure_utc(existing_run.completed_at)
+                 or (datetime.now(UTC) + timedelta(minutes=5)),
+                 subquestion_count=subq_est,
+                 task_id=payload.task_id,
+@@ -734,8 +735,11 @@ async def get_friday_research_status(
+ 
+     duration = None
+     if run.started_at:
+-        end_t = run.completed_at or datetime.now(UTC)
+-        duration = round((end_t - run.started_at).total_seconds(), 2)
++        # Both sides must be timezone-aware: SQLite returns naive datetimes for
++        # DateTime(timezone=True) columns, which made this subtraction raise a 500.
++        started_at = ensure_utc(run.started_at)
++        end_t = ensure_utc(run.completed_at) or datetime.now(UTC)
++        duration = round((end_t - started_at).total_seconds(), 2)
+ 
+     friday_req_id = (
+         run.scope_json.get("friday_request_id") if isinstance(run.scope_json, dict) else None
+diff --git a/intelx/db/models.py b/intelx/db/models.py
+index f82627b..e0e71ce 100644
+--- a/intelx/db/models.py
++++ b/intelx/db/models.py
+@@ -50,6 +50,19 @@ def utc_now() -> datetime:
+     return datetime.now(UTC)
+ 
+ 
++def ensure_utc(value: datetime | None) -> datetime | None:
++    """Attach UTC to a datetime read back from the database.
++
++    SQLite has no timezone type: a column declared ``DateTime(timezone=True)`` still comes
++    back naive. Arithmetic against ``datetime.now(UTC)`` then raises
++    ``TypeError: can't subtract offset-naive and offset-aware datetimes`` (observed as a 500
++    from GET /api/v1/friday/research/{run_id} while a run was in flight).
++    """
++    if value is None:
++        return None
++    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
++
++
+ class ResearchRun(Base):
+     """Execution container for an end-to-end intelligence investigation."""
+ 

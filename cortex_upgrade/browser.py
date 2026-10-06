@@ -1,8 +1,11 @@
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from urllib.parse import urlsplit
-from .policy import PolicyEngine, PolicyDenied
+
+from .policy import PolicyDenied, PolicyEngine
+
 
 @dataclass(frozen=True)
 class BrowserPolicy:
@@ -10,11 +13,13 @@ class BrowserPolicy:
     max_navigation_hops: int = 5
     max_steps: int = 30
 
+
 @dataclass(frozen=True)
 class BrowserAction:
     kind: str
     target: str
     value: str | None = None
+
 
 class BrowserGuard:
     def __init__(self, policy: BrowserPolicy) -> None:
@@ -38,6 +43,7 @@ class BrowserGuard:
         if self.steps > self.policy.max_steps:
             raise PolicyDenied("browser step limit exceeded")
         self.history.append(action.target)
+
 
 class BrowserSession:
     def __init__(self, guard: BrowserGuard) -> None:

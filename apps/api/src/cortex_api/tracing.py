@@ -1,7 +1,8 @@
-from starlette.middleware.base import BaseHTTPMiddleware
-from fastapi import Request
-import uuid
 import contextvars
+import uuid
+
+from fastapi import Request
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # Global context var for distributed tracing across services
 trace_id_ctx = contextvars.ContextVar("trace_id_ctx", default=None)

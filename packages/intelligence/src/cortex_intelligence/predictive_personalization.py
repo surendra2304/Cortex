@@ -1,8 +1,8 @@
 import logging
-from typing import Dict, Any, List, Optional
-from pydantic import BaseModel, Field
+from typing import Any
 
-from cortex_integrations.futuris_client import FuturisClient, ConversionTrendForecast, TrafficForecast
+from cortex_integrations.futuris_client import FuturisClient
+from pydantic import BaseModel
 
 logger = logging.getLogger("cortex-predictive-personalization")
 
@@ -11,7 +11,7 @@ class PredictivePersonalizationAction(BaseModel):
     segment_id: str
     action_type: str  # offer_adjustment, preemptive_nurture, landing_page_variant
     target_rule: str
-    variant_details: Dict[str, Any]
+    variant_details: dict[str, Any]
     rationale: str
     confidence: float
 
@@ -24,10 +24,10 @@ class PredictionInformedPersonalization:
     - If churn risk forecast is high -> Triggers retention workflow preemptively
     """
 
-    def __init__(self, futuris_client: Optional[FuturisClient] = None):
+    def __init__(self, futuris_client: FuturisClient | None = None):
         self.futuris_client = futuris_client or FuturisClient()
 
-    async def evaluate_segment_personalization(self, segment_id: str) -> Optional[PredictivePersonalizationAction]:
+    async def evaluate_segment_personalization(self, segment_id: str) -> PredictivePersonalizationAction | None:
         trend = await self.futuris_client.predict_conversion_trends(segment_id)
 
         # 1. Proactive conversion drop mitigation
@@ -39,22 +39,19 @@ class PredictionInformedPersonalization:
                 variant_details={
                     "cta_text": "Schedule a 1-on-1 Guided Architecture Review (Priority)",
                     "incentive": "Extended 30-day Enterprise Trial",
-                    "bottleneck_step": trend.bottleneck_step
+                    "bottleneck_step": trend.bottleneck_step,
                 },
                 rationale=f"Futuris forecasted {trend.drop_probability * 100:.0f}% conversion drop probability at {trend.bottleneck_step}. Preemptively engaging with guided VIP onboarding.",
-                confidence=trend.confidence
+                confidence=trend.confidence,
             )
         elif trend.trajectory == "upward":
             return PredictivePersonalizationAction(
                 segment_id=segment_id,
                 action_type="landing_page_variant",
                 target_rule=f"rule_accelerate_{segment_id}",
-                variant_details={
-                    "cta_text": "Start Instant 14-Day POC",
-                    "variant": "high_intent_accelerator"
-                },
+                variant_details={"cta_text": "Start Instant 14-Day POC", "variant": "high_intent_accelerator"},
                 rationale="Upward conversion momentum forecasted. Accelerating direct self-service conversion path.",
-                confidence=trend.confidence
+                confidence=trend.confidence,
             )
 
         return None

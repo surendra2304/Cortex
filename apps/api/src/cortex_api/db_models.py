@@ -1,11 +1,20 @@
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Float, Boolean, Integer, Index, JSON
-from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+from datetime import UTC, datetime
 
-# Universal JSON type: compiles to native JSONB on PostgreSQL and JSON on SQLite
-JSONB = JSON().with_variant(PG_JSONB, "postgresql")
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import relationship
-from datetime import datetime
+
 from cortex_api.config import Base
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
+
+# Universal JSON type: compiles to native JSONB on PostgreSQL and JSON on SQLite.
+# Defined after the imports so the module's import block stays contiguous.
+JSONB = JSON().with_variant(PG_JSONB, "postgresql")
 
 
 class ProfileModel(Base):
@@ -16,8 +25,8 @@ class ProfileModel(Base):
     primary_email = Column(String(255), nullable=True, index=True)
     identities = Column(JSONB, default=list, nullable=False)
     traits = Column(JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
 
     visitors = relationship("VisitorModel", back_populates="profile")
     leads = relationship("LeadModel", back_populates="profile")
@@ -30,8 +39,8 @@ class VisitorModel(Base):
     tenant_id = Column(String(64), nullable=False, index=True)
     site_id = Column(String(64), nullable=False, index=True)
     profile_id = Column(String(64), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True, index=True)
-    first_seen_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
-    last_seen_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    first_seen_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
     attributes = Column(JSONB, default=dict, nullable=False)
 
     profile = relationship("ProfileModel", back_populates="visitors")
@@ -46,10 +55,10 @@ class SessionModel(Base):
     visitor_id = Column(String(64), nullable=False, index=True)
     user_agent = Column(Text, nullable=True)
     ip_address = Column(String(45), nullable=True)
-    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     ended_at = Column(DateTime(timezone=True), nullable=True)
     session_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     events = relationship("EventModel", back_populates="session", cascade="all, delete-orphan")
 
@@ -69,7 +78,7 @@ class EventModel(Base):
     data = Column(JSONB, default=dict, nullable=False)
     consent = Column(JSONB, nullable=True)
     trace_id = Column(String(64), nullable=True)
-    server_received_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    server_received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     client_ip = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
 
@@ -92,7 +101,7 @@ class LeadModel(Base):
     status = Column(String(32), default="new", nullable=False)
     source = Column(String(64), nullable=True)
     lead_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
     profile = relationship("ProfileModel", back_populates="leads")
 
@@ -108,7 +117,7 @@ class AuditRecordModel(Base):
     changes = Column(JSONB, default=dict, nullable=False)
     verification_status = Column(String(32), default="verified", nullable=False)
     trace_id = Column(String(64), nullable=True, index=True)
-    timestamp = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class ApiKeyModel(Base):
@@ -121,7 +130,7 @@ class ApiKeyModel(Base):
     key_prefix = Column(String(16), nullable=False)
     name = Column(String(128), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -136,7 +145,7 @@ class IdentityLinkModel(Base):
     target_id = Column(String(64), nullable=False, index=True)
     confidence = Column(Float, default=1.0, nullable=False)
     link_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class LeadScoreHistoryModel(Base):
@@ -152,7 +161,7 @@ class LeadScoreHistoryModel(Base):
     source_score = Column(Float, default=0.0, nullable=False)
     score_breakdown = Column(JSONB, default=dict, nullable=False)
     triggered_by = Column(String(64), default="event", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class MemoryEntryModel(Base):
@@ -166,7 +175,7 @@ class MemoryEntryModel(Base):
     content = Column(JSONB, default=dict, nullable=False)
     trust_label = Column(String(32), default="verified_telemetry", nullable=False)
     source = Column(String(64), default="cognitive_loop", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -180,7 +189,7 @@ class WorkflowRunModel(Base):
     state = Column(String(32), nullable=False, index=True)  # TRIGGERED, PLANNING, EXECUTING, COMPLETED, etc.
     steps = Column(JSONB, default=list, nullable=False)
     context_data = Column("context", JSONB, default=dict, nullable=False)
-    started_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     completed_at = Column(DateTime(timezone=True), nullable=True)
 
 
@@ -199,7 +208,7 @@ class ApprovalQueueModel(Base):
     status = Column(String(32), default="pending", nullable=False)  # pending, approved, rejected, expired
     decision_by = Column(String(128), nullable=True)
     decision_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     decided_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -217,4 +226,4 @@ class StrategyPerformanceModel(Base):
     success_rate = Column(Float, default=0.0, nullable=False)
     confidence = Column(Float, default=0.0, nullable=False)
     recent_outcomes = Column(JSONB, default=list, nullable=False)
-    last_updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    last_updated_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)

@@ -1,8 +1,34 @@
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-from pydantic import BaseModel, Field
-import re
 import logging
+from datetime import UTC, datetime
+from typing import Any
+
+from pydantic import BaseModel
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
+
+def _as_utc(value: object) -> datetime | None:
+    """Normalise a timestamp to timezone-aware UTC.
+
+    Callers may pass naive datetimes (a historical convention in this codebase)
+    or ISO-8601 strings from the event stream. Comparing a naive value with an
+    aware ``now`` raises TypeError, so inputs are normalised here rather than
+    trusted (audit defect M4).
+    """
+    if value is None:
+        return None
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    if isinstance(value, datetime):
+        return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+    return None
+
 
 logger = logging.getLogger("cortex-nl-analytics")
 
@@ -13,10 +39,10 @@ class NLQueryRequest(BaseModel):
 
 class NLQueryResponse(BaseModel):
     question: str
-    parsed_intent: Dict[str, Any]
+    parsed_intent: dict[str, Any]
     sql_translation: str
     answer_summary: str
-    data: List[Dict[str, Any]]
+    data: list[dict[str, Any]]
     confidence: float = 1.0
 
 
@@ -87,37 +113,29 @@ class AdvancedAnalyticsEngine:
             {dimension: "google / organic", metric: 1420, "conversion_rate_pct": 8.4},
             {dimension: "google / cpc", metric: 980, "conversion_rate_pct": 12.1},
             {dimension: "direct", metric: 850, "conversion_rate_pct": 6.2},
-            {dimension: "linkedin / social", metric: 420, "conversion_rate_pct": 14.8}
+            {dimension: "linkedin / social", metric: 420, "conversion_rate_pct": 14.8},
         ]
 
         answer = f"Analyzed {metric} grouped by {dimension} over {time_range.replace('_', ' ')}. Top converting source is 'linkedin / social' (14.8% CR), followed by 'google / cpc' (12.1% CR)."
 
         return NLQueryResponse(
             question=question,
-            parsed_intent={
-                "metric": metric,
-                "dimension": dimension,
-                "time_range": time_range,
-                "filters": filter_cond
-            },
+            parsed_intent={"metric": metric, "dimension": dimension, "time_range": time_range, "filters": filter_cond},
             sql_translation=sql,
             answer_summary=answer,
             data=mock_data,
-            confidence=0.96
+            confidence=0.96,
         )
 
     def calculate_revenue_attribution(
-        self,
-        touchpoints: List[Dict[str, Any]],
-        total_revenue: float,
-        model: str = "linear"
-    ) -> Dict[str, float]:
+        self, touchpoints: list[dict[str, Any]], total_revenue: float, model: str = "linear"
+    ) -> dict[str, float]:
         """Calculates multi-touch attribution (first-touch, last-touch, linear, time-decay)."""
         if not touchpoints:
             return {}
 
         n = len(touchpoints)
-        result: Dict[str, float] = {}
+        result: dict[str, float] = {}
 
         if model == "first_touch":
             first = touchpoints[0]["channel"]
@@ -128,10 +146,10 @@ class AdvancedAnalyticsEngine:
         elif model == "time_decay":
             # 7-day half-life weighting: 2^(-age_in_days / 7)
             weights = []
-            now = datetime.utcnow()
+            now = _utcnow()
             for tp in touchpoints:
-                occurred = tp.get("occurred_at", now)
-                days_old = max((now - occurred).days if isinstance(occurred, datetime) else 1, 0)
+                occurred = _as_utc(tp.get("occurred_at", now))
+                days_old = max((now - occurred).days, 0) if occurred else 1
                 weights.append(pow(2, -days_old / 7.0))
             total_weight = sum(weights) or 1.0
             for i, tp in enumerate(touchpoints):

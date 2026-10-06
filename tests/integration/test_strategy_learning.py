@@ -1,7 +1,8 @@
-import pytest
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -11,7 +12,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_memory import MemoryStore, MemoryScope
+from cortex_memory import MemoryStore
 
 
 @pytest.mark.asyncio
@@ -34,7 +35,7 @@ async def test_strategy_learning_and_performance_feedback_e2e():
             action_type="banner_injection",
             context_snapshot={"intent_score": 0.85},
             verdict="SUCCESS",
-            metric_delta={"conversion_rate": 0.12}
+            metric_delta={"conversion_rate": 0.12},
         )
 
     high_perf = await memory_store.get_strategy_performance("banner_injection")
@@ -50,7 +51,7 @@ async def test_strategy_learning_and_performance_feedback_e2e():
             action_type="cold_popup",
             context_snapshot={"intent_score": 0.20},
             verdict="FAILURE",
-            metric_delta={"conversion_rate": -0.05}
+            metric_delta={"conversion_rate": -0.05},
         )
 
     fail_perf = await memory_store.get_strategy_performance("cold_popup")

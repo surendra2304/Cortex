@@ -50,5 +50,44 @@ packages = [
     "packages/intelligence/src/cortex_intelligence",
     "packages/memory/src/cortex_memory",
     "apps/api/src/cortex_api",
+    "apps/worker/src/cortex_worker",
     "cortex_upgrade"
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["node_modules", ".venv", "apps/dashboard/out", "migrations/versions"]
+
+[tool.ruff.lint]
+# E/F/W are the correctness rules; I orders imports; B catches real bugs such as
+# mutable defaults and bare except-pass; UP keeps the codebase on modern Python.
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = [
+    "E501",  # line length is enforced by the formatter, not by lint
+    "B008",  # FastAPI depends on function calls in argument defaults (Depends/Query)
+    # StrEnum conversion changes str() semantics and therefore JSON output;
+    # tracked as a deliberate upgrade rather than a lint sweep.
+    "UP042",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test modules prepend package paths before importing; E402 is expected there.
+"tests/**" = ["B011", "E402"]
+"migrations/**" = ["E402", "F401"]
+# Package entry points intentionally re-export their public surface (including
+# submodule classes) and some import for side effects. Downstream code imports
+# from these names, so unused-import removal is not safe mechanically.
+# Aggregating __init__ modules import submodules at the bottom on purpose (they
+# must run after the package-level definitions they extend).
+"**/__init__.py" = ["F401", "E402"]
+"scripts/**" = ["E402"]
+# These two modules import integration clients late, after their own module-level
+# singletons are defined, to break import cycles. The imports are deliberate.
+"apps/api/src/cortex_api/friday_router.py" = ["E402"]
+"apps/api/src/cortex_api/production_router.py" = ["E402"]

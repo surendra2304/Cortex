@@ -1,7 +1,8 @@
-import pytest
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -31,10 +32,7 @@ async def test_identity_chain_and_lifecycle_promotion_e2e():
 
     # Step 1: Anonymous browsing (no email)
     anon_res = await resolver.resolve_identity(
-        db=mock_db,
-        visitor_id="vis_e2e_anon_01",
-        email=None,
-        consent_granted=True
+        db=mock_db, visitor_id="vis_e2e_anon_01", email=None, consent_granted=True
     )
     assert anon_res["lifecycle_stage"] == "anonymous"
     assert anon_res["is_identified"] is False
@@ -45,7 +43,7 @@ async def test_identity_chain_and_lifecycle_promotion_e2e():
         visitor_id="vis_e2e_anon_01",
         email="buyer@enterprise-corp.com",
         consent_granted=True,
-        traits={"company": "Enterprise Corp", "role": "Head of Growth"}
+        traits={"company": "Enterprise Corp", "role": "Head of Growth"},
     )
     assert lead_res["lifecycle_stage"] == "lead"
     assert lead_res["is_identified"] is True

@@ -1,8 +1,15 @@
 import logging
 import uuid
-from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import Any
+
 from pydantic import BaseModel, Field
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-sentinel-listener")
 
@@ -12,17 +19,17 @@ class SentinelFinding(BaseModel):
     severity: str  # critical, high, medium, low, info
     title: str
     description: str
-    evidence_ref: Optional[str] = None
-    attack_vector: Optional[str] = None
-    affected_endpoint: Optional[str] = None
+    evidence_ref: str | None = None
+    attack_vector: str | None = None
+    affected_endpoint: str | None = None
 
 
 class SentinelPayload(BaseModel):
     sentinel_task_id: str
     asset_id: str
-    findings: List[SentinelFinding] = Field(default_factory=list)
+    findings: list[SentinelFinding] = Field(default_factory=list)
     posture_score: float = 100.0
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utcnow)
 
 
 class SentinelEventListener:
@@ -33,22 +40,26 @@ class SentinelEventListener:
     - Integrates with AssetExposureMonitor to evaluate actual attack surface exposure
     """
 
-    def __init__(self, exposure_monitor: Optional[Any] = None):
+    def __init__(self, exposure_monitor: Any | None = None):
         self.exposure_monitor = exposure_monitor
-        self.received_findings: List[Dict[str, Any]] = []
+        self.received_findings: list[dict[str, Any]] = []
 
-    async def handle_findings(self, payload: SentinelPayload, orchestrator: Optional[Any] = None) -> Dict[str, Any]:
-        logger.info(f"Received Sentinel security findings for asset {payload.asset_id} (Task: {payload.sentinel_task_id})")
+    async def handle_findings(self, payload: SentinelPayload, orchestrator: Any | None = None) -> dict[str, Any]:
+        logger.info(
+            f"Received Sentinel security findings for asset {payload.asset_id} (Task: {payload.sentinel_task_id})"
+        )
 
         processed_events = []
         for finding in payload.findings:
             finding_data = finding.model_dump()
-            self.received_findings.append({
-                "sentinel_task_id": payload.sentinel_task_id,
-                "asset_id": payload.asset_id,
-                "posture_score": payload.posture_score,
-                **finding_data
-            })
+            self.received_findings.append(
+                {
+                    "sentinel_task_id": payload.sentinel_task_id,
+                    "asset_id": payload.asset_id,
+                    "posture_score": payload.posture_score,
+                    **finding_data,
+                }
+            )
 
             # Evaluate exposure if exposure monitor is available
             exposure_level = "standard"
@@ -71,9 +82,9 @@ class SentinelEventListener:
                     "evidence_ref": finding.evidence_ref,
                     "attack_vector": finding.attack_vector,
                     "posture_score": payload.posture_score,
-                    "exposure_level": exposure_level
+                    "exposure_level": exposure_level,
                 },
-                "occurred_at": payload.timestamp.isoformat()
+                "occurred_at": payload.timestamp.isoformat(),
             }
             processed_events.append(event_wire)
 
@@ -83,5 +94,5 @@ class SentinelEventListener:
             "findings_count": len(payload.findings),
             "events_created": len(processed_events),
             "posture_score": payload.posture_score,
-            "processed_at": datetime.utcnow().isoformat()
+            "processed_at": _utcnow().isoformat(),
         }

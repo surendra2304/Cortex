@@ -1,11 +1,24 @@
 import asyncio
+import os
+import sys
 from logging.config import fileConfig
+from pathlib import Path
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
+# Make the monorepo importable when alembic is invoked from the repository root.
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+try:
+    from cortex_upgrade.paths import ensure_workspace_paths
+
+    ensure_workspace_paths(_REPO_ROOT)
+except ImportError:  # pragma: no cover - installed layout
+    pass
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -16,9 +29,17 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-target_metadata = None
+# Real metadata so `alembic revision --autogenerate` diffs against the ORM
+# instead of producing an empty migration (audit finding).
+from cortex_api.db_models import Base  # noqa: E402
+
+target_metadata = Base.metadata
+
+# The DSN comes from the environment (12-factor) with the ini value as fallback.
+_env_dsn = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
+if _env_dsn:
+    config.set_main_option("sqlalchemy.url", _env_dsn)
+
 
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""

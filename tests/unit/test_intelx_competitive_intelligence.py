@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 for p in [
@@ -20,10 +21,12 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_agents import AgentInput, AgentRegistry, CompetitiveIntelligenceAgent
 from cortex_api.main import app
 from cortex_integrations import IntelXClient
 from cortex_intelligence import MarketSignalDetector
-from cortex_agents import CompetitiveIntelligenceAgent, AgentInput, AgentRegistry
+
+from tests.conftest import friday_headers
 
 
 @pytest.mark.asyncio
@@ -51,9 +54,9 @@ async def test_competitive_intelligence_agent_processing():
         goal="Synthesize competitive positioning battlecard",
         events=[
             {"type": "page_view", "data": {"url": "https://example.com/compare-datadog-vs-cortex"}},
-            {"type": "search.performed", "data": {"query": "datadog pricing alternatives"}}
+            {"type": "search.performed", "data": {"query": "datadog pricing alternatives"}},
         ],
-        context={"competitor_name": "Datadog"}
+        context={"competitor_name": "Datadog"},
     )
 
     output = await agent.process(inp)
@@ -68,6 +71,7 @@ def test_market_signal_detector_trending_content():
     detector = MarketSignalDetector()
     # Trigger detection
     import asyncio
+
     asyncio.run(detector.detect_market_signals("saas_devops"))
 
     recs = detector.get_trending_content_recommendations(["agentic", "workflows"])
@@ -81,17 +85,18 @@ def test_agent_registry_routes_competitor_event():
     assert routed.agent_id == "agent_competitive"
 
 
-def test_friday_competitive_summary_and_market_trends_endpoints():
+def test_friday_competitive_summary_and_market_trends_endpoints(monkeypatch):
     client = TestClient(app)
+    headers = friday_headers(monkeypatch)
 
     # 1. Voice query: What's my competitive position?
-    comp_res = client.get("/v1/friday/competitive_summary?competitor=Datadog")
+    comp_res = client.get("/v1/friday/competitive_summary?competitor=Datadog", headers=headers)
     assert comp_res.status_code == 200
     assert "voice_summary" in comp_res.json()
     assert "battlecard" in comp_res.json()
 
     # 2. Voice query: Any market trends affecting my site?
-    mkt_res = client.get("/v1/friday/market_trends?industry=saas_devops")
+    mkt_res = client.get("/v1/friday/market_trends?industry=saas_devops", headers=headers)
     assert mkt_res.status_code == 200
     assert "voice_summary" in mkt_res.json()
     assert len(mkt_res.json()["active_signals"]) > 0

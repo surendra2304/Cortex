@@ -1,15 +1,25 @@
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
+
 from .models import JobState
+
 
 class WorkflowConflict(RuntimeError):
     pass
 
+
 ALLOWED = {
     JobState.CREATED: {JobState.QUEUED, JobState.CANCELLED},
     JobState.QUEUED: {JobState.RUNNING, JobState.CANCELLED},
-    JobState.RUNNING: {JobState.WAITING_APPROVAL, JobState.VERIFYING, JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED},
+    JobState.RUNNING: {
+        JobState.WAITING_APPROVAL,
+        JobState.VERIFYING,
+        JobState.SUCCEEDED,
+        JobState.FAILED,
+        JobState.CANCELLED,
+    },
     JobState.WAITING_APPROVAL: {JobState.RUNNING, JobState.CANCELLED, JobState.FAILED},
     JobState.VERIFYING: {JobState.SUCCEEDED, JobState.FAILED, JobState.CANCELLED},
     JobState.SUCCEEDED: set(),
@@ -17,10 +27,12 @@ ALLOWED = {
     JobState.CANCELLED: set(),
 }
 
+
 @dataclass(frozen=True)
 class WorkflowSnapshot:
     state: JobState
     version: int
+
 
 class WorkflowStateMachine:
     def __init__(self, state: JobState = JobState.CREATED) -> None:

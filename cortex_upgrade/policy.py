@@ -1,18 +1,23 @@
 from __future__ import annotations
+
 import ipaddress
 import socket
 from dataclasses import dataclass
 from urllib.parse import urlsplit
+
 from .models import Principal, SideEffect, ToolCall
+
 
 class PolicyDenied(PermissionError):
     pass
+
 
 @dataclass(frozen=True)
 class PolicyDecision:
     allowed: bool
     reason: str
     approval_required: bool = False
+
 
 class PolicyEngine:
     def authorize_tool(self, principal: Principal, call: ToolCall, approved: bool) -> PolicyDecision:
@@ -50,5 +55,12 @@ class PolicyEngine:
             raise PolicyDenied("DNS resolution failed") from exc
         for info in infos:
             ip = ipaddress.ip_address(info[4][0])
-            if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified:
+            if (
+                ip.is_private
+                or ip.is_loopback
+                or ip.is_link_local
+                or ip.is_reserved
+                or ip.is_multicast
+                or ip.is_unspecified
+            ):
                 raise PolicyDenied(f"unsafe destination: {ip}")

@@ -1,18 +1,20 @@
 from __future__ import annotations
-from dataclasses import dataclass, field
-from datetime import datetime, timezone, timedelta
-from typing import Any, Dict, List, Optional, Tuple
-from enum import Enum
-import uuid
-import logging
-import copy
 
-from cortex_tool_runtime import SideEffectLevel, Tool
-from cortex_core.web_property import (
-    WebProperty, PropertyRegistry, global_property_registry,
-    UnauthorizedPropertyError, OperationNotAllowedError
-)
+import copy
+import logging
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
+
 from cortex_integrations.deployment_gate import GateVerdict
+from cortex_tool_runtime import SideEffectLevel
+
+from cortex_core.web_property import (
+    PropertyRegistry,
+    global_property_registry,
+)
 
 logger = logging.getLogger("cortex-governed-operations")
 
@@ -35,31 +37,49 @@ class ImpactCategory(str, Enum):
 
 
 # 5 Mandatory High-Impact Categories per Cortex Spec
-HIGH_IMPACT_ACTION_MAP: Dict[ImpactCategory, List[str]] = {
+HIGH_IMPACT_ACTION_MAP: dict[ImpactCategory, list[str]] = {
     ImpactCategory.BILLING: [
-        "payment_initiate", "billing_update", "pricing_change",
-        "subscription_modify", "refund_issue", "stripe_charge"
+        "payment_initiate",
+        "billing_update",
+        "pricing_change",
+        "subscription_modify",
+        "refund_issue",
+        "stripe_charge",
     ],
     ImpactCategory.CUSTOMER_COMMUNICATION: [
-        "email_dispatch", "sms_dispatch", "voice_dispatch",
-        "broadcast_message", "marketing_outreach", "crm_sync"
+        "email_dispatch",
+        "sms_dispatch",
+        "voice_dispatch",
+        "broadcast_message",
+        "marketing_outreach",
+        "crm_sync",
     ],
     ImpactCategory.PRODUCTION_CONFIGURATION: [
-        "config_update", "deployment_traffic_switch", "route_mutate",
-        "prod_env_update", "feature_flag_toggle", "experiment_mutate"
+        "config_update",
+        "deployment_traffic_switch",
+        "route_mutate",
+        "prod_env_update",
+        "feature_flag_toggle",
+        "experiment_mutate",
     ],
     ImpactCategory.CONTENT_PUBLISHING: [
-        "content_publish", "page_deploy", "theme_publish",
-        "banner_injection", "site_modify"
+        "content_publish",
+        "page_deploy",
+        "theme_publish",
+        "banner_injection",
+        "site_modify",
     ],
     ImpactCategory.ACCOUNT_PERMISSIONS: [
-        "account_update", "permission_grant", "role_modify",
-        "user_invite_admin", "credential_revoke"
+        "account_update",
+        "permission_grant",
+        "role_modify",
+        "user_invite_admin",
+        "credential_revoke",
     ],
 }
 
 
-def classify_action_impact(action_name: str) -> Tuple[ImpactCategory, bool]:
+def classify_action_impact(action_name: str) -> tuple[ImpactCategory, bool]:
     """
     Classifies an action into one of the 5 high-impact categories or low-risk.
     Returns (ImpactCategory, is_high_impact).
@@ -73,16 +93,23 @@ def classify_action_impact(action_name: str) -> Tuple[ImpactCategory, bool]:
 
 class StaleContextError(Exception):
     """Raised when incoming telemetry context is too old for safe operation."""
+
     pass
 
 
 class ApprovalRequiredError(PermissionError):
     """Raised when an unapproved high-impact action attempts execution."""
+
     pass
+
+
+class RecommendationAlreadyDecidedError(PermissionError):
+    """Raised when a decision is attempted on a recommendation that is already terminal."""
 
 
 class SentinelSecurityBlockError(PermissionError):
     """Raised when Sentinel security gate rejects a production deployment or action."""
+
     pass
 
 
@@ -93,7 +120,7 @@ class SentinelSecurityBlockError(PermissionError):
 class Observation:
     observation_id: str
     property_id: str
-    telemetry: Dict[str, Any]
+    telemetry: dict[str, Any]
     timestamp: datetime
     staleness_seconds: float
     is_stale: bool = False
@@ -109,14 +136,14 @@ class Recommendation:
     observation_id: str
     property_id: str
     proposed_action: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
     category: ImpactCategory
     impact_level: SideEffectLevel
     requires_approval: bool
     rationale: str
     confidence: float
-    expected_outcomes: Dict[str, Any]
-    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expected_outcomes: dict[str, Any]
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     status: str = "PENDING_APPROVAL"  # PENDING_APPROVAL, APPROVED, REJECTED
     # INVARIANT: Recommendation is NEVER authorization
 
@@ -130,12 +157,24 @@ class ApprovedAction:
     recommendation_id: str
     property_id: str
     action_type: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
     approved: bool
     approver_id: str
     reason: str
-    sentinel_verdict: Optional[str] = None
-    approved_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    sentinel_verdict: str | None = None
+    approved_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
+
+@dataclass
+class RejectedRecommendation:
+    """Terminal record of a supervised rejection (a recommendation is never authorization)."""
+
+    recommendation_id: str
+    property_id: str
+    action_type: str
+    approver_id: str
+    reason: str
+    rejected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # ==============================================================================
@@ -144,17 +183,17 @@ class ApprovedAction:
 @dataclass
 class ExecutionRecord:
     execution_id: str
-    approval_id: Optional[str]
+    approval_id: str | None
     property_id: str
     action: str
-    params: Dict[str, Any]
+    params: dict[str, Any]
     idempotency_key: str
     status: str  # EXECUTED, SIMULATED, FAILED, ROLLED_BACK
     dry_run: bool
     classification: str  # REAL_EXECUTION vs SIMULATED_EXECUTION
-    snapshot_before: Optional[Dict[str, Any]]
-    result: Dict[str, Any]
-    executed_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    snapshot_before: dict[str, Any] | None
+    result: dict[str, Any]
+    executed_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # ==============================================================================
@@ -165,10 +204,10 @@ class MeasurementRecord:
     measurement_id: str
     execution_id: str
     property_id: str
-    expected_outcomes: Dict[str, Any]
-    observed_outcomes: Dict[str, Any]
-    lift_metrics: Dict[str, Any]
-    measured_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expected_outcomes: dict[str, Any]
+    observed_outcomes: dict[str, Any]
+    lift_metrics: dict[str, Any]
+    measured_at: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 # ==============================================================================
@@ -179,19 +218,16 @@ class GovernedOperationsEngine:
     Coordinates the 5-phase governed operational lifecycle for web applications:
     Observation -> Recommendation -> Approved Action -> Execution -> Measurement.
     """
-    def __init__(self, property_registry: Optional[PropertyRegistry] = None):
-        self.registry = property_registry or global_property_registry
-        self.recommendations: Dict[str, Recommendation] = {}
-        self.approvals: Dict[str, ApprovedAction] = {}
-        self.executions: Dict[str, ExecutionRecord] = {}
-        self.measurements: Dict[str, MeasurementRecord] = {}
 
-    def observe(
-        self,
-        property_id: str,
-        telemetry: Dict[str, Any],
-        max_staleness_seconds: float = 60.0
-    ) -> Observation:
+    def __init__(self, property_registry: PropertyRegistry | None = None):
+        self.registry = property_registry or global_property_registry
+        self.recommendations: dict[str, Recommendation] = {}
+        self.approvals: dict[str, ApprovedAction] = {}
+        self.rejections: dict[str, RejectedRecommendation] = {}
+        self.executions: dict[str, ExecutionRecord] = {}
+        self.measurements: dict[str, MeasurementRecord] = {}
+
+    def observe(self, property_id: str, telemetry: dict[str, Any], max_staleness_seconds: float = 60.0) -> Observation:
         """
         Phase 1: Ingests observation from registered web property.
         Validates property authorization and telemetry freshness.
@@ -200,14 +236,14 @@ class GovernedOperationsEngine:
 
         # Telemetry freshness validation
         obs_time = telemetry.get("timestamp")
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         if isinstance(obs_time, str):
             try:
                 obs_dt = datetime.fromisoformat(obs_time.replace("Z", "+00:00"))
             except ValueError:
                 obs_dt = now
         elif isinstance(obs_dt_cand := obs_time, datetime):
-            obs_dt = obs_dt_cand if obs_dt_cand.tzinfo else obs_dt_cand.replace(tzinfo=timezone.utc)
+            obs_dt = obs_dt_cand if obs_dt_cand.tzinfo else obs_dt_cand.replace(tzinfo=UTC)
         else:
             obs_dt = now
 
@@ -223,17 +259,17 @@ class GovernedOperationsEngine:
             timestamp=obs_dt,
             staleness_seconds=max(0.0, age),
             is_stale=is_stale,
-            source=telemetry.get("source", "web_telemetry")
+            source=telemetry.get("source", "web_telemetry"),
         )
 
     def recommend(
         self,
         observation: Observation,
         proposed_action: str,
-        params: Dict[str, Any],
+        params: dict[str, Any],
         rationale: str,
         confidence: float,
-        expected_outcomes: Dict[str, Any]
+        expected_outcomes: dict[str, Any],
     ) -> Recommendation:
         """
         Phase 2: Creates an explicit operational recommendation.
@@ -266,8 +302,8 @@ class GovernedOperationsEngine:
             rationale=rationale,
             confidence=confidence,
             expected_outcomes=copy.deepcopy(expected_outcomes),
-            created_at=datetime.now(timezone.utc),
-            status="PENDING_APPROVAL" if requires_approval else "PRE_AUTHORIZED"
+            created_at=datetime.now(UTC),
+            status="PENDING_APPROVAL" if requires_approval else "PRE_AUTHORIZED",
         )
         self.recommendations[rec.recommendation_id] = rec
         logger.info(
@@ -279,9 +315,9 @@ class GovernedOperationsEngine:
     def authorize(
         self,
         recommendation_id: str,
-        approver_id: Optional[str] = None,
+        approver_id: str | None = None,
         reason: str = "Operator approved",
-        sentinel_verdict: Optional[str] = None
+        sentinel_verdict: str | None = None,
     ) -> ApprovedAction:
         """
         Phase 3: Transitions recommendation to an approved action.
@@ -292,6 +328,7 @@ class GovernedOperationsEngine:
         if not rec:
             raise KeyError(f"Recommendation '{recommendation_id}' not found.")
 
+        self._assert_pending(rec)
         prop = self.registry.validate_property_access(rec.property_id)
 
         # Production security check: Sentinel gate
@@ -317,19 +354,55 @@ class GovernedOperationsEngine:
             approver_id=approver_id or "system_pre_authorized",
             reason=reason,
             sentinel_verdict=sentinel_verdict,
-            approved_at=datetime.now(timezone.utc)
+            approved_at=datetime.now(UTC),
         )
         self.approvals[appr.approval_id] = appr
-        logger.info(f"Approved action '{appr.approval_id}' for recommendation '{rec.recommendation_id}' by '{appr.approver_id}'")
+        logger.info(
+            f"Approved action '{appr.approval_id}' for recommendation '{rec.recommendation_id}' by '{appr.approver_id}'"
+        )
         return appr
 
-    def execute(
+    def reject(
         self,
-        approval_id: str,
-        idempotency_key: str,
-        tool_bus: Any,
-        dry_run: bool = False
-    ) -> ExecutionRecord:
+        recommendation_id: str,
+        approver_id: str | None = None,
+        reason: str = "Rejected by operator",
+    ) -> RejectedRecommendation:
+        """Phase 3 (negative branch): terminate a staged recommendation.
+
+        The API advertised a rejection path but this method did not exist, so every
+        ``approved: false`` decision died on ``AttributeError`` and surfaced as HTTP 400 with
+        the internal exception text. A recommendation can be decided only once; the decision
+        is terminal, which is what makes the approval trail trustworthy.
+        """
+        rec = self.recommendations.get(recommendation_id)
+        if not rec:
+            raise KeyError(f"Recommendation '{recommendation_id}' not found.")
+        self._assert_pending(rec)
+
+        rec.status = "REJECTED"
+        self.rejections[recommendation_id] = rejection = RejectedRecommendation(
+            recommendation_id=rec.recommendation_id,
+            property_id=rec.property_id,
+            action_type=rec.proposed_action,
+            approver_id=approver_id or "unknown_approver",
+            reason=reason,
+        )
+        logger.info(
+            f"Rejected recommendation '{recommendation_id}' for '{rec.property_id}' "
+            f"by '{rejection.approver_id}': {reason}"
+        )
+        return rejection
+
+    @staticmethod
+    def _assert_pending(rec: Recommendation) -> None:
+        """A decided recommendation is terminal: no double approval, no approval after rejection."""
+        if rec.status not in {"PENDING_APPROVAL", "PRE_AUTHORIZED"}:
+            raise RecommendationAlreadyDecidedError(
+                f"Recommendation '{rec.recommendation_id}' was already decided (status={rec.status})."
+            )
+
+    def execute(self, approval_id: str, idempotency_key: str, tool_bus: Any, dry_run: bool = False) -> ExecutionRecord:
         """
         Phase 4: Executes the approved action with idempotency and rollback snapshot.
         If dry_run=True, simulates execution without applying side effects.
@@ -354,7 +427,7 @@ class GovernedOperationsEngine:
                 "property_id": appr.property_id,
                 "simulated_params": appr.params,
                 "dry_run": True,
-                "message": f"Simulated execution of {appr.action_type} completed with zero side effects."
+                "message": f"Simulated execution of {appr.action_type} completed with zero side effects.",
             }
             exec_rec = ExecutionRecord(
                 execution_id=f"exec_{uuid.uuid4().hex[:10]}",
@@ -368,7 +441,7 @@ class GovernedOperationsEngine:
                 classification="SIMULATED_EXECUTION",
                 snapshot_before=snapshot_before,
                 result=sim_result,
-                executed_at=datetime.now(timezone.utc)
+                executed_at=datetime.now(UTC),
             )
             self.executions[exec_rec.execution_id] = exec_rec
             return exec_rec
@@ -387,7 +460,7 @@ class GovernedOperationsEngine:
             "action": appr.action_type,
             "property_id": appr.property_id,
             "applied_params": appr.params,
-            "side_effects_applied": 1
+            "side_effects_applied": 1,
         }
 
         exec_rec = ExecutionRecord(
@@ -402,17 +475,13 @@ class GovernedOperationsEngine:
             classification="REAL_EXECUTION",
             snapshot_before=snapshot_before,
             result=exec_result,
-            executed_at=datetime.now(timezone.utc)
+            executed_at=datetime.now(UTC),
         )
         self.executions[exec_rec.execution_id] = exec_rec
         logger.info(f"Executed action '{exec_rec.execution_id}' for property '{appr.property_id}'")
         return exec_rec
 
-    def measure(
-        self,
-        execution_id: str,
-        observed_telemetry: Optional[Dict[str, Any]] = None
-    ) -> MeasurementRecord:
+    def measure(self, execution_id: str, observed_telemetry: dict[str, Any] | None = None) -> MeasurementRecord:
         """
         Phase 5: Measures real-world outcome and impact lift against expected outcomes.
         """
@@ -428,14 +497,14 @@ class GovernedOperationsEngine:
             "observed_conversion_rate": 4.2,
             "conversion_lift_pct": expected.get("conversion_lift_pct", 5.0),
             "latency_impact_ms": -12.0,
-            "error_rate_delta": 0.0
+            "error_rate_delta": 0.0,
         }
 
         lift = {
             "achieved_pct": observed.get("conversion_lift_pct", 0.0),
             "expected_pct": expected.get("conversion_lift_pct", 0.0),
             "variance": observed.get("conversion_lift_pct", 0.0) - expected.get("conversion_lift_pct", 0.0),
-            "goal_met": observed.get("conversion_lift_pct", 0.0) >= expected.get("conversion_lift_pct", 0.0) * 0.8
+            "goal_met": observed.get("conversion_lift_pct", 0.0) >= expected.get("conversion_lift_pct", 0.0) * 0.8,
         }
 
         meas = MeasurementRecord(
@@ -445,7 +514,7 @@ class GovernedOperationsEngine:
             expected_outcomes=expected,
             observed_outcomes=observed,
             lift_metrics=lift,
-            measured_at=datetime.now(timezone.utc)
+            measured_at=datetime.now(UTC),
         )
         self.measurements[meas.measurement_id] = meas
         logger.info(f"Recorded measurement '{meas.measurement_id}' for execution '{execution_id}': lift={lift}")
