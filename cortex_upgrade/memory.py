@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import asyncio
 import hashlib
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+
 
 @dataclass(frozen=True)
 class Memory:
@@ -17,8 +19,10 @@ class Memory:
     expires_at: datetime | None = None
     metadata: dict = field(default_factory=dict)
 
+
 class ScopedMemory:
     """Small reference memory boundary designed to sit in front of Memora."""
+
     def __init__(self) -> None:
         self._rows: dict[str, Memory] = {}
         self._lock = asyncio.Lock()
@@ -27,17 +31,38 @@ class ScopedMemory:
     def _id(tenant_id: str, text: str) -> str:
         return hashlib.sha256(f"{tenant_id}:{text}".encode()).hexdigest()
 
-    async def add(self, tenant_id: str, text: str, *, user_id: str | None = None,
-                  agent_id: str | None = None, run_id: str | None = None,
-                  category: str = "general", importance: float = .5,
-                  expires_in_days: int | None = None, metadata: dict | None = None) -> Memory:
+    async def add(
+        self,
+        tenant_id: str,
+        text: str,
+        *,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        category: str = "general",
+        importance: float = 0.5,
+        expires_in_days: int | None = None,
+        metadata: dict | None = None,
+    ) -> Memory:
         if not any([user_id, agent_id, run_id]):
             raise ValueError("memory must have an explicit user/agent/run scope")
         if not 0 <= importance <= 1:
             raise ValueError("importance out of range")
         expiry = None if expires_in_days is None else datetime.now(UTC) + timedelta(days=expires_in_days)
-        record = Memory(self._id(tenant_id, text), tenant_id, user_id, agent_id, run_id, text, category, importance, expiry, metadata or {})
+        record = Memory(
+            self._id(tenant_id, text),
+            tenant_id,
+            user_id,
+            agent_id,
+            run_id,
+            text,
+            category,
+            importance,
+            expiry,
+            metadata or {},
+        )
         from cortex_upgrade.memora_client import memora_client
+
         result = await asyncio.to_thread(
             memora_client.record_fact,
             agent_name="cortex",
@@ -46,9 +71,11 @@ class ScopedMemory:
             importance=importance,
             entities=[category, tenant_id],
         )
-        if not isinstance(result, dict) or result.get("status") in {
-            "error", "local_only", "blocked_missing_credentials", "failed_upstream"
-        } or result.get("cloud") is False:
+        if (
+            not isinstance(result, dict)
+            or result.get("status") in {"error", "local_only", "blocked_missing_credentials", "failed_upstream"}
+            or result.get("cloud") is False
+        ):
             reason = result.get("error") or result.get("message") or "Memora did not confirm a cloud write"
             raise RuntimeError(f"Cortex memory was not stored in Memora Cloud: {reason}")
 
@@ -58,8 +85,16 @@ class ScopedMemory:
 
         return record
 
-    async def search(self, tenant_id: str, query: str, *, user_id: str | None = None,
-                     agent_id: str | None = None, run_id: str | None = None, limit: int = 20) -> list[Memory]:
+    async def search(
+        self,
+        tenant_id: str,
+        query: str,
+        *,
+        user_id: str | None = None,
+        agent_id: str | None = None,
+        run_id: str | None = None,
+        limit: int = 20,
+    ) -> list[Memory]:
         if not 1 <= limit <= 100:
             raise ValueError("invalid limit")
         now = datetime.now(UTC)
@@ -75,7 +110,7 @@ class ScopedMemory:
                     continue
                 if run_id is not None and row.run_id != run_id:
                     continue
-                lexical = 1.0 if needle and needle in row.text.lower() else .1
-                scored.append((lexical * (.5 + row.importance), row))
+                lexical = 1.0 if needle and needle in row.text.lower() else 0.1
+                scored.append((lexical * (0.5 + row.importance), row))
             scored.sort(key=lambda item: item[0], reverse=True)
             return [row for _, row in scored[:limit]]

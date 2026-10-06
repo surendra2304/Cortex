@@ -1,8 +1,10 @@
 from __future__ import annotations
+
 import asyncio
 import time
 from collections import defaultdict, deque
 from dataclasses import dataclass
+
 
 @dataclass(frozen=True)
 class LimitResult:
@@ -10,8 +12,10 @@ class LimitResult:
     remaining: int
     retry_after: float
 
+
 class AtomicSlidingWindow:
     """Reference backend for tests/dev; production should use Redis + atomic script."""
+
     def __init__(self) -> None:
         self._buckets: dict[str, deque[float]] = defaultdict(deque)
         self._lock = asyncio.Lock()

@@ -1,11 +1,17 @@
-from typing import Optional, Dict, Any, List
-from datetime import datetime
-import uuid
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
+import uuid
+from datetime import UTC, datetime
+from typing import Any
 
-from cortex_api.db_models import ProfileModel, VisitorModel, LeadModel, IdentityLinkModel, AuditRecordModel
+from cortex_api.db_models import AuditRecordModel, IdentityLinkModel, LeadModel, ProfileModel, VisitorModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-identity")
 
@@ -24,15 +30,15 @@ class IdentityResolver:
         self,
         db: AsyncSession,
         visitor_id: str,
-        user_id: Optional[str] = None,
-        email: Optional[str] = None,
-        device_fingerprint: Optional[str] = None,
+        user_id: str | None = None,
+        email: str | None = None,
+        device_fingerprint: str | None = None,
         tenant_id: str = "default",
         site_id: str = "default",
         consent_granted: bool = True,
-        traits: Optional[Dict[str, Any]] = None,
-        event_trigger: Optional[str] = None
-    ) -> Dict[str, Any]:
+        traits: dict[str, Any] | None = None,
+        event_trigger: str | None = None,
+    ) -> dict[str, Any]:
         traits = traits or {}
         if email and "email" not in traits:
             traits["email"] = email
@@ -47,13 +53,13 @@ class IdentityResolver:
                 id=visitor_id,
                 tenant_id=tenant_id,
                 site_id=site_id,
-                first_seen_at=datetime.utcnow(),
-                last_seen_at=datetime.utcnow(),
-                attributes=traits
+                first_seen_at=_utcnow(),
+                last_seen_at=_utcnow(),
+                attributes=traits,
             )
             db.add(visitor)
         else:
-            visitor.last_seen_at = datetime.utcnow()
+            visitor.last_seen_at = _utcnow()
             if traits:
                 updated = dict(visitor.attributes or {})
                 updated.update(traits)
@@ -71,18 +77,15 @@ class IdentityResolver:
                 "linked_identities": [],
                 "traits": visitor.attributes,
                 "attributes": visitor.attributes,
-                "message": "Pseudonymous tracking; no authenticated credentials or consent."
+                "message": "Pseudonymous tracking; no authenticated credentials or consent.",
             }
 
         # 3. Authenticated resolution: search existing profile by email or user_id
-        target_profile: Optional[ProfileModel] = None
+        target_profile: ProfileModel | None = None
 
         if email:
             prof_res = await db.execute(
-                select(ProfileModel).where(
-                    ProfileModel.tenant_id == tenant_id,
-                    ProfileModel.primary_email == email
-                )
+                select(ProfileModel).where(ProfileModel.tenant_id == tenant_id, ProfileModel.primary_email == email)
             )
             target_profile = prof_res.scalar_one_or_none()
 
@@ -98,9 +101,9 @@ class IdentityResolver:
             profile_id = f"prof_{uuid.uuid4().hex[:12]}"
             identities = []
             if user_id:
-                identities.append({"type": "user_id", "value": user_id, "linked_at": datetime.utcnow().isoformat()})
+                identities.append({"type": "user_id", "value": user_id, "linked_at": _utcnow().isoformat()})
             if email:
-                identities.append({"type": "email", "value": email, "linked_at": datetime.utcnow().isoformat()})
+                identities.append({"type": "email", "value": email, "linked_at": _utcnow().isoformat()})
 
             target_profile = ProfileModel(
                 id=profile_id,
@@ -108,8 +111,8 @@ class IdentityResolver:
                 primary_email=email,
                 identities=identities,
                 traits=traits,
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                created_at=_utcnow(),
+                updated_at=_utcnow(),
             )
             db.add(target_profile)
         else:
@@ -118,13 +121,13 @@ class IdentityResolver:
             merged_traits = dict(target_profile.traits or {})
             merged_traits.update(traits)
             target_profile.traits = merged_traits
-            target_profile.updated_at = datetime.utcnow()
+            target_profile.updated_at = _utcnow()
 
             ids = list(target_profile.identities or [])
             if user_id and not any(i.get("value") == user_id for i in ids):
-                ids.append({"type": "user_id", "value": user_id, "linked_at": datetime.utcnow().isoformat()})
+                ids.append({"type": "user_id", "value": user_id, "linked_at": _utcnow().isoformat()})
             if email and not any(i.get("value") == email for i in ids):
-                ids.append({"type": "email", "value": email, "linked_at": datetime.utcnow().isoformat()})
+                ids.append({"type": "email", "value": email, "linked_at": _utcnow().isoformat()})
             target_profile.identities = ids
 
         visitor.profile_id = target_profile.id
@@ -139,19 +142,18 @@ class IdentityResolver:
                 target_type="profile_id",
                 target_id=target_profile.id,
                 confidence=1.0,
-                link_metadata={"device_fingerprint": device_fingerprint, "trigger": event_trigger}
+                link_metadata={"device_fingerprint": device_fingerprint, "trigger": event_trigger},
             )
             db.add(link)
 
         # 6. Lifecycle promotions
         lifecycle_stage = "lead" if (email or user_id) else "visitor"
-        
+
         # Check if lead exists or promote visitor -> lead
         lead = None
         try:
             lead_stmt = select(LeadModel).where(
-                LeadModel.tenant_id == tenant_id,
-                LeadModel.profile_id == target_profile.id
+                LeadModel.tenant_id == tenant_id, LeadModel.profile_id == target_profile.id
             )
             lead_res = await db.execute(lead_stmt)
             lead = lead_res.scalar_one_or_none()
@@ -167,7 +169,7 @@ class IdentityResolver:
                 status="new",
                 source=traits.get("source", "identity_resolution"),
                 lead_metadata={"email": email, "promoted_from": visitor_id},
-                created_at=datetime.utcnow()
+                created_at=_utcnow(),
             )
             try:
                 db.add(lead)
@@ -193,11 +195,11 @@ class IdentityResolver:
                 "profile_id": target_profile.id,
                 "lifecycle_stage": lifecycle_stage,
                 "email": email,
-                "consent_granted": consent_granted
+                "consent_granted": consent_granted,
             },
             verification_status="verified",
             trace_id=f"trc_id_{uuid.uuid4().hex[:8]}",
-            timestamp=datetime.utcnow()
+            timestamp=_utcnow(),
         )
         db.add(audit)
         await db.commit()
@@ -210,7 +212,7 @@ class IdentityResolver:
             "lifecycle_stage": lifecycle_stage,
             "primary_email": target_profile.primary_email,
             "identities": target_profile.identities,
-            "traits": target_profile.traits
+            "traits": target_profile.traits,
         }
 
 

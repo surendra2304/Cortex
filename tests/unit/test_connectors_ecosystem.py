@@ -1,7 +1,7 @@
-import pytest
 import os
 import sys
-from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 from fastapi.testclient import TestClient
 
 for p in [
@@ -21,13 +21,10 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_integrations import (
-    create_calendar_tool,
-    CalendarToolExecutor,
-    get_connector_registry,
-    CONNECTOR_HEALTH
-)
 from cortex_api.main import app
+from cortex_integrations import CalendarToolExecutor, create_calendar_tool
+
+from tests.conftest import auth_headers
 
 
 def test_calendar_tool_creation():
@@ -47,17 +44,21 @@ async def test_calendar_tool_executor_mock_actions():
     assert len(avail_res["available_slots"]) > 0
 
     # 2. Book meeting
-    book_res = await executor.execute({
-        "action": "book_meeting",
-        "payload": {"email": "alex@enterprise.com", "scheduled_time": "2026-08-29T10:00:00Z"}
-    })
+    book_res = await executor.execute(
+        {
+            "action": "book_meeting",
+            "payload": {"email": "alex@enterprise.com", "scheduled_time": "2026-08-29T10:00:00Z"},
+        }
+    )
     assert book_res["status"] == "booked"
     assert "cal_book_" in book_res["booking_id"]
 
 
 def test_connector_registry_endpoint():
     client = TestClient(app)
-    res = client.get("/connectors")
+    # Audit C4: connector inventory is operator-only.
+    assert client.get("/connectors").status_code == 401
+    res = client.get("/connectors", headers=auth_headers())
     assert res.status_code == 200
     data = res.json()
     assert len(data) >= 6

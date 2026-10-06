@@ -1,10 +1,17 @@
-from typing import Any, Dict, List, Optional
-from datetime import datetime
-from pydantic import BaseModel, Field
-import httpx
-import os
 import asyncio
 import logging
+import os
+from datetime import UTC, datetime
+from typing import Any, Optional
+
+import httpx
+from pydantic import BaseModel, Field
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-ai-universe-adapter")
 
@@ -14,29 +21,35 @@ class EvidenceItem(BaseModel):
     value: Any
     trust_label: str = Field(
         default="verified_telemetry",
-        description="Trust level: system_fact, verified_telemetry, untrusted_user_input, inferred_profile"
+        description="Trust level: system_fact, verified_telemetry, untrusted_user_input, inferred_profile",
     )
     source: str = "telemetry_engine"
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=_utcnow)
 
 
 class IntelligenceRequest(BaseModel):
     request_id: str = Field(..., description="Unique identifier for the intelligence request")
     task_type: str = Field(..., description="Task classification e.g. lead_scoring, anomaly_detection, intervention")
     goal: str = Field(..., description="Specific goal description or query intent")
-    context: Dict[str, Any] = Field(default_factory=dict, description="Contextual state attributes")
-    evidence: List[Dict[str, Any]] = Field(default_factory=list, description="Historical events, visitor traits, or metrics")
-    trust_labels: Dict[str, str] = Field(default_factory=dict, description="Mapping of evidence/context keys to trust classifications")
-    provenance: Dict[str, Any] = Field(default_factory=dict, description="Lineage metadata tracking origin site, tenant, and trace_id")
-    constraints: List[str] = Field(default_factory=list, description="Operational boundaries or policy rules")
-    required_output: Dict[str, Any] = Field(default_factory=dict, description="Expected schema or key targets")
-    budget: Dict[str, Any] = Field(default_factory=lambda: {"max_tokens": 1000, "timeout_ms": 3000})
+    context: dict[str, Any] = Field(default_factory=dict, description="Contextual state attributes")
+    evidence: list[dict[str, Any]] = Field(
+        default_factory=list, description="Historical events, visitor traits, or metrics"
+    )
+    trust_labels: dict[str, str] = Field(
+        default_factory=dict, description="Mapping of evidence/context keys to trust classifications"
+    )
+    provenance: dict[str, Any] = Field(
+        default_factory=dict, description="Lineage metadata tracking origin site, tenant, and trace_id"
+    )
+    constraints: list[str] = Field(default_factory=list, description="Operational boundaries or policy rules")
+    required_output: dict[str, Any] = Field(default_factory=dict, description="Expected schema or key targets")
+    budget: dict[str, Any] = Field(default_factory=lambda: {"max_tokens": 1000, "timeout_ms": 3000})
 
 
 class RecommendedAction(BaseModel):
     action_type: str
     target: str
-    parameters: Dict[str, Any] = Field(default_factory=dict)
+    parameters: dict[str, Any] = Field(default_factory=dict)
     priority: int = 1
 
 
@@ -45,13 +58,13 @@ class IntelligenceResponse(BaseModel):
     decision: str
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
     summary: str
-    key_evidence: List[str] = Field(default_factory=list)
-    provenance: Dict[str, Any] = Field(default_factory=dict)
-    unresolved_disagreements: List[str] = Field(default_factory=list)
-    recommended_actions: List[RecommendedAction] = Field(default_factory=list)
-    safety_notes: List[str] = Field(default_factory=list)
+    key_evidence: list[str] = Field(default_factory=list)
+    provenance: dict[str, Any] = Field(default_factory=dict)
+    unresolved_disagreements: list[str] = Field(default_factory=list)
+    recommended_actions: list[RecommendedAction] = Field(default_factory=list)
+    safety_notes: list[str] = Field(default_factory=list)
     fallback_applied: bool = False
-    generated_at: datetime = Field(default_factory=datetime.utcnow)
+    generated_at: datetime = Field(default_factory=_utcnow)
 
 
 class AIUniverseClient:
@@ -59,20 +72,19 @@ class AIUniverseClient:
 
     def __init__(
         self,
-        endpoint: Optional[str] = None,
-        api_key: Optional[str] = None,
+        endpoint: str | None = None,
+        api_key: str | None = None,
         timeout_seconds: float = 5.0,
-        max_retries: int = 3
+        max_retries: int = 3,
     ):
-        self.endpoint = (
-            endpoint
-            or os.getenv("AI_UNIVERSE_BASE_URL", "https://api.ai-universe.dev")
-        ).rstrip("/")
+        self.endpoint = (endpoint or os.getenv("AI_UNIVERSE_BASE_URL", "https://api.ai-universe.dev")).rstrip("/")
         self.api_key = api_key or os.getenv("AI_UNIVERSE_API_KEY", "")
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
 
-    def _get_deterministic_fallback(self, request: IntelligenceRequest, reason: str = "upstream_unavailable") -> IntelligenceResponse:
+    def _get_deterministic_fallback(
+        self, request: IntelligenceRequest, reason: str = "upstream_unavailable"
+    ) -> IntelligenceResponse:
         """Deterministic safety policy fallback when AI Universe is unavailable or times out."""
         return IntelligenceResponse(
             request_id=request.request_id,
@@ -85,15 +97,12 @@ class AIUniverseClient:
             recommended_actions=[],
             safety_notes=["Deterministic fallback activated to preserve platform safety and system invariants."],
             fallback_applied=True,
-            generated_at=datetime.utcnow()
+            generated_at=_utcnow(),
         )
 
     async def evaluate(self, request: IntelligenceRequest) -> IntelligenceResponse:
         url = f"{self.endpoint}/v1/cortex/intelligence"
-        headers = {
-            "Content-Type": "application/json",
-            "User-Agent": "CORTEX-AIUniverse-Adapter/1.0"
-        }
+        headers = {"Content-Type": "application/json", "User-Agent": "CORTEX-AIUniverse-Adapter/1.0"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
@@ -103,7 +112,7 @@ class AIUniverseClient:
             try:
                 async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                     resp = await client.post(url, json=payload, headers=headers)
-                    
+
                     if resp.status_code == 200:
                         data = resp.json()
                         response = IntelligenceResponse(**data)
@@ -139,17 +148,19 @@ from enum import Enum
 
 class AIMode(str, Enum):
     """AI Universe deliberation mode — controls how many agents participate."""
-    FAST   = "fast"    # Single specialist, low latency — for AMBIGUOUS decisions
+
+    FAST = "fast"  # Single specialist, low latency — for AMBIGUOUS decisions
     REVIEW = "review"  # Two-agent critique pass — moderate ambiguity
     DEBATE = "debate"  # Multi-round adversarial deliberation — STRATEGIC decisions
 
 
 class RequestClassification(str, Enum):
     """Classification of an intelligence request — determines whether AI Universe is called."""
-    TRIVIAL    = "trivial"    # Deterministic only — NO AI call
-    ROUTINE    = "routine"    # Deterministic first, optional AI copy optimization
-    AMBIGUOUS  = "ambiguous"  # AI Universe recommended
-    STRATEGIC  = "strategic"  # AI Universe strongly required
+
+    TRIVIAL = "trivial"  # Deterministic only — NO AI call
+    ROUTINE = "routine"  # Deterministic first, optional AI copy optimization
+    AMBIGUOUS = "ambiguous"  # AI Universe recommended
+    STRATEGIC = "strategic"  # AI Universe strongly required
 
 
 class RequestClassifier:
@@ -160,36 +171,48 @@ class RequestClassifier:
 
     # Event type prefixes that are always TRIVIAL (no AI)
     TRIVIAL_PREFIXES = (
-        "page_view", "session.start", "session.end", "session.heartbeat",
-        "score.refresh", "metric.update", "notification.sent", "click",
-        "scroll", "mouseover"
+        "page_view",
+        "session.start",
+        "session.end",
+        "session.heartbeat",
+        "score.refresh",
+        "metric.update",
+        "notification.sent",
+        "click",
+        "scroll",
+        "mouseover",
     )
 
     # Event types that are ROUTINE (deterministic + optional AI copy)
-    ROUTINE_PREFIXES = (
-        "lead.score_refresh", "report.scheduled", "digest.",
-        "email.opened", "email.clicked"
-    )
+    ROUTINE_PREFIXES = ("lead.score_refresh", "report.scheduled", "digest.", "email.opened", "email.clicked")
 
     # Event types that are STRATEGIC (AI strongly recommended)
     STRATEGIC_PREFIXES = (
-        "high_intent", "conversion", "campaign", "experiment.launch",
-        "churn.risk_high", "incident.p0", "incident.p1",
-        "qualification.final", "friday_command"
+        "high_intent",
+        "conversion",
+        "campaign",
+        "experiment.launch",
+        "churn.risk_high",
+        "incident.p0",
+        "incident.p1",
+        "qualification.final",
+        "friday_command",
     )
 
     # Event types that are AMBIGUOUS (AI recommended)
     AMBIGUOUS_PREFIXES = (
-        "pricing", "checkout", "demo", "enterprise", "lead.qualify",
-        "error", "anomaly", "drop", "funnel"
+        "pricing",
+        "checkout",
+        "demo",
+        "enterprise",
+        "lead.qualify",
+        "error",
+        "anomaly",
+        "drop",
+        "funnel",
     )
 
-    def classify(
-        self,
-        event_type: str,
-        context: Dict[str, Any],
-        agent_output: Optional[Any] = None
-    ) -> tuple:
+    def classify(self, event_type: str, context: dict[str, Any], agent_output: Any | None = None) -> tuple:
         """
         Returns (RequestClassification, Optional[AIMode])
         AIMode is None for TRIVIAL and ROUTINE.
@@ -215,7 +238,7 @@ class RequestClassifier:
         for prefix in self.AMBIGUOUS_PREFIXES:
             if event_lower.startswith(prefix):
                 # Use REVIEW mode if agent output has low confidence
-                if agent_output and hasattr(agent_output, 'confidence'):
+                if agent_output and hasattr(agent_output, "confidence"):
                     mode = AIMode.REVIEW if agent_output.confidence < 0.6 else AIMode.FAST
                 else:
                     mode = AIMode.FAST

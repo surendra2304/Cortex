@@ -30,7 +30,10 @@ jobs:
 
       - name: Run Pytest Test Suite
         run: |
-          pytest tests/unit --verbose
+          # Whole suite (unit + integration + upgrade), not just tests/unit:
+          # the integration and upgrade tests are what caught the approval and
+          # task-routing defects.
+          pytest tests --verbose
 
   typescript-lint-and-build:
     name: TypeScript Build & Lint (SDK & Dashboard)

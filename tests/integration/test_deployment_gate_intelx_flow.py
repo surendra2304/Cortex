@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -32,9 +33,7 @@ async def test_deployment_gate_with_intelx_cve_research_flow():
         deployment_id="dep_forge_cve_01",
         asset_id="site_main",
         endpoints=["/api/v1/auth/token"],
-        simulated_findings=[
-            {"severity": "critical", "title": "CVE-2026-8891 Authentication Bypass"}
-        ]
+        simulated_findings=[{"severity": "critical", "title": "CVE-2026-8891 Authentication Bypass"}],
     )
 
     assert res.verdict == GateVerdict.BLOCKED

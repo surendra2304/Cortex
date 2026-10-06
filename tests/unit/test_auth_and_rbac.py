@@ -1,14 +1,14 @@
 import os
 import sys
+
 import pytest
 from fastapi.testclient import TestClient
 from jose import jwt
-import pytest
 
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from cortex_api.main import app
 from cortex_api.auth import JWT_SECRET, Role, verify_jwt_token
+from cortex_api.main import app
 
 
 def generate_token(role: str, sub: str = "usr_test") -> str:
@@ -40,11 +40,15 @@ def test_rbac_roles_enforcement():
     assert res_viewer_agents.status_code == 200
 
     # 2. Viewer CANNOT trigger actions (POST /v1/actions/:id/approve)
-    res_viewer_approve = client.post("/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {viewer_token}"})
+    res_viewer_approve = client.post(
+        "/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {viewer_token}"}
+    )
     assert res_viewer_approve.status_code == 403
 
     # 3. Operator CAN trigger action approval
-    res_operator_approve = client.post("/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {operator_token}"})
+    res_operator_approve = client.post(
+        "/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {operator_token}"}
+    )
     assert res_operator_approve.status_code == 200
     assert res_operator_approve.json()["status"] == "approved"
 
@@ -52,6 +56,7 @@ def test_rbac_roles_enforcement():
     #    With a key configured and MOCK_MODE=false, any JWT Bearer token (even admin)
     #    correctly returns 401 (missing X-Friday-Api-Key header).
     import cortex_api.auth as _auth
+
     _saved_key = _auth.FRIDAY_API_KEY
     _saved_env_key = os.environ.get("FRIDAY_API_KEY")
     _saved_mock = os.environ.get("MOCK_MODE")
@@ -65,8 +70,9 @@ def test_rbac_roles_enforcement():
             json={"goal": "test", "required_capability": "growth", "requested_action": "page_view"},
             headers={"Authorization": f"Bearer {operator_token}"},
         )
-        assert res_operator_friday.status_code == 401, \
-            f"Expected 401 (missing X-Friday-Api-Key), got {res_operator_friday.status_code}"
+        assert (
+            res_operator_friday.status_code == 401
+        ), f"Expected 401 (missing X-Friday-Api-Key), got {res_operator_friday.status_code}"
 
         # 5. Admin JWT also returns 401 — FRIDAY uses its own auth scheme, not RBAC.
         res_admin_friday = client.post(
@@ -74,8 +80,9 @@ def test_rbac_roles_enforcement():
             json={"goal": "test", "required_capability": "growth", "requested_action": "page_view"},
             headers={"Authorization": f"Bearer {admin_token}"},
         )
-        assert res_admin_friday.status_code == 401, \
-            f"Expected 401 (missing X-Friday-Api-Key), got {res_admin_friday.status_code}"
+        assert (
+            res_admin_friday.status_code == 401
+        ), f"Expected 401 (missing X-Friday-Api-Key), got {res_admin_friday.status_code}"
     finally:
         _auth.FRIDAY_API_KEY = _saved_key
         if _saved_env_key is not None:

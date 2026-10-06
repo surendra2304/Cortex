@@ -1,21 +1,23 @@
 import os
 import sys
+from unittest.mock import AsyncMock
+
 import pytest
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 
-from cortex_tool_runtime import ToolBus, Execution, SideEffectLevel
 from cortex_integrations import (
-    EmailToolExecutor, create_email_tool,
-    CRMToolExecutor, create_crm_tool,
-    WebhookToolExecutor, create_webhook_tool
+    CRMToolExecutor,
+    EmailToolExecutor,
+    WebhookToolExecutor,
+    create_crm_tool,
+    create_email_tool,
+    create_webhook_tool,
 )
-from cortex_policy_engine import PolicyEngine
+from cortex_tool_runtime import Execution, ToolBus
 
 
 @pytest.mark.asyncio
@@ -28,14 +30,14 @@ async def test_email_tool_execution():
     params = {
         "to": "lead@customer.com",
         "subject": "Exclusive Enterprise Offer",
-        "body": "Hi there, we have a custom plan tailored for your team."
+        "body": "Hi there, we have a custom plan tailored for your team.",
     }
     exec_item = Execution(
         request_id="exec_mail_1",
         tool_name="email_tool",
         actor={"type": "agent", "id": "agent_sales"},
         reason="Follow up on pricing view",
-        params=params
+        params=params,
     )
 
     result = await bus.execute("email_tool", params, exec_item)
@@ -52,17 +54,13 @@ async def test_crm_tool_execution():
     executor = CRMToolExecutor()
     bus.register_tool(tool, executor)
 
-    params = {
-        "lead_id": "lead_999",
-        "action": "upsert",
-        "payload": {"status": "qualified", "score": 92.5}
-    }
+    params = {"lead_id": "lead_999", "action": "upsert", "payload": {"status": "qualified", "score": 92.5}}
     exec_item = Execution(
         request_id="exec_crm_1",
         tool_name="crm_tool",
         actor={"type": "agent", "id": "agent_sales"},
         reason="Sync qualified score to HubSpot",
-        params=params
+        params=params,
     )
 
     result = await bus.execute("crm_tool", params, exec_item)
@@ -78,10 +76,7 @@ async def test_webhook_tool_execution():
     executor = WebhookToolExecutor()
     bus.register_tool(tool, executor)
 
-    params = {
-        "url": "https://hooks.slack.com/services/T00/B00/X00",
-        "payload": {"text": "New VIP Lead identified!"}
-    }
+    params = {"url": "https://hooks.slack.com/services/T00/B00/X00", "payload": {"text": "New VIP Lead identified!"}}
     result = await bus.execute("webhook_tool", params)
     assert result["status"] == "success"
     assert result["result"]["delivered"] is True
@@ -98,12 +93,7 @@ async def test_tool_idempotency_redis():
     tool = create_email_tool()
     bus.register_tool(tool, EmailToolExecutor())
 
-    params = {
-        "to": "test@test.com",
-        "subject": "Hello",
-        "body": "World",
-        "idempotency_key": "idemp_unique_key_123"
-    }
+    params = {"to": "test@test.com", "subject": "Hello", "body": "World", "idempotency_key": "idemp_unique_key_123"}
 
     # First execution should succeed
     res1 = await bus.execute("email_tool", params)

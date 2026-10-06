@@ -1,8 +1,8 @@
-import pytest
 import os
 import sys
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -17,8 +17,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
-from cortex_integrations import create_email_tool, EmailToolExecutor
+from cortex_workflow_engine import WorkflowState, WorkflowStateMachine
 
 
 @pytest.mark.asyncio
@@ -34,21 +33,11 @@ async def test_high_intent_followup_workflow_e2e():
     sm = WorkflowStateMachine(db=mock_db)
 
     # 1. Trigger High-Intent Follow-up Workflow
-    trigger_event = {
-        "type": "high_intent.detected",
-        "actor_id": "vis_high_intent_88",
-        "intent_score": 0.92
-    }
-    context_data = {
-        "email": "cto@target-enterprise.com",
-        "consent": True,
-        "first_name": "Jordan"
-    }
+    trigger_event = {"type": "high_intent.detected", "actor_id": "vis_high_intent_88", "intent_score": 0.92}
+    context_data = {"email": "cto@target-enterprise.com", "consent": True, "first_name": "Jordan"}
 
     ctx = await sm.start_workflow(
-        workflow_name="HIGH_INTENT_FOLLOWUP",
-        trigger_event=trigger_event,
-        context_data=context_data
+        workflow_name="HIGH_INTENT_FOLLOWUP", trigger_event=trigger_event, context_data=context_data
     )
     assert ctx.current_state == WorkflowState.TRIGGERED
 

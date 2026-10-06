@@ -1,14 +1,18 @@
 from __future__ import annotations
+
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
+
 from .models import Approval, ToolCall
+
 
 @dataclass
 class PendingApproval:
     approval: Approval
     expires_at: datetime
+
 
 class ApprovalQueue:
     def __init__(self) -> None:
@@ -19,8 +23,13 @@ class ApprovalQueue:
         if ttl_minutes <= 0:
             raise ValueError("invalid approval TTL")
         approval = Approval(
-            approval_id=uuid4(), tenant_id=tenant_id, principal_id=principal_id,
-            tool_name=call.tool_name, call_id=call.call_id, approved=False, decided_by=""
+            approval_id=uuid4(),
+            tenant_id=tenant_id,
+            principal_id=principal_id,
+            tool_name=call.tool_name,
+            call_id=call.call_id,
+            approved=False,
+            decided_by="",
         )
         async with self._lock:
             self._items[approval.approval_id] = PendingApproval(
@@ -36,6 +45,15 @@ class ApprovalQueue:
             if item.expires_at <= datetime.now(UTC):
                 del self._items[approval_id]
                 raise TimeoutError("approval expired")
+            # A decision is terminal: replaying the same decision is idempotent, but a
+            # conflicting one must be refused. Without this, an approved high-impact tool
+            # call could be flipped to rejected (or back) after the fact.
+            if item.approval.decided_by:
+                if item.approval.approved != approved:
+                    raise ValueError(
+                        f"approval already {item.approval.decided_by and ('approved' if item.approval.approved else 'rejected')}"
+                    )
+                return item.approval
             approved_record = Approval(
                 approval_id=item.approval.approval_id,
                 tenant_id=item.approval.tenant_id,

@@ -1,22 +1,43 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
-import sys
-import os
+"""Understand Layer: identity, scoring, analytics, memory, workflows, approvals.
 
-sys.path.insert(0, os.path.abspath("packages/identity/src"))
-sys.path.insert(0, os.path.abspath("packages/analytics/src"))
-sys.path.insert(0, os.path.abspath("packages/memory/src"))
-sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
+Security contract (audit defect C4 + H1)
+----------------------------------------
+Every route requires authentication:
 
+* Operator/dashboard routes use JWT RBAC (``CORTEX_VIEWER`` for reads,
+  ``CORTEX_OPERATOR`` for mutations).
+* ``/v1/identity/resolve`` is an internal service endpoint: it accepts a FRIDAY
+  service key (``X-Friday-Api-Key``) *or* an operator JWT. A service caller may
+  name the tenant explicitly; a JWT caller's tenant always comes from the token.
+* Every read query is filtered by the authenticated ``tenant_id`` — no route
+  ever trusts a client-supplied ``tenant_id`` query parameter.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import Any
+
+from cortex_analytics import CohortEngine, FunnelEngine, OutcomeTracker, ScoringEngine
 from cortex_identity import IdentityResolver
-from cortex_analytics import ScoringEngine, FunnelEngine, CohortEngine
-from cortex_memory import MemoryStore, MemoryScope
 from cortex_intelligence import ContextBuilder
+from cortex_memory import MemoryScope, MemoryStore
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi.security import HTTPAuthorizationCredentials
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from cortex_api.auth import Role, require_role, security, verify_friday_token, verify_jwt_token
 from cortex_api.config import get_db_session
-from cortex_api.db_models import ProfileModel, VisitorModel, LeadModel, EventModel, IdentityLinkModel
+from cortex_api.db_models import (
+    ApprovalQueueModel,
+    EventModel,
+    IdentityLinkModel,
+    LeadModel,
+    ProfileModel,
+    VisitorModel,
+    WorkflowRunModel,
+)
 
 router = APIRouter(prefix="/v1", tags=["Understand Layer"])
 
@@ -26,19 +47,48 @@ funnel_engine = FunnelEngine()
 cohort_engine = CohortEngine()
 memory_store = MemoryStore()
 context_builder = ContextBuilder()
+outcome_tracker = OutcomeTracker()
+
+
+async def service_or_operator_auth(
+    x_friday_api_key: str | None = Header(None, alias="X-Friday-Api-Key"),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
+) -> dict[str, Any]:
+    """Accept a FRIDAY service key or an operator JWT for internal endpoints."""
+    if x_friday_api_key:
+        return await verify_friday_token(x_friday_api_key)
+    return await verify_jwt_token(credentials)
+
+
+def resolve_tenant(auth: dict[str, Any], payload_tenant: str | None) -> str:
+    """Derive the authoritative tenant for identity resolution."""
+    token_tenant = auth.get("tenant_id")
+    if token_tenant in (None, "system", "tenant_default") and payload_tenant:
+        return payload_tenant
+    if payload_tenant and payload_tenant != token_tenant:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Tenant mismatch: token tenant '{token_tenant}' cannot act on '{payload_tenant}'.",
+        )
+    return token_tenant or "tenant_default"
 
 
 # ── 1. IDENTITY & PROFILES ───────────────────────────────────────────────────
 
+
 @router.post("/identity/resolve")
 async def resolve_identity_endpoint(
-    payload: Dict[str, Any],
-    db: AsyncSession = Depends(get_db_session)
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(service_or_operator_auth),
 ):
-    """Internal identity resolution API."""
+    """Internal identity resolution API (FRIDAY service key or operator JWT)."""
     visitor_id = payload.get("visitor_id")
     if not visitor_id:
         raise HTTPException(status_code=400, detail="visitor_id is required")
+
+    tenant_id = resolve_tenant(auth, payload.get("tenant_id"))
+    consent_granted = bool(payload.get("consent_granted", False))
 
     result = await identity_resolver.resolve_identity(
         db=db,
@@ -46,11 +96,11 @@ async def resolve_identity_endpoint(
         user_id=payload.get("user_id"),
         email=payload.get("email"),
         device_fingerprint=payload.get("device_fingerprint"),
-        tenant_id=payload.get("tenant_id", "default"),
+        tenant_id=tenant_id,
         site_id=payload.get("site_id", "default"),
-        consent_granted=payload.get("consent_granted", True),
+        consent_granted=consent_granted,
         traits=payload.get("traits", {}),
-        event_trigger=payload.get("event_trigger")
+        event_trigger=payload.get("event_trigger"),
     )
     return result
 
@@ -58,10 +108,14 @@ async def resolve_identity_endpoint(
 @router.get("/visitors/{visitor_id}/profile")
 async def get_visitor_resolved_profile(
     visitor_id: str,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    """Returns resolved profile with linked identities for a visitor."""
-    v_res = await db.execute(select(VisitorModel).where(VisitorModel.id == visitor_id))
+    """Returns the resolved profile with linked identities for a visitor (tenant scoped)."""
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    v_res = await db.execute(
+        select(VisitorModel).where(VisitorModel.id == visitor_id, VisitorModel.tenant_id == tenant_id)
+    )
     visitor = v_res.scalar_one_or_none()
     if not visitor:
         raise HTTPException(status_code=404, detail="Visitor not found")
@@ -70,7 +124,9 @@ async def get_visitor_resolved_profile(
     links_data = []
 
     if visitor.profile_id:
-        p_res = await db.execute(select(ProfileModel).where(ProfileModel.id == visitor.profile_id))
+        p_res = await db.execute(
+            select(ProfileModel).where(ProfileModel.id == visitor.profile_id, ProfileModel.tenant_id == tenant_id)
+        )
         profile = p_res.scalar_one_or_none()
         if profile:
             profile_data = {
@@ -78,20 +134,23 @@ async def get_visitor_resolved_profile(
                 "primary_email": profile.primary_email,
                 "identities": profile.identities,
                 "traits": profile.traits,
-                "created_at": profile.created_at.isoformat()
+                "created_at": profile.created_at.isoformat() if profile.created_at else None,
             }
 
         l_res = await db.execute(
-            select(IdentityLinkModel).where(IdentityLinkModel.target_id == visitor.profile_id)
+            select(IdentityLinkModel).where(
+                IdentityLinkModel.target_id == visitor.profile_id,
+                IdentityLinkModel.tenant_id == tenant_id,
+            )
         )
         links_data = [
             {
-                "link_id": l.id,
-                "source_type": l.source_type,
-                "source_value": l.source_value,
-                "confidence": l.confidence
+                "link_id": link.id,
+                "source_type": link.source_type,
+                "source_value": link.source_value,
+                "confidence": link.confidence,
             }
-            for l in l_res.scalars().all()
+            for link in l_res.scalars().all()
         ]
 
     return {
@@ -100,19 +159,22 @@ async def get_visitor_resolved_profile(
         "last_seen_at": visitor.last_seen_at.isoformat() if visitor.last_seen_at else None,
         "attributes": visitor.attributes,
         "profile": profile_data,
-        "linked_identities": links_data
+        "linked_identities": links_data,
     }
 
 
 # ── 2. LEAD SCORING & TRENDS ─────────────────────────────────────────────────
 
+
 @router.get("/leads/{lead_id}/score")
 async def get_lead_score_with_history(
     lead_id: str,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    """Returns current lead score breakdown + score trend history."""
-    lead_res = await db.execute(select(LeadModel).where(LeadModel.id == lead_id))
+    """Returns the current lead score breakdown and score trend history."""
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    lead_res = await db.execute(select(LeadModel).where(LeadModel.id == lead_id, LeadModel.tenant_id == tenant_id))
     lead = lead_res.scalar_one_or_none()
     if not lead:
         raise HTTPException(status_code=404, detail="Lead not found")
@@ -124,46 +186,61 @@ async def get_lead_score_with_history(
         "status": lead.status,
         "source": lead.source,
         "metadata": lead.lead_metadata,
-        "score_history": history
+        "score_history": history,
     }
 
 
 # ── 3. ANALYTICS (FUNNELS, COHORTS, ATTRIBUTION) ─────────────────────────────
 
+
+async def _tenant_events(db: AsyncSession, tenant_id: str, site_id: str, limit: int = 500, newest_first: bool = True):
+    order = desc(EventModel.occurred_at) if newest_first else EventModel.occurred_at.asc()
+    result = await db.execute(
+        select(EventModel)
+        .where(EventModel.site_id == site_id, EventModel.tenant_id == tenant_id)
+        .order_by(order)
+        .limit(limit)
+    )
+    return result.scalars().all()
+
+
 @router.get("/analytics/funnel")
 async def get_funnel_analysis(
-    steps: Optional[str] = Query(None, description="Comma-separated step identifiers"),
+    steps: str | None = Query(None, description="Comma-separated step identifiers"),
     site_id: str = "default",
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     """Computes conversion rates and drop-off analysis for a multi-step funnel."""
-    step_list = [s.strip() for s in steps.split(",")] if steps else [
-        "page_view", "pricing", "demo", "checkout"
-    ]
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    step_list = [step.strip() for step in steps.split(",")] if steps else ["page_view", "pricing", "demo", "checkout"]
 
-    events_res = await db.execute(
-        select(EventModel).where(EventModel.site_id == site_id).order_by(desc(EventModel.occurred_at)).limit(500)
-    )
     events = [
-        {"type": e.type, "session_id": e.session_id, "data": e.data, "occurred_at": e.occurred_at.isoformat()}
-        for e in events_res.scalars().all()
+        {
+            "type": event.type,
+            "session_id": event.session_id,
+            "data": event.data,
+            "occurred_at": event.occurred_at.isoformat(),
+        }
+        for event in await _tenant_events(db, tenant_id, site_id)
     ]
-
-    return funnel_engine.analyze_funnel(events, step_list)
+    result = funnel_engine.analyze_funnel(events, step_list)
+    if isinstance(result, dict):
+        result.setdefault("tenant_id", tenant_id)
+    return result
 
 
 @router.get("/analytics/cohorts")
 async def get_cohort_analysis(
     site_id: str = "default",
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     """Returns weekly visitor retention cohorts."""
-    events_res = await db.execute(
-        select(EventModel).where(EventModel.site_id == site_id).order_by(desc(EventModel.occurred_at)).limit(500)
-    )
+    tenant_id = auth.get("tenant_id", "tenant_default")
     events = [
-        {"actor_id": e.actor_id, "occurred_at": e.occurred_at.isoformat()}
-        for e in events_res.scalars().all()
+        {"actor_id": event.actor_id, "occurred_at": event.occurred_at.isoformat()}
+        for event in await _tenant_events(db, tenant_id, site_id)
     ]
     return cohort_engine.compute_cohorts(events)
 
@@ -171,93 +248,135 @@ async def get_cohort_analysis(
 @router.get("/analytics/attribution")
 async def get_attribution_analysis(
     site_id: str = "default",
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     """Calculates first-touch attribution from acquisition events."""
-    events_res = await db.execute(
-        select(EventModel).where(EventModel.site_id == site_id).order_by(EventModel.occurred_at.asc()).limit(500)
-    )
-    attribution_counts: Dict[str, int] = {}
-    for e in events_res.scalars().all():
-        data = e.data or {}
-        utm = data.get("utm_source") or data.get("source") or "direct"
-        attribution_counts[utm] = attribution_counts.get(utm, 0) + 1
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    attribution_counts: dict[str, int] = {}
+    for event in await _tenant_events(db, tenant_id, site_id, newest_first=False):
+        data = event.data or {}
+        source = data.get("utm_source") or data.get("source") or "direct"
+        attribution_counts[source] = attribution_counts.get(source, 0) + 1
 
     return {
         "site_id": site_id,
+        "tenant_id": tenant_id,
         "first_touch_breakdown": attribution_counts,
-        "total_touchpoints": sum(attribution_counts.values())
+        "total_touchpoints": sum(attribution_counts.values()),
     }
 
 
 # ── 4. MEMORY SERVICE ────────────────────────────────────────────────────────
 
+
 @router.get("/memory/{scope}/{scope_id}")
 async def get_memory_entries(
     scope: str,
     scope_id: str,
-    key: Optional[str] = None,
-    db: AsyncSession = Depends(get_db_session)
+    key: str | None = None,
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
-    """Retrieves scoped memory entries (visitor, lead, strategy, etc.)."""
-    entries = await memory_store.get(db=db, scope=scope, scope_id=scope_id, key=key)
+    """Retrieves scoped memory entries (visitor, lead, strategy, ...) for the caller's tenant."""
+    try:
+        MemoryScope(scope)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Unknown memory scope '{scope}'.") from exc
+
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    entries = await memory_store.get(db=db, scope=scope, scope_id=scope_id, key=key, tenant_id=tenant_id)
     return {
         "scope": scope,
         "scope_id": scope_id,
-        "entries": [e.model_dump(mode="json") for e in entries]
+        "tenant_id": tenant_id,
+        "entries": [entry.model_dump(mode="json") for entry in entries],
     }
 
 
 # ── 5. WORKFLOWS & AUTOMATION ────────────────────────────────────────────────
 
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
-from cortex_analytics import OutcomeTracker
-from cortex_api.db_models import WorkflowRunModel, ApprovalQueueModel
+from cortex_workflow_engine import WorkflowStateMachine  # noqa: E402
 
-outcome_tracker = OutcomeTracker()
+WORKFLOW_EVENT_MAP = {
+    "HIGH_INTENT_FOLLOWUP": "high_intent.detected",
+    "LEAD_QUALIFICATION_ROUTING": "lead.qualification_requested",
+    "ABANDONED_FORM_RECOVERY": "form.abandoned",
+    "CONVERSION_DROP_DIAGNOSIS": "funnel.anomaly_detected",
+    "CHURN_RISK_INTERVENTION": "churn.risk_detected",
+}
 
 
 @router.get("/workflows")
-async def list_available_workflows():
-    """Returns definitions of all 5 first-class operational workflows."""
+async def list_available_workflows(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+    """Returns definitions of all first-class operational workflows."""
     return [
-        {"name": "HIGH_INTENT_FOLLOWUP", "description": "High intent detection -> business hours check -> email dispatch -> open/reply outcome tracking"},
-        {"name": "LEAD_QUALIFICATION_ROUTING", "description": "Lead score computation -> AI qualification review -> route to sales tier"},
-        {"name": "ABANDONED_FORM_RECOVERY", "description": "Form started without submit -> wait -> recovery email -> completion tracking"},
-        {"name": "CONVERSION_DROP_DIAGNOSIS", "description": "Funnel anomaly detected -> slice segments -> AI debate mode -> auto-remediate"},
-        {"name": "CHURN_RISK_INTERVENTION", "description": "Churn signals -> ChurnRiskAgent -> AI strategy -> win-back proposal"}
+        {
+            "name": "HIGH_INTENT_FOLLOWUP",
+            "description": "High intent detection -> business hours check -> email dispatch -> open/reply outcome tracking",
+        },
+        {
+            "name": "LEAD_QUALIFICATION_ROUTING",
+            "description": "Lead score computation -> AI qualification review -> route to sales tier",
+        },
+        {
+            "name": "ABANDONED_FORM_RECOVERY",
+            "description": "Form started without submit -> wait -> recovery email -> completion tracking",
+        },
+        {
+            "name": "CONVERSION_DROP_DIAGNOSIS",
+            "description": "Funnel anomaly detected -> slice segments -> AI debate mode -> auto-remediate",
+        },
+        {
+            "name": "CHURN_RISK_INTERVENTION",
+            "description": "Churn signals -> ChurnRiskAgent -> AI strategy -> win-back proposal",
+        },
     ]
 
 
 @router.post("/workflows/{workflow_name}/run")
 async def trigger_workflow_run(
     workflow_name: str,
-    payload: Dict[str, Any],
-    db: AsyncSession = Depends(get_db_session)
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
-    """Trigger a new execution run of a named workflow."""
-    sm = WorkflowStateMachine(db=db)
-    ctx = await sm.start_workflow(
+    """Trigger a new execution run of a named workflow, scoped to the caller's tenant."""
+    state_machine = WorkflowStateMachine(db=db)
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    site_id = payload.get("site_id", "default")
+
+    ctx = await state_machine.start_workflow(
         workflow_name=workflow_name,
-        trigger_event=payload.get("trigger_event", {"type": "manual_trigger"}),
-        context_data=payload.get("context_data", {})
+        trigger_event=payload.get("trigger_event", {"type": WORKFLOW_EVENT_MAP.get(workflow_name, "manual_trigger")}),
+        context_data=payload.get("context_data", {}),
+        tenant_id=tenant_id,
+        site_id=site_id,
     )
 
     if workflow_name == "HIGH_INTENT_FOLLOWUP":
-        await sm.execute_high_intent_followup(ctx, None)
+        await state_machine.execute_high_intent_followup(ctx, None)
     elif workflow_name == "CONVERSION_DROP_DIAGNOSIS":
-        await sm.execute_conversion_drop_diagnosis(ctx, None)
+        await state_machine.execute_conversion_drop_diagnosis(ctx, None)
 
-    return {"status": "started", "run_id": ctx.run_id, "state": ctx.current_state.value, "steps": ctx.steps}
+    return {
+        "status": "started",
+        "run_id": ctx.run_id,
+        "tenant_id": tenant_id,
+        "state": ctx.current_state.value,
+        "steps": ctx.steps,
+    }
 
 
 @router.get("/workflows/runs/{run_id}")
 async def get_workflow_run_details(
     run_id: str,
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     """Fetch execution run history and step timeline for a workflow run."""
-    stmt = select(WorkflowRunModel).where(WorkflowRunModel.id == run_id)
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(WorkflowRunModel).where(WorkflowRunModel.id == run_id, WorkflowRunModel.tenant_id == tenant_id)
     res = await db.execute(stmt)
     run = res.scalar_one_or_none()
     if not run:
@@ -271,85 +390,110 @@ async def get_workflow_run_details(
         "steps": run.steps,
         "context_data": run.context_data,
         "started_at": run.started_at.isoformat() if run.started_at else None,
-        "completed_at": run.completed_at.isoformat() if run.completed_at else None
+        "completed_at": run.completed_at.isoformat() if run.completed_at else None,
     }
 
 
 # ── 6. APPROVAL QUEUE (HUMAN-IN-THE-LOOP) ────────────────────────────────────
 
+
 @router.get("/approvals/pending")
 async def get_pending_approvals(
-    tenant_id: str = "default",
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    """Returns all pending approval items requiring operator decision."""
-    stmt = select(ApprovalQueueModel).where(
-        ApprovalQueueModel.tenant_id == tenant_id,
-        ApprovalQueueModel.status == "pending"
-    ).order_by(desc(ApprovalQueueModel.risk_score))
+    """Returns all pending approval items for the authenticated tenant."""
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = (
+        select(ApprovalQueueModel)
+        .where(ApprovalQueueModel.tenant_id == tenant_id, ApprovalQueueModel.status == "pending")
+        .order_by(desc(ApprovalQueueModel.risk_score))
+    )
     res = await db.execute(stmt)
     return [
         {
-            "id": a.id,
-            "workflow_run_id": a.workflow_run_id,
-            "action_type": a.action_type,
-            "target": a.target,
-            "params": a.params,
-            "rationale": a.rationale,
-            "evidence_refs": a.evidence_refs,
-            "risk_score": a.risk_score,
-            "expires_at": a.expires_at.isoformat()
+            "id": item.id,
+            "workflow_run_id": item.workflow_run_id,
+            "action_type": item.action_type,
+            "target": item.target,
+            "params": item.params,
+            "rationale": item.rationale,
+            "evidence_refs": item.evidence_refs,
+            "risk_score": item.risk_score,
+            "expires_at": item.expires_at.isoformat() if item.expires_at else None,
         }
-        for a in res.scalars().all()
+        for item in res.scalars().all()
     ]
+
+
+async def _decide_action(
+    db: AsyncSession,
+    auth: dict[str, Any],
+    action_id: str,
+    approve: bool,
+    payload: dict[str, Any] | None,
+) -> ApprovalQueueModel:
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(ApprovalQueueModel).where(
+        ApprovalQueueModel.id == action_id, ApprovalQueueModel.tenant_id == tenant_id
+    )
+    res = await db.execute(stmt)
+    item = res.scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="Approval item not found")
+    if item.status != "pending":
+        raise HTTPException(status_code=409, detail=f"Approval item is already '{item.status}'.")
+
+    now = datetime.now(UTC)
+    if item.expires_at and item.expires_at.replace(tzinfo=item.expires_at.tzinfo or UTC) <= now:
+        item.status = "expired"
+        item.decided_at = now
+        item.decision_reason = "Auto-expired: decision window closed."
+        await db.commit()
+        raise HTTPException(status_code=409, detail="Approval request has expired.")
+
+    operator = auth.get("sub", "cortex_operator")
+    item.status = "approved" if approve else "rejected"
+    item.decision_by = operator
+    item.decided_at = now
+    item.decision_reason = ((payload or {}).get("reason") if payload else None) or (
+        "Approved by operator." if approve else "Operator rejected action"
+    )
+    await db.commit()
+    return item
 
 
 @router.post("/actions/{action_id}/approve")
 async def approve_action(
     action_id: str,
-    payload: Optional[Dict[str, Any]] = None,
-    db: AsyncSession = Depends(get_db_session)
+    payload: dict[str, Any] | None = None,
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
     """Approve a pending high-impact action."""
-    stmt = select(ApprovalQueueModel).where(ApprovalQueueModel.id == action_id)
-    res = await db.execute(stmt)
-    item = res.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="Approval item not found")
-
-    item.status = "approved"
-    item.decision_by = payload.get("operator_id", "cortex_operator") if payload else "cortex_operator"
-    item.decided_at = datetime.utcnow()
-    await db.commit()
-    return {"status": "approved", "action_id": action_id}
+    await _decide_action(db, auth, action_id, approve=True, payload=payload)
+    return {"status": "approved", "action_id": action_id, "decided_by": auth.get("sub")}
 
 
 @router.post("/actions/{action_id}/reject")
 async def reject_action(
     action_id: str,
-    payload: Optional[Dict[str, Any]] = None,
-    db: AsyncSession = Depends(get_db_session)
+    payload: dict[str, Any] | None = None,
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
-    """Reject a pending high-impact action with reason."""
-    stmt = select(ApprovalQueueModel).where(ApprovalQueueModel.id == action_id)
-    res = await db.execute(stmt)
-    item = res.scalar_one_or_none()
-    if not item:
-        raise HTTPException(status_code=404, detail="Approval item not found")
-
-    item.status = "rejected"
-    item.decision_by = payload.get("operator_id", "cortex_operator") if payload else "cortex_operator"
-    item.decision_reason = payload.get("reason", "Operator rejected action") if payload else "Operator rejected action"
-    item.decided_at = datetime.utcnow()
-    await db.commit()
+    """Reject a pending high-impact action with an optional reason."""
+    item = await _decide_action(db, auth, action_id, approve=False, payload=payload)
     return {"status": "rejected", "action_id": action_id, "reason": item.decision_reason}
 
 
 # ── 7. STRATEGY PERFORMANCE & OUTCOMES ───────────────────────────────────────
 
+
 @router.get("/strategies/performance")
 async def get_strategies_performance(
-    db: AsyncSession = Depends(get_db_session)
+    db: AsyncSession = Depends(get_db_session),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    """Returns PROVEN, PROBATION, and DEMOTED strategy performance ratings."""
-    return await outcome_tracker.get_strategy_performance(db)
+    """Returns PROVEN, PROBATION and DEMOTED strategy performance ratings."""
+    return await outcome_tracker.get_strategy_performance(db, tenant_id=auth.get("tenant_id", "tenant_default"))

@@ -1,7 +1,6 @@
-import pytest
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 for p in [
     "packages/core/src",
@@ -38,9 +37,9 @@ def test_multi_touch_revenue_attribution_models():
     engine = AdvancedAnalyticsEngine()
 
     touchpoints = [
-        {"channel": "google_ads", "occurred_at": datetime.utcnow() - timedelta(days=14)},
-        {"channel": "linkedin", "occurred_at": datetime.utcnow() - timedelta(days=7)},
-        {"channel": "direct", "occurred_at": datetime.utcnow()}
+        {"channel": "google_ads", "occurred_at": datetime.now(UTC) - timedelta(days=14)},
+        {"channel": "linkedin", "occurred_at": datetime.now(UTC) - timedelta(days=7)},
+        {"channel": "direct", "occurred_at": datetime.now(UTC)},
     ]
 
     total_revenue = 1000.0

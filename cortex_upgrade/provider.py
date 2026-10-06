@@ -1,10 +1,14 @@
 from __future__ import annotations
+
 import asyncio
 import time
-from typing import Any, Awaitable, Callable
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 from .circuit import CircuitBreaker, CircuitOpen
 from .models import FailureKind
 from .retry import retry
+
 
 class Provider:
     def __init__(self, name: str, fn: Callable[..., Awaitable[Any]], breaker: CircuitBreaker | None = None) -> None:
@@ -19,15 +23,25 @@ class Provider:
             output = await retry(
                 lambda: self.fn(**kwargs),
                 attempts=2,
-                base_delay=.01,
+                base_delay=0.01,
                 retryable=lambda exc: isinstance(exc, (TimeoutError, ConnectionError)),
             )
             await self.breaker.success()
-            return {"ok": True, "provider": self.name, "output": output, "latency_ms": (time.perf_counter()-started)*1000}
+            return {
+                "ok": True,
+                "provider": self.name,
+                "output": output,
+                "latency_ms": (time.perf_counter() - started) * 1000,
+            }
         except asyncio.CancelledError:
             raise
         except CircuitOpen:
-            return {"ok": False, "provider": self.name, "failure": FailureKind.PROVIDER_UNAVAILABLE.value, "retryable": True}
+            return {
+                "ok": False,
+                "provider": self.name,
+                "failure": FailureKind.PROVIDER_UNAVAILABLE.value,
+                "retryable": True,
+            }
         except TimeoutError:
             await self.breaker.failure()
             return {"ok": False, "provider": self.name, "failure": FailureKind.TIMEOUT.value, "retryable": True}
@@ -39,4 +53,10 @@ class Provider:
             return {"ok": False, "provider": self.name, "failure": FailureKind.INVALID.value, "retryable": False}
         except Exception as exc:
             await self.breaker.failure()
-            return {"ok": False, "provider": self.name, "failure": FailureKind.TRANSIENT.value, "retryable": True, "error_type": type(exc).__name__}
+            return {
+                "ok": False,
+                "provider": self.name,
+                "failure": FailureKind.TRANSIENT.value,
+                "retryable": True,
+                "error_type": type(exc).__name__,
+            }

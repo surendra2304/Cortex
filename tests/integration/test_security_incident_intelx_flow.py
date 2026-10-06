@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -12,7 +13,7 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding, IntelXClient
+from cortex_integrations import IntelXClient, SentinelEventListener, SentinelFinding, SentinelPayload
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import SecurityIncidentWorkflow
 
@@ -40,9 +41,9 @@ async def test_sentinel_intelx_enriched_security_incident_flow():
                 title="Zero-Day Prototype Pollution in Webhook Handler",
                 description="Prototype pollution leading to remote execution.",
                 attack_vector="api_json_body",
-                affected_endpoint="/v1/webhooks/incoming"
+                affected_endpoint="/v1/webhooks/incoming",
             )
-        ]
+        ],
     )
     await listener.handle_findings(payload)
 
@@ -53,8 +54,7 @@ async def test_sentinel_intelx_enriched_security_incident_flow():
     # 3. Security workflow triage
     exposure = monitor.evaluate_exposure(payload.asset_id, "/v1/webhooks/incoming")
     incident = await sec_workflow.execute_security_incident_triage(
-        finding=payload.findings[0].model_dump(),
-        asset_exposure=exposure
+        finding=payload.findings[0].model_dump(), asset_exposure=exposure
     )
 
     assert incident["severity"] == "critical"

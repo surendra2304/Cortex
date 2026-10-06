@@ -36,17 +36,17 @@ Design note: The /v1/friday/* namespace is intentionally separate from the
 without breaking regular operator clients.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
-from datetime import datetime, timedelta, timezone
-import uuid
+import logging
 import os
 import sys
-import logging
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
 
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, desc
 
 # ── Internal package imports ──────────────────────────────────────────────────
 sys.path.insert(0, os.path.abspath("packages/core/src"))
@@ -58,33 +58,42 @@ sys.path.insert(0, os.path.abspath("packages/integrations/src"))
 sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
 sys.path.insert(0, os.path.abspath("packages/workflow_engine/src"))
 
-from cortex_event_schema import EventSchema, Actor, ActorType
-from cortex_core.orchestrator import Orchestrator
-from cortex_core.web_property import (
-    WebProperty, PropertyRegistry, global_property_registry,
-    UnauthorizedPropertyError, OperationNotAllowedError, EnvironmentMismatchError
-)
 from cortex_core.governed_operations import (
-    GovernedOperationsEngine, global_governed_engine,
-    Observation, Recommendation, ApprovedAction, ExecutionRecord, MeasurementRecord,
-    ImpactCategory, classify_action_impact,
-    ApprovalRequiredError, SentinelSecurityBlockError, StaleContextError,
-    HIGH_IMPACT_ACTION_MAP
+    ApprovalRequiredError,
+    Recommendation,
+    RecommendationAlreadyDecidedError,
+    SentinelSecurityBlockError,
+    classify_action_impact,
+    global_governed_engine,
 )
-from cortex_core.task_manager import (
-    TaskManager, global_task_manager, CortexTask, TaskState
+from cortex_core.orchestrator import Orchestrator
+from cortex_core.task_manager import TaskState, global_task_manager
+from cortex_core.web_property import (
+    EnvironmentMismatchError,
+    OperationNotAllowedError,
+    UnauthorizedPropertyError,
+    WebProperty,
+    global_property_registry,
 )
+from cortex_event_schema import Actor, ActorType, EventSchema
 from cortex_integrations.connector_manager import (
-    ConnectorManager, global_connector_manager, CredentialManager,
-    ConnectorHealth, HealthStatus
+    global_connector_manager,
 )
-from cortex_tool_runtime import SideEffectLevel
 from cortex_integrations.deployment_gate import GateVerdict
-from cortex_upgrade.idempotency import IdempotencyStore, IdempotencyConflict
-from cortex_api.config import get_db_session
-from cortex_api.db_models import LeadModel, ProfileModel, EventModel, AuditRecordModel
+from cortex_tool_runtime import SideEffectLevel
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
+
 from cortex_api.auth import verify_friday_token
+from cortex_api.config import get_db_session
+from cortex_api.db_models import AuditRecordModel, EventModel, LeadModel, ProfileModel
 from cortex_api.tracing import get_current_trace_id
+from cortex_upgrade.audit import redact
+from cortex_upgrade.idempotency import IdempotencyStore
 
 logger = logging.getLogger("cortex-friday-gateway")
 
@@ -93,7 +102,7 @@ _friday_idempotency_store = IdempotencyStore()
 router = APIRouter(prefix="/v1/friday", tags=["FRIDAY Integration"])
 
 # Module-level orchestrator instance (shared across requests)
-_orchestrator: Optional[Orchestrator] = None
+_orchestrator: Orchestrator | None = None
 
 
 def _get_orchestrator() -> Orchestrator:
@@ -108,6 +117,7 @@ def _get_orchestrator() -> Orchestrator:
 # Pydantic Models
 # ==============================================================================
 
+
 class FridayCommand(BaseModel):
     """
     Canonical command structure issued by the FRIDAY general OS.
@@ -116,12 +126,13 @@ class FridayCommand(BaseModel):
     specialist capability. CORTEX translates it into an EventSchema, routes it
     through the full 10-phase cognitive loop, and returns the trace.
     """
+
     goal: str = Field(
         ...,
         description="High-level objective FRIDAY wants CORTEX to achieve.",
         examples=["Convert high-intent enterprise visitors to booked demos"],
     )
-    context: Dict[str, Any] = Field(
+    context: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Structured contextual data FRIDAY provides to inform CORTEX reasoning. "
@@ -154,7 +165,7 @@ class FridayCommand(BaseModel):
         default="default",
         description="Tenant namespace for multi-tenant isolation.",
     )
-    idempotency_key: Optional[str] = Field(
+    idempotency_key: str | None = Field(
         default=None,
         description="Optional client-supplied idempotency key for deduplication.",
     )
@@ -162,43 +173,47 @@ class FridayCommand(BaseModel):
 
 class FridayCommandResponse(BaseModel):
     """Response returned to FRIDAY after the cognitive loop completes."""
+
     status: str
     command_id: str
     cortex_loop_id: str
     agent_id: str
     decision: str
     executed_actions: int
-    trace: List[Dict[str, Any]]
+    trace: list[dict[str, Any]]
     trace_id: str
     processed_at: str
 
 
 class HealthSummary(BaseModel):
     """Compact operational health snapshot for FRIDAY consumption."""
+
     status: str
     uptime_indicator: str
-    active_incidents: Optional[int]
-    active_agents: List[Dict[str, str]]
-    recent_errors_24h: Optional[int]
-    total_events_24h: Optional[int]
-    cognitive_loops_today: Optional[int]
+    active_incidents: int | None
+    active_agents: list[dict[str, str]]
+    recent_errors_24h: int | None
+    total_events_24h: int | None
+    cognitive_loops_today: int | None
     last_checked: str
 
 
 class PriorityLead(BaseModel):
     """A high-intent lead enriched with profile data for FRIDAY prioritisation."""
+
     lead_id: str
     score: float
     status: str
-    source: Optional[str]
-    profile_email: Optional[str]
-    intent_signals: List[str]
+    source: str | None
+    profile_email: str | None
+    intent_signals: list[str]
     recommended_action: str
-    created_at: Optional[str]
+    created_at: str | None
 
 
 class Incident(BaseModel):
     """An unresolved incident enriched with a root-cause hypothesis."""
+
     incident_id: str
     event_type: str
     occurred_at: str
@@ -206,12 +221,13 @@ class Incident(BaseModel):
     root_cause_hypothesis: str
     affected_site_id: str
     affected_tenant_id: str
-    raw_data: Dict[str, Any]
+    raw_data: dict[str, Any]
 
 
 # ==============================================================================
 # Helper — map requested_action prefix → severity
 # ==============================================================================
+
 
 def _infer_severity(event_type: str) -> str:
     if "critical" in event_type or "p0" in event_type:
@@ -249,7 +265,7 @@ def _recommended_lead_action(score: float, status: str) -> str:
     return "Monitor — insufficient signals for active intervention."
 
 
-def _intent_signals_from_metadata(metadata: dict) -> List[str]:
+def _intent_signals_from_metadata(metadata: dict) -> list[str]:
     signals = []
     for key, val in metadata.items():
         if isinstance(val, bool) and val:
@@ -263,6 +279,7 @@ def _intent_signals_from_metadata(metadata: dict) -> List[str]:
 # 1. POST /v1/friday/command
 # ==============================================================================
 
+
 @router.post(
     "/command",
     response_model=FridayCommandResponse,
@@ -275,7 +292,7 @@ def _intent_signals_from_metadata(metadata: dict) -> List[str]:
 )
 async def execute_friday_command(
     command: FridayCommand,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
     command_id = command.idempotency_key or f"fri_{uuid.uuid4().hex[:10]}"
@@ -296,7 +313,7 @@ async def execute_friday_command(
         tenant_id=command.tenant_id,
         site_id=command.site_id,
         type=command.requested_action,
-        occurred_at=datetime.utcnow(),
+        occurred_at=_utcnow(),
         actor=Actor(
             type=ActorType.FRIDAY_SYSTEM,
             id="friday_system",
@@ -327,7 +344,7 @@ async def execute_friday_command(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"CORTEX cognitive loop error: {exc}",
-        )
+        ) from exc
 
     return FridayCommandResponse(
         status="success",
@@ -338,13 +355,14 @@ async def execute_friday_command(
         executed_actions=loop_result["executed_actions"],
         trace=loop_result["trace"],
         trace_id=loop_result["trace_id"],
-        processed_at=datetime.utcnow().isoformat(),
+        processed_at=_utcnow().isoformat(),
     )
 
 
 # ==============================================================================
 # 2. GET /v1/friday/health_summary
 # ==============================================================================
+
 
 @router.get(
     "/health_summary",
@@ -357,18 +375,17 @@ async def execute_friday_command(
     ),
 )
 async def friday_health_summary(
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = _utcnow() - timedelta(hours=24)
 
     # Count error/incident events in last 24 h
-    error_count: Optional[int] = None
-    total_events_24h: Optional[int] = None
+    error_count: int | None = None
+    total_events_24h: int | None = None
     try:
         err_stmt = select(EventModel).where(
-            EventModel.server_received_at >= since,
-            EventModel.type.like("error.%") | EventModel.type.like("incident.%")
+            EventModel.server_received_at >= since, EventModel.type.like("error.%") | EventModel.type.like("incident.%")
         )
         err_res = await db.execute(err_stmt)
         error_count = len(err_res.scalars().all())
@@ -380,12 +397,11 @@ async def friday_health_summary(
         logger.warning(f"DB query for health summary failed: {exc}")
 
     # Count cognitive loops run today (audit records with 'cognitive_loop:' prefix)
-    loops_today: Optional[int] = None
-    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    loops_today: int | None = None
+    today_start = _utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
     try:
         audit_stmt = select(AuditRecordModel).where(
-            AuditRecordModel.timestamp >= today_start,
-            AuditRecordModel.action.like("cognitive_loop:%")
+            AuditRecordModel.timestamp >= today_start, AuditRecordModel.action.like("cognitive_loop:%")
         )
         audit_res = await db.execute(audit_stmt)
         loops_today = len(audit_res.scalars().all())
@@ -393,10 +409,9 @@ async def friday_health_summary(
         logger.warning(f"DB query for audit records failed: {exc}")
 
     uptime_indicator = (
-        "unknown" if error_count is None
-        else "healthy" if error_count == 0
-        else "degraded" if error_count < 10
-        else "critical"
+        "unknown"
+        if error_count is None
+        else "healthy" if error_count == 0 else "degraded" if error_count < 10 else "critical"
     )
 
     return HealthSummary(
@@ -412,7 +427,7 @@ async def friday_health_summary(
         recent_errors_24h=error_count,
         total_events_24h=total_events_24h,
         cognitive_loops_today=loops_today,
-        last_checked=datetime.utcnow().isoformat(),
+        last_checked=_utcnow().isoformat(),
     )
 
 
@@ -420,9 +435,10 @@ async def friday_health_summary(
 # 3. GET /v1/friday/priority_leads
 # ==============================================================================
 
+
 @router.get(
     "/priority_leads",
-    response_model=List[PriorityLead],
+    response_model=list[PriorityLead],
     summary="Priority Leads for FRIDAY",
     description=(
         "Returns the top 5 highest-scored leads with status 'new' or 'engaged' "
@@ -431,7 +447,7 @@ async def friday_health_summary(
     ),
 )
 async def friday_priority_leads(
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
     try:
@@ -447,10 +463,10 @@ async def friday_priority_leads(
         logger.warning(f"DB query for priority leads failed: {exc}")
         leads = []
 
-    result: List[PriorityLead] = []
+    result: list[PriorityLead] = []
     for lead in leads:
         # Enrich with profile email if a profile link exists
-        profile_email: Optional[str] = None
+        profile_email: str | None = None
         if lead.profile_id:
             try:
                 p_stmt = select(ProfileModel).where(ProfileModel.id == lead.profile_id)
@@ -482,9 +498,10 @@ async def friday_priority_leads(
 # 4. GET /v1/friday/incidents
 # ==============================================================================
 
+
 @router.get(
     "/incidents",
-    response_model=List[Incident],
+    response_model=list[Incident],
     summary="Active Incidents for FRIDAY",
     description=(
         "Returns unresolved error and incident events from the last 24 hours, "
@@ -493,17 +510,17 @@ async def friday_priority_leads(
     ),
 )
 async def friday_incidents(
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
-    since = datetime.utcnow() - timedelta(hours=24)
+    since = _utcnow() - timedelta(hours=24)
 
     try:
         stmt = (
             select(EventModel)
             .where(
                 EventModel.server_received_at >= since,
-                EventModel.type.like("error.%") | EventModel.type.like("incident.%")
+                EventModel.type.like("error.%") | EventModel.type.like("incident.%"),
             )
             .order_by(desc(EventModel.server_received_at))
             .limit(50)
@@ -514,7 +531,7 @@ async def friday_incidents(
         logger.warning(f"DB query for incidents failed: {exc}")
         events = []
 
-    incidents: List[Incident] = []
+    incidents: list[Incident] = []
     for ev in events:
         data = dict(ev.data or {})
         incidents.append(
@@ -541,28 +558,30 @@ async def friday_incidents(
 # Outbound FridayClient (CORTEX -> FRIDAY Capability Delegator)
 # ==============================================================================
 
+
 class FridayCapabilityRequest(BaseModel):
     """CORTEX request to FRIDAY for capabilities outside CORTEX's website scope."""
+
     goal: str
-    context: Dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
     required_capability: str  # desktop, file, voice, device
     risk_level: str = "LOW"
-    evidence: List[str] = Field(default_factory=list)
+    evidence: list[str] = Field(default_factory=list)
     requested_action: str
     expected_result: str
 
 
 class FridayCapabilityResponse(BaseModel):
     accepted: bool
-    action_result: Dict[str, Any] = Field(default_factory=dict)
-    evidence: List[str] = Field(default_factory=list)
+    action_result: dict[str, Any] = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list)
     trace_id: str
 
 
 class FridayClient:
     """Outbound client used by CORTEX when requesting desktop/device actions from FRIDAY."""
 
-    def __init__(self, endpoint: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(self, endpoint: str | None = None, api_key: str | None = None):
         self.endpoint = endpoint or os.getenv("FRIDAY_API_URL", "https://friday-zw59.onrender.com")
         self.api_key = api_key or os.getenv("FRIDAY_API_KEY", "friday_dev_key")
 
@@ -571,21 +590,27 @@ class FridayClient:
         is_mock = os.getenv("MOCK_MODE", "true").lower() in ("true", "1", "yes")
 
         if is_mock:
-            logger.info(f"[MOCK FRIDAY CLIENT] Delegating capability='{req.required_capability}' action='{req.requested_action}'")
+            logger.info(
+                f"[MOCK FRIDAY CLIENT] Delegating capability='{req.required_capability}' action='{req.requested_action}'"
+            )
             return FridayCapabilityResponse(
                 accepted=True,
-                action_result={"status": "executed_by_friday", "output": f"FRIDAY fulfilled action {req.requested_action}"},
+                action_result={
+                    "status": "executed_by_friday",
+                    "output": f"FRIDAY fulfilled action {req.requested_action}",
+                },
                 evidence=[f"capability={req.required_capability}", f"action={req.requested_action}"],
-                trace_id=trace_id
+                trace_id=trace_id,
             )
 
         try:
             import httpx
+
             async with httpx.AsyncClient(timeout=15.0) as client:
                 res = await client.post(
                     f"{self.endpoint}/v1/capabilities/execute",
                     headers={"X-Friday-Api-Key": self.api_key, "Content-Type": "application/json"},
-                    json=req.model_dump()
+                    json=req.model_dump(),
                 )
                 if res.status_code == 200:
                     data = res.json()
@@ -600,18 +625,19 @@ friday_client = FridayClient()
 
 
 @router.post("/outbound/request", response_model=FridayCapabilityResponse)
-async def delegate_to_friday(
-    req: FridayCapabilityRequest,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
-):
+async def delegate_to_friday(req: FridayCapabilityRequest, friday_auth: dict[str, Any] = Depends(verify_friday_token)):
     """CORTEX delegates desktop/voice/device actions to FRIDAY OS."""
     return await friday_client.request_capability(req)
 
 
 # ── Competitive & Market Intelligence for FRIDAY Voice Queries ──────────────
 
-from cortex_integrations.intelx_client import IntelXClient
-from cortex_intelligence.market_signals import MarketSignalDetector
+from cortex_integrations.intelx_client import (
+    IntelXClient,
+)
+from cortex_intelligence.market_signals import (
+    MarketSignalDetector,
+)
 
 _intelx_client = IntelXClient()
 _market_detector = MarketSignalDetector(intelx_client=_intelx_client)
@@ -619,8 +645,7 @@ _market_detector = MarketSignalDetector(intelx_client=_intelx_client)
 
 @router.get("/competitive_summary")
 async def get_friday_competitive_summary(
-    competitor: str = "Datadog",
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
+    competitor: str = "Datadog", friday_auth: dict[str, Any] = Depends(verify_friday_token)
 ):
     """FRIDAY voice query: 'What's my competitive position?'"""
     profile = await _intelx_client.fetch_competitor_intelligence(competitor)
@@ -630,14 +655,13 @@ async def get_friday_competitive_summary(
         "voice_summary": f"Against {profile.competitor_name}, our key differentiator is sub-100 millisecond autonomous agentic operations without per-seat taxation. {len(profile.feature_gaps)} critical feature gaps identified.",
         "battlecard": profile.battlecard_summary,
         "feature_gaps": profile.feature_gaps,
-        "citations": profile.evidence_citations
+        "citations": profile.evidence_citations,
     }
 
 
 @router.get("/market_trends")
 async def get_friday_market_trends(
-    industry: str = "saas_devops",
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token)
+    industry: str = "saas_devops", friday_auth: dict[str, Any] = Depends(verify_friday_token)
 ):
     """FRIDAY voice query: 'Any market trends affecting my site?'"""
     signals = await _market_detector.detect_market_signals(industry)
@@ -646,7 +670,7 @@ async def get_friday_market_trends(
         "industry": industry,
         "voice_summary": f"Market intelligence indicates a major shift: {top_signal.trend_title if top_signal else 'Autonomous agent adoption'}. Recommended positioning: {top_signal.recommended_positioning if top_signal else 'Lead with closed-loop cognitive operations'}.",
         "active_signals": [s.model_dump() for s in signals],
-        "total_signals": len(signals)
+        "total_signals": len(signals),
     }
 
 
@@ -654,20 +678,23 @@ async def get_friday_market_trends(
 # FRIDAY Universal Task Protocol & Governed Operations Endpoints
 # ==============================================================================
 
+
 class FridayTaskEnvelope(BaseModel):
     """Canonical Task Envelope for FRIDAY Universe delegation."""
+
     task_id: str = Field(default_factory=lambda: f"cortex_task_{uuid.uuid4().hex[:10]}")
     source_agent: str = Field(default="friday")
     target_agent: str = Field(default="cortex")
     action: str = Field(..., description="Action name or command")
-    payload: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
     priority: str = Field(default="NORMAL")
-    idempotency_key: Optional[str] = None
+    idempotency_key: str | None = None
     dry_run: bool = False
 
 
 class FridayTaskResponse(BaseModel):
     """Canonical Task Envelope Response for Cortex."""
+
     task_id: str
     target_agent: str = "cortex"
     status: str
@@ -675,19 +702,19 @@ class FridayTaskResponse(BaseModel):
     progress: float
     stage: str
     property_id: str
-    result: Dict[str, Any] = Field(default_factory=dict)
+    result: dict[str, Any] = Field(default_factory=dict)
     summary: str
     dry_run: bool = False
-    classification: str = "REAL"
+    # Callers must never assume a real execution: only the execution path sets a
+    # classification, everything else stays honestly unclassified.
+    classification: str = "UNCLASSIFIED"
     execution_time_ms: float = 0.0
 
 
-async def process_task_envelope(
-    envelope: FridayTaskEnvelope,
-    db: Optional[AsyncSession] = None
-) -> FridayTaskResponse:
+async def process_task_envelope(envelope: FridayTaskEnvelope, db: AsyncSession | None = None) -> FridayTaskResponse:
     """Core executor for FridayTaskEnvelope adhering to 5-phase governed operations."""
     import time
+
     t0 = time.time()
 
     # 1. Idempotency Check
@@ -712,23 +739,21 @@ async def process_task_envelope(
 
     try:
         prop = global_property_registry.validate_property_access(
-            property_id=property_id,
-            operation=op_on_prop,
-            environment=envelope.payload.get("environment")
+            property_id=property_id, operation=op_on_prop, environment=envelope.payload.get("environment")
         )
     except UnauthorizedPropertyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc))
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except OperationNotAllowedError as exc:
         if op_on_prop:
             cat, is_high = classify_action_impact(op_on_prop)
             if is_high and not envelope.payload.get("approved", False):
                 raise HTTPException(
                     status_code=403,
-                    detail=f"High-impact operation '{op_on_prop}' in category '{cat.value}' requires explicit supervisor approval before execution."
-                )
-        raise HTTPException(status_code=403, detail=str(exc))
+                    detail=f"High-impact operation '{op_on_prop}' in category '{cat.value}' requires explicit supervisor approval before execution.",
+                ) from exc
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except EnvironmentMismatchError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # 3. Action Routing
     if action_norm == "health_summary":
@@ -749,15 +774,15 @@ async def process_task_envelope(
                 "active_incidents": 0,
                 "connectors_summary": conn_health["overall_status"],
                 "registered_properties_count": len(global_property_registry.list_properties()),
-                "allowed_operations": prop.allowed_operations
+                "allowed_operations": prop.allowed_operations,
             },
             summary=f"Health summary for '{property_id}' ({prop.name}) in {prop.target_environment}: healthy.",
-            execution_time_ms=lat
+            execution_time_ms=lat,
         )
 
     elif action_norm in ("recommend_intervention", "recommend"):
         task = global_task_manager.create_task(envelope.task_id, property_id, envelope.action, dry_run=envelope.dry_run)
-        telemetry = envelope.payload.get("telemetry", {"source": "web_telemetry", "timestamp": datetime.now(timezone.utc)})
+        telemetry = envelope.payload.get("telemetry", {"source": "web_telemetry", "timestamp": datetime.now(UTC)})
         max_staleness = float(envelope.payload.get("max_staleness_seconds", 60.0))
 
         # Phase 1: Observation
@@ -768,7 +793,9 @@ async def process_task_envelope(
         if obs.is_stale and envelope.payload.get("reject_on_stale", False):
             task.update_progress(TaskState.BLOCKED, 1.0, "Blocked due to stale telemetry")
             global_task_manager.finalize_task(task.task_id)
-            raise HTTPException(status_code=400, detail=f"Telemetry context is stale: {obs.staleness_seconds:.1f}s > {max_staleness}s")
+            raise HTTPException(
+                status_code=400, detail=f"Telemetry context is stale: {obs.staleness_seconds:.1f}s > {max_staleness}s"
+            )
 
         # Phase 2: Recommendation (INVARIANT: Recommendation != Authorization)
         proposed_op = envelope.payload.get("proposed_operation", "banner_injection")
@@ -782,7 +809,7 @@ async def process_task_envelope(
             params=op_params,
             rationale=rationale,
             confidence=float(envelope.payload.get("confidence", 0.92)),
-            expected_outcomes=expected_outcomes
+            expected_outcomes=expected_outcomes,
         )
         task.recommendations.append(rec.__dict__)
         task.update_progress(TaskState.RECOMMENDING, 0.6, "Recommendation generated")
@@ -811,14 +838,16 @@ async def process_task_envelope(
                     "rationale": rec.rationale,
                     "confidence": rec.confidence,
                     "expected_outcomes": rec.expected_outcomes,
-                    "status": rec.status
+                    "status": rec.status,
                 }
             },
             summary=f"Cortex recommended '{rec.proposed_action}' on '{property_id}' (requires_approval={rec.requires_approval}). Recommendation is not authorization.",
-            execution_time_ms=lat
+            execution_time_ms=lat,
         )
         if envelope.idempotency_key:
-            await _friday_idempotency_store.commit(envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump())
+            await _friday_idempotency_store.commit(
+                envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump()
+            )
         return resp
 
     elif action_norm in ("execute_operation", "execute", "apply_change"):
@@ -836,16 +865,19 @@ async def process_task_envelope(
             global_task_manager.finalize_task(task.task_id)
             raise HTTPException(
                 status_code=403,
-                detail=f"High-impact operation '{op}' in category '{cat.value}' requires explicit supervisor approval before execution."
+                detail=f"High-impact operation '{op}' in category '{cat.value}' requires explicit supervisor approval before execution.",
             )
 
         # Sentinel Security Gate for Production
-        if prop.target_environment.lower() == "production" and sentinel_verdict in ("BLOCKED", GateVerdict.BLOCKED.value):
+        if prop.target_environment.lower() == "production" and sentinel_verdict in (
+            "BLOCKED",
+            GateVerdict.BLOCKED.value,
+        ):
             task.update_progress(TaskState.BLOCKED, 0.5, f"Production action '{op}' blocked by Sentinel security gate")
             global_task_manager.finalize_task(task.task_id)
             raise HTTPException(
                 status_code=403,
-                detail=f"Production operation '{op}' on '{property_id}' blocked by Sentinel security gate."
+                detail=f"Production operation '{op}' on '{property_id}' blocked by Sentinel security gate.",
             )
 
         # Phase 3: Approved Action
@@ -862,14 +894,14 @@ async def process_task_envelope(
                 requires_approval=is_high_impact,
                 rationale=envelope.payload.get("rationale", "Direct authorized operation"),
                 confidence=1.0,
-                expected_outcomes=envelope.payload.get("expected_outcomes", {"conversion_lift_pct": 5.0})
+                expected_outcomes=envelope.payload.get("expected_outcomes", {"conversion_lift_pct": 5.0}),
             )
 
         appr = global_governed_engine.authorize(
             recommendation_id=rec_id,
             approver_id=approver_id or "supervisor_token",
             reason=envelope.payload.get("approval_reason", "Authorized by FRIDAY"),
-            sentinel_verdict=sentinel_verdict
+            sentinel_verdict=sentinel_verdict,
         )
         task.approvals.append(appr.__dict__)
 
@@ -882,7 +914,7 @@ async def process_task_envelope(
             approval_id=appr.approval_id,
             idempotency_key=idemp_key,
             tool_bus=_get_orchestrator().tool_bus,
-            dry_run=envelope.dry_run
+            dry_run=envelope.dry_run,
         )
         task.executions.append(exec_rec.__dict__)
 
@@ -909,25 +941,29 @@ async def process_task_envelope(
                     "status": exec_rec.status,
                     "classification": exec_rec.classification,
                     "action": exec_rec.action,
-                    "result": exec_rec.result
+                    "result": exec_rec.result,
                 },
                 "measurement": {
                     "measurement_id": meas.measurement_id,
                     "lift_metrics": meas.lift_metrics,
                     "expected_outcomes": meas.expected_outcomes,
-                    "observed_outcomes": meas.observed_outcomes
-                }
+                    "observed_outcomes": meas.observed_outcomes,
+                },
             },
             summary=f"Cortex executed '{op}' on '{property_id}' ({exec_rec.classification}). Achieved lift: {meas.lift_metrics.get('achieved_pct')}%.",
-            execution_time_ms=lat
+            execution_time_ms=lat,
         )
         if envelope.idempotency_key:
-            await _friday_idempotency_store.commit(envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump())
+            await _friday_idempotency_store.commit(
+                envelope.idempotency_key, envelope.model_dump(), 200, resp.model_dump()
+            )
         return resp
 
     elif action_norm == "cancel":
         target_id = envelope.payload.get("target_task_id") or envelope.task_id
-        cancelled_task = global_task_manager.cancel_task(target_id, reason=envelope.payload.get("reason", "Cancelled by supervisor"))
+        cancelled_task = global_task_manager.cancel_task(
+            target_id, reason=envelope.payload.get("reason", "Cancelled by supervisor")
+        )
         lat = (time.time() - t0) * 1000
         return FridayTaskResponse(
             task_id=cancelled_task.task_id,
@@ -938,7 +974,7 @@ async def process_task_envelope(
             property_id=cancelled_task.property_id,
             result={"cancelled": True},
             summary=f"Task '{target_id}' successfully cancelled.",
-            execution_time_ms=lat
+            execution_time_ms=lat,
         )
 
     elif action_norm == "rollback":
@@ -954,32 +990,35 @@ async def process_task_envelope(
             property_id=rolled_task.property_id,
             result={
                 "rolled_back": True,
-                "current_property_state": global_property_registry.get(rolled_task.property_id).state_snapshot
+                "current_property_state": global_property_registry.get(rolled_task.property_id).state_snapshot,
             },
             summary=f"Task '{target_id}' successfully rolled back property '{rolled_task.property_id}'.",
-            execution_time_ms=lat
+            execution_time_ms=lat,
         )
 
     else:
-        # Fallback to cognitive loop via EventSchema
-        lat = (time.time() - t0) * 1000
-        return FridayTaskResponse(
-            task_id=envelope.task_id,
-            status="SUCCESS",
-            state="COMPLETED",
-            progress=1.0,
-            stage="Task processed",
-            property_id=property_id,
-            result={"action": envelope.action, "payload": envelope.payload},
-            summary=f"Cortex processed task '{envelope.action}' on '{property_id}'.",
-            execution_time_ms=lat
+        # Fail closed. This branch used to answer status=SUCCESS / state=COMPLETED /
+        # classification=REAL while performing no observation, recommendation, approval or
+        # execution at all (it did not even reach the cognitive loop it referred to), so a
+        # caller could believe an unrouted high-impact action had really been applied.
+        logger.warning(
+            "Rejected unrouted FRIDAY action '%s' on property '%s' (no execution performed).",
+            envelope.action,
+            property_id,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unsupported action '{envelope.action}'. Supported actions: health_summary, "
+                "recommend_intervention, execute_operation, cancel, rollback."
+            ),
         )
 
 
 @router.post("/task", response_model=FridayTaskResponse, summary="FRIDAY Universal Task Protocol Endpoint")
 async def friday_task_endpoint(
     envelope: FridayTaskEnvelope,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
     """Executes a FRIDAY Universal Task Envelope through Cortex Governed Operations."""
@@ -990,7 +1029,7 @@ async def friday_task_endpoint(
 @router.get("/tasks/{task_id}/status", summary="Query Cortex Task Status (Alias)")
 async def get_cortex_task_status(
     task_id: str,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Returns lifecycle state, progress, and traces for an asynchronous Cortex task."""
     task = global_task_manager.get_task(task_id)
@@ -1019,51 +1058,66 @@ async def get_cortex_task_status(
 @router.post("/tasks/{task_id}/cancel", summary="Cancel Active Cortex Task")
 async def cancel_cortex_task(
     task_id: str,
-    body: Optional[Dict[str, Any]] = None,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    body: dict[str, Any] | None = None,
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Halts an active task and transitions state to CANCELLED."""
     reason = (body or {}).get("reason", "Cancelled by operator")
     try:
         task = global_task_manager.cancel_task(task_id, reason=reason)
         return {"status": "success", "task_id": task.task_id, "state": task.state.value, "stage": task.stage}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.") from exc
     except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err))
+        raise HTTPException(status_code=400, detail=str(err)) from err
 
 
 @router.post("/tasks/{task_id}/rollback", summary="Rollback Executed Cortex Task")
 async def rollback_cortex_task(
     task_id: str,
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Restores pre-execution property state from snapshots."""
     try:
         task = global_task_manager.rollback_task(task_id)
         return {"status": "success", "task_id": task.task_id, "state": task.state.value, "stage": task.stage}
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.") from exc
     except ValueError as err:
-        raise HTTPException(status_code=400, detail=str(err))
+        raise HTTPException(status_code=400, detail=str(err)) from err
 
 
 @router.post("/approvals/{approval_id}/decide", summary="Decide Pending Recommendation Approval")
 async def decide_approval_endpoint(
     approval_id: str,
-    body: Dict[str, Any],
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    body: dict[str, Any],
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Explicit multi-party supervisor approval for staged recommendations."""
     approved = body.get("approved", True)
     approver = body.get("approver_id", "operator")
     reason = body.get("reason", "Approved by operator")
     try:
+        if not approved:
+            rejection = global_governed_engine.reject(
+                recommendation_id=approval_id,
+                approver_id=approver,
+                reason=reason,
+            )
+            return {
+                "status": "success",
+                "approval_id": None,
+                "recommendation_id": rejection.recommendation_id,
+                "approved": False,
+                "approver_id": rejection.approver_id,
+                "reason": rejection.reason,
+                "decided_at": rejection.rejected_at.isoformat(),
+            }
         appr = global_governed_engine.authorize(
             recommendation_id=approval_id,
             approver_id=approver,
             reason=reason,
-            sentinel_verdict=body.get("sentinel_verdict")
+            sentinel_verdict=body.get("sentinel_verdict"),
         )
         return {
             "status": "success",
@@ -1071,18 +1125,24 @@ async def decide_approval_endpoint(
             "recommendation_id": appr.recommendation_id,
             "approved": appr.approved,
             "approver_id": appr.approver_id,
-            "reason": appr.reason
+            "reason": appr.reason,
         }
-    except KeyError:
-        raise HTTPException(status_code=404, detail=f"Recommendation '{approval_id}' not found.")
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=f"Recommendation '{approval_id}' not found.") from exc
+    except RecommendationAlreadyDecidedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (ApprovalRequiredError, SentinelSecurityBlockError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        # Never return internal exception text (it leaked "object has no attribute 'reject'").
+        logger.exception("Approval decision failed for %s", approval_id)
+        raise HTTPException(status_code=500, detail="Approval decision failed; the decision was not recorded.") from exc
 
 
 @router.post("/properties/register", summary="Register Web Property Under Cortex Governance")
 async def register_property_endpoint(
-    body: Dict[str, Any],
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    body: dict[str, Any],
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Registers a website or web application under Cortex operations."""
     if "property_id" not in body:
@@ -1095,7 +1155,7 @@ async def register_property_endpoint(
         target_environment=body.get("target_environment", "production"),
         approval_policy=body.get("approval_policy", {}),
         rollback_policy=body.get("rollback_policy", {}),
-        state_snapshot=body.get("state_snapshot", {})
+        state_snapshot=body.get("state_snapshot", {}),
     )
     reg_prop = global_property_registry.register(prop)
     return {
@@ -1103,13 +1163,13 @@ async def register_property_endpoint(
         "property_id": reg_prop.property_id,
         "name": reg_prop.name,
         "target_environment": reg_prop.target_environment,
-        "allowed_operations": reg_prop.allowed_operations
+        "allowed_operations": reg_prop.allowed_operations,
     }
 
 
 @router.get("/properties", summary="List Governed Web Properties")
 async def list_properties_endpoint(
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Lists all websites and web applications under Cortex governance."""
     props = global_property_registry.list_properties()
@@ -1123,17 +1183,272 @@ async def list_properties_endpoint(
                 "allowed_operations": p.allowed_operations,
                 "target_environment": p.target_environment,
                 "approval_policy": p.approval_policy,
-                "rollback_policy": p.rollback_policy
+                "rollback_policy": p.rollback_policy,
             }
             for p in props
-        ]
+        ],
     }
 
 
 @router.get("/connectors/health", summary="Connector Health Status")
 async def get_connectors_health_endpoint(
-    friday_auth: Dict[str, Any] = Depends(verify_friday_token),
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
 ):
     """Reports active health and latency of all integrated connectors."""
     return await global_connector_manager.check_all()
 
+
+# ==============================================================================
+# MULTI-AGENT COLLABORATION, SELF-HEALING & SELF-MODEL
+# ==============================================================================
+
+_self_healing_supervisor = None
+_self_model = None
+_self_modification_engine = None
+_runtime_knobs = None
+
+
+_healing_loop: Any | None = None
+
+
+def set_healing_loop(loop: Any | None) -> None:
+    """Register the background self-healing loop started by the app lifespan."""
+    global _healing_loop
+    _healing_loop = loop
+
+
+def _get_healing_loop() -> Any | None:
+    """The background loop started by the app lifespan (None when the API is embedded)."""
+    return _healing_loop
+
+
+def _self_state():
+    """Lazy singletons: knobs, healing supervisor and self-model for this process."""
+    global _self_healing_supervisor, _self_model, _self_modification_engine, _runtime_knobs
+    if _runtime_knobs is None:
+        from cortex_upgrade.runtime_knobs import global_runtime_knobs
+
+        _runtime_knobs = global_runtime_knobs
+    if _self_healing_supervisor is None:
+        from cortex_api.self_healing import build_supervisor
+
+        _self_healing_supervisor = build_supervisor(_get_orchestrator().agent_registry)
+    if _self_model is None:
+        from cortex_api.self_healing import build_self_model
+
+        _self_model = build_self_model(_get_orchestrator().agent_registry, _self_healing_supervisor, _runtime_knobs)
+        _self_modification_engine = _self_model.engine
+    return _runtime_knobs, _self_healing_supervisor, _self_model
+
+
+class CollaborationRequest(BaseModel):
+    """Run a bounded multi-agent collaboration session.
+
+    ``extra="forbid"`` is deliberate: a misspelled field (``agent_id`` instead of
+    ``root_agent_id``) must be a loud 422, never a silent run against the default agent.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    goal: str = Field(..., description="What the agents should achieve together")
+    root_agent_id: str = Field(default="agent_growth", description="Agent that starts the session")
+    context: dict[str, Any] = Field(default_factory=dict)
+    events: list[dict[str, Any]] = Field(default_factory=list)
+    identity_scope: dict[str, Any] = Field(default_factory=dict)
+    max_rounds: int | None = Field(default=None, ge=1, le=5)
+    max_agents: int | None = Field(default=None, ge=1, le=7)
+    include_outputs: bool = True
+
+
+@router.post("/collaborate", summary="Run a bounded multi-agent collaboration")
+async def collaborate_endpoint(
+    body: CollaborationRequest,
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Specialist agents hand work to each other and close with an explicit consensus.
+
+    Bounded on purpose: rounds and participants are capped (and the caps themselves are
+    runtime knobs the self-modification engine may tune), cycles are refused, and a failing
+    agent is recorded as AGENT_ERROR rather than sinking the session. Findings accumulate in
+    a shared board that every later participant receives.
+    """
+    from cortex_agents import CollaborationSession
+
+    knobs, _supervisor, _model = _self_state()
+    configured_rounds = int(knobs.get("max_collaboration_rounds", 3))
+    session = CollaborationSession(
+        registry=_get_orchestrator().agent_registry,
+        max_rounds=body.max_rounds or configured_rounds,
+        max_agents=body.max_agents or 5,
+    )
+    try:
+        result = await session.run(
+            root_agent_id=body.root_agent_id,
+            goal=body.goal,
+            context=body.context,
+            events=body.events,
+            identity_scope=body.identity_scope,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    # The collaboration itself is an auditable governance event.
+    try:
+        db.add(
+            AuditRecordModel(
+                id=f"aud_{result.session_id}",
+                tenant_id=(body.context or {}).get("tenant_id", "tenant_default"),
+                actor_id=result.root_agent_id,
+                action="multi_agent_collaboration",
+                target_resource=f"collaboration/{result.session_id}",
+                changes=redact(
+                    {
+                        "participants": result.participants,
+                        "consensus": result.consensus.as_dict(),
+                        "handoffs_refused": result.handoffs_refused,
+                    }
+                ),
+                trace_id=get_current_trace_id() or "",
+                timestamp=datetime.now(UTC),
+            )
+        )
+        await db.commit()
+    except Exception as exc:
+        await db.rollback()
+        logger.warning("collaboration audit write failed: %s", exc)
+
+    return {"collaboration": result.as_dict(include_outputs=body.include_outputs), "trace_id": get_current_trace_id()}
+
+
+@router.get("/self_healing", summary="Self-healing subsystem status")
+async def self_healing_status(friday_auth: dict[str, Any] = Depends(verify_friday_token)):
+    """Circuit state, outages and escalations for every registered subsystem."""
+    _knobs, supervisor, _model = _self_state()
+    from cortex_core.resilience import global_health_registry
+
+    snapshot = global_health_registry.snapshot()
+    snapshot["escalations"] = list(supervisor.escalations)
+    snapshot["escalation_delivery"] = supervisor.notifier.status()
+    snapshot["repair_cooldown_seconds"] = supervisor.repair_cooldown_seconds
+    snapshot["self_healing_enabled"] = bool(_knobs.get("self_healing_enabled", True))
+    snapshot["background"] = dict(_healing_loop.status()) if _healing_loop is not None else {"running": False}
+    return snapshot
+
+
+@router.post("/self_healing/run", summary="Run one self-healing cycle")
+async def self_healing_run(friday_auth: dict[str, Any] = Depends(verify_friday_token)):
+    """Probe every subsystem, attempt bounded repairs, escalate what cannot be verified."""
+    _knobs, supervisor, _model = _self_state()
+    run = await supervisor.run_cycle()
+    return run.as_dict()
+
+
+@router.get("/self_model", summary="Honest self-model of this process")
+async def self_model_endpoint(
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Capabilities with their observed state, real usage counters and explicit gaps.
+
+    Nothing here is hardcoded: a subsystem whose health has never been observed reports
+    ``unverified`` and appears in ``gaps`` instead of claiming to be operational.
+    """
+    _knobs, _supervisor, model = _self_state()
+    return await model.build(db=db)
+
+
+@router.get("/self_model/diagnose", summary="Self-diagnosis with ranked findings")
+async def self_diagnose_endpoint(
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
+):
+    _knobs, _supervisor, model = _self_state()
+    return await model.diagnose(db=db)
+
+
+class SelfModificationRequest(BaseModel):
+    """Request a bounded runtime self-modification."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposals: list[dict[str, Any]] = Field(default_factory=list, description="[{knob, value, rationale}]")
+    apply: bool = Field(default=False, description="False = dry run (evaluate only)")
+    rollback: list[str] = Field(
+        default_factory=list,
+        description="Knob names to restore from defaults before applying proposals (reversibility)",
+    )
+
+
+@router.post("/self_model/modify", summary="Propose or apply a bounded self-modification")
+async def self_modify_endpoint(
+    body: SelfModificationRequest,
+    friday_auth: dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Allow-listed, reversible, low-impact changes only; everything else is refused.
+
+    A proposal that is not on the allow-list (or is out of range) is refused with the reason.
+    Applying is explicit (``apply=true``) and irreversible changes are never on the list, so
+    the worst case is a knob the operator can reset.
+    """
+    _knobs, _supervisor, model = _self_state()
+    rolled_back: list[dict[str, Any]] = []
+    for knob_name in body.rollback:
+        try:
+            rolled_back.append(model.engine.rollback(knob_name))
+        except KeyError as exc:
+            raise HTTPException(status_code=400, detail=f"unknown knob '{knob_name}'") from exc
+    accepted, refused = model.engine.evaluate(body.proposals)
+    applied: list[dict[str, Any]] = []
+    if body.apply and accepted:
+        try:
+            applied = [p.as_dict() for p in model.engine.apply(accepted, db=db)]
+        except Exception as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        try:
+            db.add(
+                AuditRecordModel(
+                    id=f"aud_selfmod_{uuid.uuid4().hex[:10]}",
+                    tenant_id="system",
+                    actor_id="self_model",
+                    action="self_modification",
+                    target_resource="runtime_knobs",
+                    changes=redact({"applied": applied, "refused": refused}),
+                    trace_id=get_current_trace_id() or "",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+        except Exception as exc:
+            await db.rollback()
+            logger.warning("self-modification audit write failed: %s", exc)
+
+    if rolled_back:
+        try:
+            db.add(
+                AuditRecordModel(
+                    id=f"aud_selfrollback_{uuid.uuid4().hex[:10]}",
+                    tenant_id="system",
+                    actor_id="self_model",
+                    action="self_modification_rollback",
+                    target_resource="runtime_knobs",
+                    changes=redact({"rolled_back": rolled_back}),
+                    trace_id=get_current_trace_id() or "",
+                    timestamp=datetime.now(UTC),
+                )
+            )
+            await db.commit()
+        except Exception as exc:  # noqa: BLE001 - audit failure must not block the rollback
+            await db.rollback()
+            logger.warning("self-modification rollback audit write failed: %s", exc)
+
+    return {
+        "mode": "applied" if body.apply else "dry_run",
+        "accepted": [p.as_dict() for p in accepted],
+        "refused": refused,
+        "applied": applied,
+        "rolled_back": rolled_back,
+        "knobs": _knobs.snapshot(),
+        "trace_id": get_current_trace_id(),
+    }

@@ -1,18 +1,22 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
 
 class SideEffect(str, Enum):
     READ = "read"
     SENSITIVE = "sensitive"
     HIGH_IMPACT = "high_impact"
     FORBIDDEN = "forbidden"
+
 
 class JobState(str, Enum):
     CREATED = "created"
@@ -23,6 +27,7 @@ class JobState(str, Enum):
     SUCCEEDED = "succeeded"
     FAILED = "failed"
     CANCELLED = "cancelled"
+
 
 class FailureKind(str, Enum):
     TRANSIENT = "transient"
@@ -35,6 +40,7 @@ class FailureKind(str, Enum):
     PERSISTENCE = "persistence"
     UNKNOWN = "unknown"
 
+
 @dataclass(frozen=True)
 class Principal:
     principal_id: str
@@ -43,11 +49,13 @@ class Principal:
     scopes: frozenset[str] = frozenset()
     credential_id: str | None = None
 
+
 @dataclass(frozen=True)
 class RequestContext:
     request_id: str
     principal: Principal
     idempotency_key: str | None = None
+
 
 @dataclass(frozen=True)
 class ToolCall:
@@ -58,6 +66,7 @@ class ToolCall:
     scopes: frozenset[str] = frozenset()
     approval_required: bool = True
 
+
 @dataclass(frozen=True)
 class ToolResult:
     call_id: UUID
@@ -67,6 +76,7 @@ class ToolResult:
     failure: FailureKind | None = None
     retryable: bool = False
     verified: bool = False
+
 
 @dataclass(frozen=True)
 class Approval:
@@ -79,6 +89,7 @@ class Approval:
     decided_by: str
     decided_at: datetime = field(default_factory=utc_now)
     reason: str = ""
+
 
 @dataclass(frozen=True)
 class AuditEvent:

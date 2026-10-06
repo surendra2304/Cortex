@@ -1,13 +1,19 @@
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
-from enum import Enum
-from pydantic import BaseModel, Field
-import uuid
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+import uuid
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any
 
 from cortex_api.db_models import StrategyPerformanceModel
+from pydantic import BaseModel, Field
+from sqlalchemy import desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-outcome-tracker")
 
@@ -28,15 +34,15 @@ class StrategyStatus(str, Enum):
 class OutcomeRecord(BaseModel):
     id: str
     action_id: str
-    workflow_run_id: Optional[str] = None
+    workflow_run_id: str | None = None
     strategy_key: str
     action_type: str
     target: str
-    context_snapshot: Dict[str, Any] = Field(default_factory=dict)
-    outcome_events: List[Dict[str, Any]] = Field(default_factory=list)
+    context_snapshot: dict[str, Any] = Field(default_factory=dict)
+    outcome_events: list[dict[str, Any]] = Field(default_factory=list)
     verdict: OutcomeVerdict = OutcomeVerdict.NO_EFFECT
     lift_pct: float = 0.0
-    measured_at: datetime = Field(default_factory=datetime.utcnow)
+    measured_at: datetime = Field(default_factory=_utcnow)
 
 
 class OutcomeTracker:
@@ -48,11 +54,7 @@ class OutcomeTracker:
     - Informs agents of strategy performance before action proposals
     """
 
-    def evaluate_verdict(
-        self,
-        action_type: str,
-        downstream_events: List[Dict[str, Any]]
-    ) -> OutcomeVerdict:
+    def evaluate_verdict(self, action_type: str, downstream_events: list[dict[str, Any]]) -> OutcomeVerdict:
         if not downstream_events:
             return OutcomeVerdict.NO_EFFECT
 
@@ -79,13 +81,13 @@ class OutcomeTracker:
 
     async def record_and_update_strategy(
         self,
-        db: Optional[AsyncSession],
+        db: AsyncSession | None,
         strategy_key: str,
         action_type: str,
         action_id: str,
-        downstream_events: List[Dict[str, Any]],
+        downstream_events: list[dict[str, Any]],
         tenant_id: str = "default",
-        workflow_run_id: Optional[str] = None
+        workflow_run_id: str | None = None,
     ) -> StrategyStatus:
         verdict = self.evaluate_verdict(action_type, downstream_events)
         is_success = verdict in (OutcomeVerdict.SUCCESS, OutcomeVerdict.PARTIAL)
@@ -95,8 +97,7 @@ class OutcomeTracker:
 
         try:
             stmt = select(StrategyPerformanceModel).where(
-                StrategyPerformanceModel.tenant_id == tenant_id,
-                StrategyPerformanceModel.strategy_key == strategy_key
+                StrategyPerformanceModel.tenant_id == tenant_id, StrategyPerformanceModel.strategy_key == strategy_key
             )
             res = await db.execute(stmt)
             strat = res.scalar_one_or_none()
@@ -113,7 +114,7 @@ class OutcomeTracker:
                     success_rate=0.0,
                     confidence=0.1,
                     recent_outcomes=[],
-                    last_updated_at=datetime.utcnow()
+                    last_updated_at=_utcnow(),
                 )
                 db.add(strat)
 
@@ -127,9 +128,9 @@ class OutcomeTracker:
             strat.confidence = round(min(strat.total_executions / 20.0, 1.0), 2)
 
             recent = list(strat.recent_outcomes or [])
-            recent.append({"action_id": action_id, "verdict": verdict.value, "time": datetime.utcnow().isoformat()})
+            recent.append({"action_id": action_id, "verdict": verdict.value, "time": _utcnow().isoformat()})
             strat.recent_outcomes = recent[-20:]
-            strat.last_updated_at = datetime.utcnow()
+            strat.last_updated_at = _utcnow()
 
             # Spec Rule: Auto-promote if > 60% over n>=20; Auto-demote if < 30% over n>=10
             if strat.total_executions >= 20 and strat.success_rate >= 0.60:
@@ -149,14 +150,12 @@ class OutcomeTracker:
                 await db.rollback()
             return StrategyStatus.PROBATION
 
-    async def get_strategy_performance(
-        self,
-        db: AsyncSession,
-        tenant_id: str = "default"
-    ) -> List[Dict[str, Any]]:
-        stmt = select(StrategyPerformanceModel).where(
-            StrategyPerformanceModel.tenant_id == tenant_id
-        ).order_by(desc(StrategyPerformanceModel.success_rate))
+    async def get_strategy_performance(self, db: AsyncSession, tenant_id: str = "default") -> list[dict[str, Any]]:
+        stmt = (
+            select(StrategyPerformanceModel)
+            .where(StrategyPerformanceModel.tenant_id == tenant_id)
+            .order_by(desc(StrategyPerformanceModel.success_rate))
+        )
         res = await db.execute(stmt)
         return [
             {
@@ -165,7 +164,7 @@ class OutcomeTracker:
                 "total_executions": s.total_executions,
                 "success_rate_pct": round(s.success_rate * 100, 1),
                 "confidence": s.confidence,
-                "recent_outcomes": s.recent_outcomes
+                "recent_outcomes": s.recent_outcomes,
             }
             for s in res.scalars().all()
         ]

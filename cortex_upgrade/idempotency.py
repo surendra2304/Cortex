@@ -1,12 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 import hashlib
 import json
 from dataclasses import dataclass
 from typing import Any
 
+
 class IdempotencyConflict(RuntimeError):
     pass
+
 
 @dataclass(frozen=True)
 class IdempotentResponse:
@@ -14,6 +17,7 @@ class IdempotentResponse:
     fingerprint: str
     status_code: int
     body: Any
+
 
 class IdempotencyStore:
     def __init__(self) -> None:

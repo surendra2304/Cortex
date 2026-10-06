@@ -1,19 +1,35 @@
 import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from cortex_core import (
-    Tenant, Site, Visitor, Session, Event, Profile, Account,
-    Conversation, Lead, Opportunity, Customer, Workflow, Action,
-    Experiment, Incident, AgentRun, IntelligenceRequest, Memory, AuditRecord
-)
-from cortex_event_schema import EventSchema, Actor, ActorType
-from fastapi.testclient import TestClient
 from cortex_api.main import app
+from cortex_core import (
+    Account,
+    Action,
+    AgentRun,
+    AuditRecord,
+    Conversation,
+    Customer,
+    Event,
+    Experiment,
+    Incident,
+    IntelligenceRequest,
+    Lead,
+    Memory,
+    Opportunity,
+    Profile,
+    Session,
+    Site,
+    Tenant,
+    Visitor,
+    Workflow,
+)
+from cortex_event_schema import Actor, ActorType, EventSchema
+from fastapi.testclient import TestClient
 
 
 def test_core_models():
@@ -35,7 +51,35 @@ def test_core_models():
     ar = AgentRun(id="run_1", tenant_id=t.id, agent_name="SupportAgent")
     ir = IntelligenceRequest(id="ir_1", tenant_id=t.id, query_type="intent_scoring")
     mem = Memory(id="mem_1", tenant_id=t.id, entity_type="visitor", entity_id=visitor.id, key="pref_lang", value="en")
-    audit = AuditRecord(id="aud_1", tenant_id=t.id, actor_id="usr_1", action="create_tenant", target_resource="tenant/tenant_1")
+    audit = AuditRecord(
+        id="aud_1", tenant_id=t.id, actor_id="usr_1", action="create_tenant", target_resource="tenant/tenant_1"
+    )
+
+    # Every model must be constructible AND carry its identity and tenant binding.
+    constructed = {
+        "tenant": t,
+        "site": site,
+        "visitor": visitor,
+        "session": session,
+        "event": event,
+        "profile": profile,
+        "account": account,
+        "conversation": conv,
+        "lead": lead,
+        "opportunity": opp,
+        "customer": cust,
+        "workflow": wf,
+        "action": act,
+        "experiment": exp,
+        "incident": inc,
+        "agent_run": ar,
+        "intelligence_request": ir,
+        "memory": mem,
+        "audit": audit,
+    }
+    for name, model in constructed.items():
+        assert model.id, f"{name} must carry an id"
+        assert getattr(model, "tenant_id", t.id) == t.id, f"{name} must be tenant-scoped"
     assert t.id == "tenant_1"
     assert audit.target_resource == "tenant/tenant_1"
 
@@ -53,14 +97,15 @@ def test_event_schema_and_api():
         tenant_id="tenant_1",
         site_id="site_1",
         type="click",
-        occurred_at=datetime.utcnow(),
+        occurred_at=datetime.now(UTC),
         actor=Actor(type=ActorType.VISITOR, id="vis_123"),
         session_id="sess_123",
         source="web",
         data={"button": "signup_cta"},
         consent={"analytics": True},
-        trace_id="trc_abc123"
+        trace_id="trc_abc123",
     )
+    # Ingestion is credential-bound: an anonymous post must be rejected (audit defect C1).
     res_event = client.post("/v1/events", json=evt_schema.model_dump(mode="json"))
-    assert res_event.status_code == 200
-    assert res_event.json()["status"] == "accepted"
+    assert res_event.status_code == 401
+    assert "X-Cortex-Public-Key" in res_event.json()["detail"]

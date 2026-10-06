@@ -1,13 +1,14 @@
-from typing import Any, Dict, Optional, List
-import os
-import logging
-from datetime import datetime
 import asyncio
+import logging
+import os
+from datetime import UTC, datetime
+from typing import Any, Optional
 
 # SendGrid SDK
 try:
     from sendgrid import SendGridAPIClient
-    from sendgrid.helpers.mail import Mail, Email, To, Content
+    from sendgrid.helpers.mail import Content, Email, Mail, To
+
     HAVE_SENDGRID = True
 except ImportError:
     HAVE_SENDGRID = False
@@ -15,6 +16,7 @@ except ImportError:
 # Twilio SDK
 try:
     from twilio.rest import Client as TwilioClient
+
     HAVE_TWILIO = True
 except ImportError:
     HAVE_TWILIO = False
@@ -22,17 +24,26 @@ except ImportError:
 # HubSpot SDK
 try:
     from hubspot import HubSpot
-    from hubspot.crm.contacts import SimplePublicObjectInputForCreate as ContactCreateInput
     from hubspot.crm.contacts import SimplePublicObjectInput as ContactUpdateInput
+    from hubspot.crm.contacts import SimplePublicObjectInputForCreate as ContactCreateInput
     from hubspot.crm.deals import SimplePublicObjectInputForCreate as DealCreateInput
+
     HAVE_HUBSPOT = True
 except ImportError:
     HAVE_HUBSPOT = False
 
-from enum import Enum
 from datetime import timezone
-from cortex_upgrade.policy import PolicyEngine, PolicyDenied
-from cortex_tool_runtime import Tool, SideEffectLevel, ToolCapability, IdempotencyStrategy
+from enum import Enum
+
+from cortex_tool_runtime import IdempotencyStrategy, SideEffectLevel, Tool, ToolCapability
+
+from cortex_upgrade.policy import PolicyDenied, PolicyEngine
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-integrations")
 
@@ -48,7 +59,7 @@ def is_mock_mode_enabled() -> bool:
     return val in ("true", "1", "yes")
 
 
-def resolve_connector_mode(credential: Optional[str] = None, explicit_mock: Optional[bool] = None) -> ConnectorMode:
+def resolve_connector_mode(credential: str | None = None, explicit_mock: bool | None = None) -> ConnectorMode:
     app_env = os.getenv("APP_ENV", "development").lower()
     is_prod = app_env == "production"
 
@@ -76,13 +87,13 @@ def resolve_connector_mode(credential: Optional[str] = None, explicit_mock: Opti
 class EmailToolExecutor:
     """Production SendGrid email tool executor with explicit mode handling."""
 
-    def __init__(self, api_key: Optional[str] = None, from_email: Optional[str] = None, mock_mode: Optional[bool] = None):
+    def __init__(self, api_key: str | None = None, from_email: str | None = None, mock_mode: bool | None = None):
         self.api_key = api_key or os.getenv("SENDGRID_API_KEY")
         self.from_email = from_email or os.getenv("SENDGRID_FROM_EMAIL", "notifications@cortex.dev")
         self.mode = resolve_connector_mode(self.api_key, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         to_email = params.get("to")
         subject = params.get("subject")
         body = params.get("body")
@@ -91,9 +102,11 @@ class EmailToolExecutor:
             raise ValueError("EmailTool requires 'to' and 'subject' parameters.")
 
         if self.mode == ConnectorMode.DISABLED:
-            raise PermissionError("SendGrid email connector is DISABLED due to missing or invalid credentials in production.")
+            raise PermissionError(
+                "SendGrid email connector is DISABLED due to missing or invalid credentials in production."
+            )
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mode == ConnectorMode.MOCK or not HAVE_SENDGRID:
             logger.warning(
                 f"[MOCK MODE] EmailTool simulated delivery to '{to_email}' with subject '{subject}'. No live SMTP/SendGrid call made."
@@ -109,7 +122,7 @@ class EmailToolExecutor:
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "mock",
                 "status": "delivered",
-                "verified": True
+                "verified": True,
             }
 
         # Real SendGrid API execution
@@ -119,7 +132,7 @@ class EmailToolExecutor:
                 from_email=self.from_email,
                 to_emails=to_email,
                 subject=subject,
-                html_content=body or "<p>Notification from CORTEX</p>"
+                html_content=body or "<p>Notification from CORTEX</p>",
             )
             loop = asyncio.get_event_loop()
             response = await loop.run_in_executor(None, sg.send, message)
@@ -135,7 +148,7 @@ class EmailToolExecutor:
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "live",
                 "status": "delivered",
-                "verified": True
+                "verified": True,
             }
         except Exception as exc:
             logger.error(f"SendGrid dispatch failed ({exc}).")
@@ -158,9 +171,9 @@ def create_email_tool() -> Tool:
             "properties": {
                 "to": {"type": "string", "format": "email"},
                 "subject": {"type": "string"},
-                "body": {"type": "string"}
-            }
-        }
+                "body": {"type": "string"},
+            },
+        },
     )
 
 
@@ -172,19 +185,19 @@ class SMSToolExecutor:
 
     def __init__(
         self,
-        account_sid: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        from_number: Optional[str] = None,
-        mock_mode: Optional[bool] = None
+        account_sid: str | None = None,
+        auth_token: str | None = None,
+        from_number: str | None = None,
+        mock_mode: bool | None = None,
     ):
         self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
         self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
         self.from_number = from_number or os.getenv("TWILIO_FROM_NUMBER", "+15005550006")
         has_creds = bool(self.account_sid and self.auth_token)
         self.mode = resolve_connector_mode(self.account_sid if has_creds else None, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         to_phone = params.get("to")
         body = params.get("body")
 
@@ -194,7 +207,7 @@ class SMSToolExecutor:
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("Twilio SMS connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mode == ConnectorMode.MOCK or not HAVE_TWILIO:
             logger.warning(f"[MOCK MODE] SMSTool simulated SMS to '{to_phone}'. No live Twilio dispatch.")
             sid = f"SM_mock_{abs(hash(to_phone)) % 100000}"
@@ -207,15 +220,14 @@ class SMSToolExecutor:
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "mock",
                 "status": "delivered",
-                "verified": True
+                "verified": True,
             }
 
         try:
             client = TwilioClient(self.account_sid, self.auth_token)
             loop = asyncio.get_event_loop()
             msg = await loop.run_in_executor(
-                None,
-                lambda: client.messages.create(to=to_phone, from_=self.from_number, body=body)
+                None, lambda: client.messages.create(to=to_phone, from_=self.from_number, body=body)
             )
             return {
                 "delivered": True,
@@ -226,7 +238,7 @@ class SMSToolExecutor:
                 "status": msg.status,
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "live",
-                "verified": True
+                "verified": True,
             }
         except Exception as exc:
             logger.error(f"Twilio SMS dispatch failed ({exc}).")
@@ -246,11 +258,8 @@ def create_sms_tool() -> Tool:
         input_schema={
             "type": "object",
             "required": ["to", "body"],
-            "properties": {
-                "to": {"type": "string"},
-                "body": {"type": "string"}
-            }
-        }
+            "properties": {"to": {"type": "string"}, "body": {"type": "string"}},
+        },
     )
 
 
@@ -259,19 +268,19 @@ class VoiceToolExecutor:
 
     def __init__(
         self,
-        account_sid: Optional[str] = None,
-        auth_token: Optional[str] = None,
-        from_number: Optional[str] = None,
-        mock_mode: Optional[bool] = None
+        account_sid: str | None = None,
+        auth_token: str | None = None,
+        from_number: str | None = None,
+        mock_mode: bool | None = None,
     ):
         self.account_sid = account_sid or os.getenv("TWILIO_ACCOUNT_SID")
         self.auth_token = auth_token or os.getenv("TWILIO_AUTH_TOKEN")
         self.from_number = from_number or os.getenv("TWILIO_FROM_NUMBER", "+15005550006")
         has_creds = bool(self.account_sid and self.auth_token)
         self.mode = resolve_connector_mode(self.account_sid if has_creds else None, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         to_phone = params.get("to")
         twiml = params.get("twiml", "<Response><Say>CORTEX High-Priority System Alert</Say></Response>")
 
@@ -281,7 +290,7 @@ class VoiceToolExecutor:
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("Twilio Voice connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mode == ConnectorMode.MOCK or not HAVE_TWILIO:
             logger.warning(f"[MOCK MODE] VoiceTool simulated call to '{to_phone}'. No live Twilio dispatch.")
             cid = f"CA_mock_{abs(hash(to_phone)) % 100000}"
@@ -294,15 +303,14 @@ class VoiceToolExecutor:
                 "initiated_at": now_utc.isoformat(),
                 "mode": "mock",
                 "status": "initiated",
-                "verified": True
+                "verified": True,
             }
 
         try:
             client = TwilioClient(self.account_sid, self.auth_token)
             loop = asyncio.get_event_loop()
             call = await loop.run_in_executor(
-                None,
-                lambda: client.calls.create(to=to_phone, from_=self.from_number, twiml=twiml)
+                None, lambda: client.calls.create(to=to_phone, from_=self.from_number, twiml=twiml)
             )
             return {
                 "initiated": True,
@@ -313,7 +321,7 @@ class VoiceToolExecutor:
                 "status": call.status,
                 "initiated_at": now_utc.isoformat(),
                 "mode": "live",
-                "verified": True
+                "verified": True,
             }
         except Exception as exc:
             logger.error(f"Twilio Voice dispatch failed ({exc}).")
@@ -333,11 +341,8 @@ def create_voice_tool() -> Tool:
         input_schema={
             "type": "object",
             "required": ["to"],
-            "properties": {
-                "to": {"type": "string"},
-                "twiml": {"type": "string"}
-            }
-        }
+            "properties": {"to": {"type": "string"}, "twiml": {"type": "string"}},
+        },
     )
 
 
@@ -347,12 +352,12 @@ def create_voice_tool() -> Tool:
 class CRMToolExecutor:
     """Production HubSpot CRM tool executor supporting create/update contact and create deal."""
 
-    def __init__(self, api_key: Optional[str] = None, mock_mode: Optional[bool] = None):
+    def __init__(self, api_key: str | None = None, mock_mode: bool | None = None):
         self.api_key = api_key or os.getenv("HUBSPOT_API_KEY")
         self.mode = resolve_connector_mode(self.api_key, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         action = params.get("action", "create_contact")
         payload = params.get("payload", {})
         lead_id = params.get("lead_id", "lead_default")
@@ -360,7 +365,7 @@ class CRMToolExecutor:
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("HubSpot CRM connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mode == ConnectorMode.MOCK or not HAVE_HUBSPOT:
             logger.warning(
                 f"[MOCK MODE] CRMTool simulated action '{action}' for lead '{lead_id}'. No external HubSpot API call made."
@@ -377,7 +382,7 @@ class CRMToolExecutor:
                 "synced_at": now_utc.isoformat(),
                 "mode": "mock",
                 "status": "synced",
-                "verified": True
+                "verified": True,
             }
 
         try:
@@ -390,7 +395,7 @@ class CRMToolExecutor:
                     "firstname": payload.get("first_name"),
                     "lastname": payload.get("last_name"),
                     "company": payload.get("company"),
-                    "lifecyclestage": payload.get("lifecycle_stage", "lead")
+                    "lifecyclestage": payload.get("lifecycle_stage", "lead"),
                 }
                 c_input = ContactCreateInput(properties={k: v for k, v in properties.items() if v is not None})
                 contact_resp = await loop.run_in_executor(None, hs.crm.contacts.basic_api.create, c_input)
@@ -404,7 +409,7 @@ class CRMToolExecutor:
                     "synced_at": now_utc.isoformat(),
                     "mode": "live",
                     "status": "synced",
-                    "verified": True
+                    "verified": True,
                 }
 
             elif action == "update_contact":
@@ -421,7 +426,7 @@ class CRMToolExecutor:
                     "synced_at": now_utc.isoformat(),
                     "mode": "live",
                     "status": "synced",
-                    "verified": True
+                    "verified": True,
                 }
 
             elif action == "create_deal":
@@ -429,7 +434,7 @@ class CRMToolExecutor:
                     "dealname": payload.get("deal_name", f"Deal for {lead_id}"),
                     "amount": str(payload.get("amount", "10000")),
                     "dealstage": payload.get("deal_stage", "appointmentscheduled"),
-                    "pipeline": payload.get("pipeline", "default")
+                    "pipeline": payload.get("pipeline", "default"),
                 }
                 d_input = DealCreateInput(properties=deal_props)
                 deal_resp = await loop.run_in_executor(None, hs.crm.deals.basic_api.create, d_input)
@@ -443,7 +448,7 @@ class CRMToolExecutor:
                     "synced_at": now_utc.isoformat(),
                     "mode": "live",
                     "status": "synced",
-                    "verified": True
+                    "verified": True,
                 }
 
             else:
@@ -471,9 +476,9 @@ def create_crm_tool() -> Tool:
                 "action": {"type": "string", "enum": ["create_contact", "update_contact", "create_deal"]},
                 "lead_id": {"type": "string"},
                 "crm_record_id": {"type": "string"},
-                "payload": {"type": "object"}
-            }
-        }
+                "payload": {"type": "object"},
+            },
+        },
     )
 
 
@@ -483,12 +488,12 @@ def create_crm_tool() -> Tool:
 class WebhookToolExecutor:
     """Concrete outbound webhook tool executor delivering events to third-party endpoints."""
 
-    def __init__(self, timeout_seconds: float = 5.0, mock_mode: Optional[bool] = None):
+    def __init__(self, timeout_seconds: float = 5.0, mock_mode: bool | None = None):
         self.timeout_seconds = timeout_seconds
         self.mode = resolve_connector_mode(None, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         url = params.get("url")
         payload = params.get("payload", {})
         headers = params.get("headers", {})
@@ -496,7 +501,7 @@ class WebhookToolExecutor:
         if not url:
             raise ValueError("WebhookTool requires target 'url'.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mock_mode:
             logger.warning(f"[MOCK MODE] WebhookTool simulated outbound delivery to '{url}'.")
             return {
@@ -507,24 +512,27 @@ class WebhookToolExecutor:
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "mock",
                 "status": "delivered",
-                "verified": True
+                "verified": True,
             }
 
         # SSRF Protection for live execution
         PolicyEngine.validate_url(url)
 
         import httpx
+
         async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
             resp = await client.post(url, json=payload, headers=headers)
             return {
                 "delivered": resp.status_code < 400,
                 "target_url": url,
                 "status_code": resp.status_code,
-                "response_body": resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text,
+                "response_body": (
+                    resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text
+                ),
                 "dispatched_at": now_utc.isoformat(),
                 "mode": "live",
                 "status": "delivered" if resp.status_code < 400 else "failed",
-                "verified": True
+                "verified": True,
             }
 
 
@@ -544,9 +552,9 @@ def create_webhook_tool() -> Tool:
             "properties": {
                 "url": {"type": "string", "format": "uri"},
                 "payload": {"type": "object"},
-                "headers": {"type": "object"}
-            }
-        }
+                "headers": {"type": "object"},
+            },
+        },
     )
 
 
@@ -557,6 +565,7 @@ def create_webhook_tool() -> Tool:
 # Stripe SDK — optional import guard
 try:
     import stripe as _stripe_sdk
+
     HAVE_STRIPE = True
 except ImportError:
     HAVE_STRIPE = False
@@ -570,25 +579,22 @@ class PaymentsToolExecutor:
     Falls back to mock mode if STRIPE_SECRET_KEY is absent or MOCK_MODE=true.
     """
 
-    def __init__(self, secret_key: Optional[str] = None, mock_mode: Optional[bool] = None):
+    def __init__(self, secret_key: str | None = None, mock_mode: bool | None = None):
         self.secret_key = secret_key or os.getenv("STRIPE_SECRET_KEY")
         self.mode = resolve_connector_mode(self.secret_key, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         action = params.get("action", "create_payment_link")
         payload = params.get("payload", {})
 
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("Stripe Payments connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         # ── Mock path ──────────────────────────────────────────────────────────
         if self.mode == ConnectorMode.MOCK or not HAVE_STRIPE:
-            logger.warning(
-                f"[MOCK MODE] PaymentsTool simulated action '{action}'. "
-                "No live Stripe API call made."
-            )
+            logger.warning(f"[MOCK MODE] PaymentsTool simulated action '{action}'. " "No live Stripe API call made.")
             mock_id = f"stripe_mock_{action}_{abs(hash(str(payload))) % 100000}"
             if action == "create_payment_link":
                 return {
@@ -601,7 +607,7 @@ class PaymentsToolExecutor:
                     "currency": payload.get("currency", "usd"),
                     "created_at": now_utc.isoformat(),
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             elif action == "retrieve_payment_intent":
                 return {
@@ -614,7 +620,7 @@ class PaymentsToolExecutor:
                     "customer_id": payload.get("customer_id"),
                     "retrieved_at": now_utc.isoformat(),
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             elif action == "create_customer":
                 return {
@@ -626,7 +632,7 @@ class PaymentsToolExecutor:
                     "name": payload.get("name"),
                     "created_at": now_utc.isoformat(),
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             else:
                 raise ValueError(f"Unsupported PaymentsTool action: '{action}'.")
@@ -645,9 +651,7 @@ class PaymentsToolExecutor:
                         currency=price_data.get("currency", "usd"),
                         product_data={"name": price_data.get("product_name", "CORTEX Service")},
                     )
-                    link = _stripe_sdk.PaymentLink.create(
-                        line_items=[{"price": price.id, "quantity": 1}]
-                    )
+                    link = _stripe_sdk.PaymentLink.create(line_items=[{"price": price.id, "quantity": 1}])
                     return link
 
                 link = await loop.run_in_executor(None, _create_link)
@@ -656,7 +660,7 @@ class PaymentsToolExecutor:
                     "payment_link_id": link.id,
                     "url": link.url,
                     "active": link.active,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": _utcnow().isoformat(),
                     "mode": "live",
                 }
 
@@ -665,16 +669,14 @@ class PaymentsToolExecutor:
                 if not pi_id:
                     raise ValueError("retrieve_payment_intent requires 'payment_intent_id'.")
 
-                pi = await loop.run_in_executor(
-                    None, lambda: _stripe_sdk.PaymentIntent.retrieve(pi_id)
-                )
+                pi = await loop.run_in_executor(None, lambda: _stripe_sdk.PaymentIntent.retrieve(pi_id))
                 return {
                     "status": pi.status,
                     "payment_intent_id": pi.id,
                     "amount": pi.amount,
                     "currency": pi.currency,
                     "customer_id": pi.customer,
-                    "retrieved_at": datetime.utcnow().isoformat(),
+                    "retrieved_at": _utcnow().isoformat(),
                     "mode": "live",
                 }
 
@@ -692,7 +694,7 @@ class PaymentsToolExecutor:
                     "customer_id": customer.id,
                     "email": customer.email,
                     "name": customer.name,
-                    "created_at": datetime.utcnow().isoformat(),
+                    "created_at": _utcnow().isoformat(),
                     "mode": "live",
                 }
 
@@ -709,8 +711,7 @@ def create_payments_tool() -> Tool:
         name="payments_tool",
         version="1.0.0",
         description=(
-            "Creates Stripe payment links, retrieves payment intents, "
-            "and provisions Stripe customer records."
+            "Creates Stripe payment links, retrieves payment intents, " "and provisions Stripe customer records."
         ),
         capabilities=[ToolCapability.PAYMENT_INITIATE],
         side_effect_level=SideEffectLevel.HIGH_IMPACT,
@@ -735,6 +736,7 @@ def create_payments_tool() -> Tool:
 # 6. Zendesk Ticketing Tool
 # ==============================================================================
 
+
 class TicketingToolExecutor:
     """
     Zendesk ticketing executor supporting create_ticket and update_ticket.
@@ -745,17 +747,17 @@ class TicketingToolExecutor:
 
     def __init__(
         self,
-        subdomain: Optional[str] = None,
-        api_token: Optional[str] = None,
-        zendesk_email: Optional[str] = None,
-        mock_mode: Optional[bool] = None,
+        subdomain: str | None = None,
+        api_token: str | None = None,
+        zendesk_email: str | None = None,
+        mock_mode: bool | None = None,
     ):
         self.subdomain = subdomain or os.getenv("ZENDESK_SUBDOMAIN")
         self.api_token = api_token or os.getenv("ZENDESK_API_TOKEN")
         self.zendesk_email = zendesk_email or os.getenv("ZENDESK_EMAIL", "admin@cortex.dev")
         has_creds = bool(self.subdomain and self.api_token)
         self.mode = resolve_connector_mode(self.api_token if has_creds else None, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
     def _base_url(self) -> str:
         return f"https://{self.subdomain}.zendesk.com/api/v2"
@@ -763,26 +765,24 @@ class TicketingToolExecutor:
     def _auth(self):
         """Returns httpx BasicAuth using Zendesk email/token scheme."""
         import httpx
+
         return httpx.BasicAuth(
             username=f"{self.zendesk_email}/token",
             password=self.api_token or "",
         )
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         action = params.get("action", "create_ticket")
         payload = params.get("payload", {})
 
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("Zendesk Ticketing connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         # ── Mock path ──────────────────────────────────────────────────────────
         if self.mode == ConnectorMode.MOCK:
             mock_id = abs(hash(str(payload))) % 100000
-            logger.warning(
-                f"[MOCK MODE] TicketingTool simulated action '{action}'. "
-                "No live Zendesk API call made."
-            )
+            logger.warning(f"[MOCK MODE] TicketingTool simulated action '{action}'. " "No live Zendesk API call made.")
             if action == "create_ticket":
                 return {
                     "status": "created",
@@ -841,7 +841,7 @@ class TicketingToolExecutor:
                         "ticket_url": ticket.get("url", ""),
                         "subject": ticket["subject"],
                         "priority": ticket["priority"],
-                        "created_at": ticket.get("created_at", datetime.utcnow().isoformat()),
+                        "created_at": ticket.get("created_at", _utcnow().isoformat()),
                         "mode": "live",
                     }
 
@@ -850,7 +850,7 @@ class TicketingToolExecutor:
                     if not ticket_id:
                         raise ValueError("update_ticket requires 'ticket_id' in payload.")
 
-                    update_body: Dict[str, Any] = {"ticket": {}}
+                    update_body: dict[str, Any] = {"ticket": {}}
                     for field in ("status", "priority", "comment", "tags", "assignee_id"):
                         if field in payload:
                             if field == "comment":
@@ -868,7 +868,7 @@ class TicketingToolExecutor:
                         "status": "updated",
                         "ticket_id": ticket["id"],
                         "updated_fields": list(update_body["ticket"].keys()),
-                        "updated_at": ticket.get("updated_at", datetime.utcnow().isoformat()),
+                        "updated_at": ticket.get("updated_at", _utcnow().isoformat()),
                         "mode": "live",
                     }
 
@@ -913,32 +913,28 @@ def create_ticketing_tool() -> Tool:
 class CalendarToolExecutor:
     """Production Calendar tool executor for Calendly and Google Calendar availability & booking."""
 
-    def __init__(self, api_key: Optional[str] = None, mock_mode: Optional[bool] = None):
+    def __init__(self, api_key: str | None = None, mock_mode: bool | None = None):
         self.api_key = api_key or os.getenv("CALENDLY_API_KEY")
         self.mode = resolve_connector_mode(self.api_key, mock_mode)
-        self.mock_mode = (self.mode == ConnectorMode.MOCK)
+        self.mock_mode = self.mode == ConnectorMode.MOCK
 
-    async def execute(self, params: Dict[str, Any], execution_context: Optional[Any] = None) -> Dict[str, Any]:
+    async def execute(self, params: dict[str, Any], execution_context: Any | None = None) -> dict[str, Any]:
         action = params.get("action", "check_availability")
         payload = params.get("payload", {})
 
         if self.mode == ConnectorMode.DISABLED:
             raise PermissionError("Calendly Calendar connector is DISABLED due to missing credentials in production.")
 
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self.mode == ConnectorMode.MOCK:
             logger.info(f"[MOCK] Executing CalendarTool action='{action}' with payload={payload}")
             if action == "check_availability":
                 return {
                     "status": "available",
-                    "available_slots": [
-                        "2026-08-29T10:00:00Z",
-                        "2026-08-29T14:00:00Z",
-                        "2026-08-30T11:00:00Z"
-                    ],
+                    "available_slots": ["2026-08-29T10:00:00Z", "2026-08-29T14:00:00Z", "2026-08-30T11:00:00Z"],
                     "provider": "calendly",
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             elif action == "book_meeting":
                 b_id = f"cal_book_{now_utc.strftime('%Y%m%d%H%M%S')}"
@@ -950,7 +946,7 @@ class CalendarToolExecutor:
                     "attendee": payload.get("email", "lead@enterprise.com"),
                     "scheduled_time": payload.get("scheduled_time", "2026-08-29T10:00:00Z"),
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             elif action == "reschedule":
                 return {
@@ -960,25 +956,82 @@ class CalendarToolExecutor:
                     "provider": "calendly",
                     "new_time": payload.get("new_time", "2026-08-30T15:00:00Z"),
                     "mode": "mock",
-                    "verified": True
+                    "verified": True,
                 }
             else:
                 raise ValueError(f"Unsupported CalendarTool action: '{action}'.")
 
-        # Live Calendly/Google Calendar REST execution
+        # Live Calendly REST execution.
+        #
+        # This branch previously returned hardcoded booking identifiers while
+        # labelling the result {"mode": "live", "verified": True} and never
+        # issued an HTTP request — a fabricated success in a tool the loop counts
+        # as a verified side effect (audit defect H7). It now performs the real
+        # call and reports exactly what the provider returned.
+        import httpx
+
+        base_url = os.getenv("CALENDLY_BASE_URL", "https://api.calendly.com").rstrip("/")
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json",
+        }
+
         try:
-            import httpx
             async with httpx.AsyncClient(timeout=10.0) as client:
-                headers = {"Authorization": f"Bearer {self.api_key}"}
                 if action == "check_availability":
-                    return {"status": "available", "available_slots": ["2026-08-29T10:00:00Z"], "mode": "live", "provider": "calendly", "verified": True}
-                elif action == "book_meeting":
-                    return {"status": "booked", "booking_id": "cal_live_123", "external_id": "cal_live_123", "mode": "live", "provider": "calendly", "verified": True}
-                else:
-                    raise ValueError(f"Unsupported action: '{action}'.")
-        except Exception as exc:
-            logger.error(f"CalendarTool execution failed: {exc}")
-            raise
+                    response = await client.get(
+                        f"{base_url}/scheduled_events",
+                        headers=headers,
+                        params={
+                            "user": payload.get("user_uri", ""),
+                            "status": "active",
+                            "min_start_time": payload.get("after", now_utc.isoformat()),
+                        },
+                    )
+                    response.raise_for_status()
+                    body = response.json()
+                    return {
+                        "status": "available",
+                        "mode": "live",
+                        "provider": "calendly",
+                        "verified": True,
+                        "scheduled_events": body.get("collection", []),
+                        "pagination": body.get("pagination", {}),
+                    }
+
+                if action == "book_meeting":
+                    response = await client.post(
+                        f"{base_url}/scheduling_links",
+                        headers=headers,
+                        json={
+                            "max_event_count": 1,
+                            "owner": payload.get("event_type_uri", ""),
+                            "owner_type": "EventType",
+                        },
+                    )
+                    response.raise_for_status()
+                    body = response.json()["resource"]
+                    return {
+                        "status": "booked",
+                        "booking_id": body.get("booking_url"),
+                        "external_id": body.get("booking_url"),
+                        "mode": "live",
+                        "provider": "calendly",
+                        "verified": True,
+                        "booking_url": body.get("booking_url"),
+                    }
+
+                raise ValueError(f"Unsupported action: '{action}'.")
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "CalendarTool live call failed with HTTP %s: %s",
+                exc.response.status_code,
+                exc.response.text[:200],
+            )
+            raise RuntimeError(f"Calendly rejected the {action} request with HTTP {exc.response.status_code}.") from exc
+        except httpx.HTTPError as exc:
+            logger.error("CalendarTool live call failed: %s", exc)
+            raise RuntimeError(f"Calendly is unreachable for action '{action}'.") from exc
 
 
 def create_calendar_tool() -> Tool:
@@ -1008,36 +1061,77 @@ def create_calendar_tool() -> Tool:
 # ==============================================================================
 # Connector Health & Circuit Breaker Registry
 # ==============================================================================
-CONNECTOR_HEALTH: Dict[str, Dict[str, Any]] = {
-    "sendgrid": {"name": "SendGrid Email", "scope": "integrations:email", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "twilio": {"name": "Twilio SMS & Voice", "scope": "integrations:communications", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "hubspot": {"name": "HubSpot CRM", "scope": "integrations:crm", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "stripe": {"name": "Stripe Payments", "scope": "integrations:payments", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "zendesk": {"name": "Zendesk Ticketing", "scope": "integrations:ticketing", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "calendly": {"name": "Calendly Calendar", "scope": "integrations:calendar", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
-    "outbound_webhook": {"name": "Outbound Webhooks", "scope": "integrations:webhook", "status": "HEALTHY", "failure_count": 0, "last_sync": datetime.utcnow().isoformat()},
+CONNECTOR_HEALTH: dict[str, dict[str, Any]] = {
+    "sendgrid": {
+        "name": "SendGrid Email",
+        "scope": "integrations:email",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "twilio": {
+        "name": "Twilio SMS & Voice",
+        "scope": "integrations:communications",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "hubspot": {
+        "name": "HubSpot CRM",
+        "scope": "integrations:crm",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "stripe": {
+        "name": "Stripe Payments",
+        "scope": "integrations:payments",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "zendesk": {
+        "name": "Zendesk Ticketing",
+        "scope": "integrations:ticketing",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "calendly": {
+        "name": "Calendly Calendar",
+        "scope": "integrations:calendar",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
+    "outbound_webhook": {
+        "name": "Outbound Webhooks",
+        "scope": "integrations:webhook",
+        "status": "HEALTHY",
+        "failure_count": 0,
+        "last_sync": _utcnow().isoformat(),
+    },
 }
 
 
-def get_connector_registry() -> List[Dict[str, Any]]:
+def get_connector_registry() -> list[dict[str, Any]]:
     return [{"id": k, **v} for k, v in CONNECTOR_HEALTH.items()]
 
 
 # Sentinel Security Findings Integration
-from .sentinel_listener import SentinelEventListener, SentinelPayload, SentinelFinding
-from .deployment_gate import DeploymentSecurityGate, GateVerdict, DeploymentGateResult
-
-# IntelX Competitive & Market Intelligence Integration
-from .intelx_client import IntelXClient, CompetitorProfile, MarketSignal
-
-# Futuris Predictive Operations Integration
-from .futuris_client import FuturisClient, TrafficForecast, ConversionTrendForecast, ChurnSegmentForecast
-
 # Connector Health & Credential Isolation
 from .connector_manager import (
-    ConnectorManager,
-    global_connector_manager,
-    CredentialManager,
     ConnectorHealth,
-    HealthStatus
+    ConnectorManager,
+    CredentialManager,
+    HealthStatus,
+    global_connector_manager,
 )
+from .deployment_gate import DeploymentGateResult, DeploymentSecurityGate, GateVerdict
+
+# Futuris Predictive Operations Integration
+from .futuris_client import ChurnSegmentForecast, ConversionTrendForecast, FuturisClient, TrafficForecast
+
+# IntelX Competitive & Market Intelligence Integration
+from .intelx_client import CompetitorProfile, IntelXClient, MarketSignal
+from .sentinel_listener import SentinelEventListener, SentinelFinding, SentinelPayload

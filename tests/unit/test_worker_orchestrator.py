@@ -1,9 +1,9 @@
+import json
 import os
 import sys
+from datetime import UTC, datetime
+
 import pytest
-import json
-from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
@@ -28,11 +28,11 @@ async def test_worker_cognitive_loop_pipeline():
         "tenant_id": "tenant_alpha",
         "site_id": "site_store",
         "type": "checkout.completed",
-        "occurred_at": datetime.utcnow().isoformat(),
+        "occurred_at": datetime.now(UTC).isoformat(),
         "actor": {"type": "user", "id": "usr_vip_888"},
         "source": "webhook:stripe",
         "data": {"order_total": 499.0, "currency": "USD"},
-        "trace_id": "trc_worker_pipe_1"
+        "trace_id": "trc_worker_pipe_1",
     }
 
     raw_stream_message = json.dumps(event_payload)

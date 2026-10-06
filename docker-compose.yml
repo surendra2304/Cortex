@@ -47,7 +47,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       MOCK_MODE: "true"
       AI_UNIVERSE_BASE_URL: https://api.ai-universe.dev
-      JWT_SECRET: super_secret_jwt_signing_key_replace_in_production
+      JWT_SECRET: ${JWT_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -60,7 +60,7 @@ services:
       dockerfile: apps/api/Dockerfile
     container_name: nexus-worker
     restart: unless-stopped
-    command: ["python", "apps/worker/src/nexus_worker/main.py"]
+    command: ["python", "-m", "cortex_worker.main"]
     environment:
       DATABASE_URL: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db
       POSTGRES_DSN: postgresql+asyncpg://nexus:nexus@postgres:5432/nexus_db

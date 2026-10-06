@@ -1,8 +1,8 @@
-import pytest
 import os
 import sys
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -15,9 +15,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowState
 from cortex_policy_engine import PolicyEngine
-from cortex_tool_runtime import Tool, ToolCapability, SideEffectLevel, Execution
+from cortex_tool_runtime import Execution, SideEffectLevel, Tool, ToolCapability
+from cortex_workflow_engine import WorkflowState, WorkflowStateMachine
 
 
 @pytest.mark.asyncio
@@ -37,7 +37,7 @@ async def test_human_in_the_loop_approval_flow_e2e():
     high_impact_tool = Tool(
         name="banner_injection",
         capabilities=[ToolCapability.BANNER_INJECTION],
-        side_effect_level=SideEffectLevel.HIGH_IMPACT
+        side_effect_level=SideEffectLevel.HIGH_IMPACT,
     )
 
     execution = Execution(
@@ -45,7 +45,7 @@ async def test_human_in_the_loop_approval_flow_e2e():
         tool_name="banner_injection",
         actor={"type": "agent", "id": "agent_growth"},
         reason="High bounce rate detected on pricing page",
-        params={"variant": "aggressive_pricing_cta"}
+        params={"variant": "aggressive_pricing_cta"},
     )
 
     # 2. Policy Engine blocks execution and requires human approval
@@ -57,7 +57,7 @@ async def test_human_in_the_loop_approval_flow_e2e():
     ctx = await sm.start_workflow(
         workflow_name="OPTIMIZE_PRICING_CONVERSION",
         trigger_event={"type": "pricing.drop_off"},
-        context_data={"proposed_tool": "banner_injection"}
+        context_data={"proposed_tool": "banner_injection"},
     )
 
     await sm.transition(ctx, WorkflowState.AWAITING_APPROVAL, "GATE_HUMAN_APPROVAL", {"requires_human": True})

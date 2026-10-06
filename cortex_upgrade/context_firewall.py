@@ -1,7 +1,9 @@
 from __future__ import annotations
+
 import re
 from dataclasses import dataclass
 from enum import Enum
+
 
 class Trust(str, Enum):
     SYSTEM = "system"
@@ -9,11 +11,13 @@ class Trust(str, Enum):
     EXTERNAL = "external"
     TOOL = "tool"
 
+
 @dataclass(frozen=True)
 class Context:
     text: str
     trust: Trust
     source: str
+
 
 PATTERNS = [
     re.compile(r"\bignore\s+(?:all|previous|the)\s+instructions\b", re.I),
@@ -22,8 +26,10 @@ PATTERNS = [
     re.compile(r"\bcall\s+(?:this|the)\s+tool\b", re.I),
 ]
 
+
 def injection_signals(text: str) -> list[str]:
     return [p.pattern for p in PATTERNS if p.search(text)]
+
 
 class ContextFirewall:
     def sanitize(self, items: list[Context]) -> tuple[list[Context], list[str]]:

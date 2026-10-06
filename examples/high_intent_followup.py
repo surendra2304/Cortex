@@ -10,9 +10,10 @@ This script simulates an end-to-end journey:
 """
 
 import asyncio
-import uuid
 import json
+import uuid
 from datetime import datetime
+
 import httpx
 
 API_BASE_URL = "http://localhost:8000"
@@ -21,7 +22,7 @@ OPERATOR_TOKEN = "mock_operator_jwt_token_123"
 HEADERS = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {OPERATOR_TOKEN}",
-    "X-Cortex-Public-Key": "pk_demo_live_999"
+    "X-Cortex-Public-Key": "pk_demo_live_999",
 }
 
 
@@ -40,7 +41,7 @@ async def run_scenario():
     pages = [
         {"path": "/pricing/enterprise", "type": "page_view", "title": "Enterprise Pricing & Tiers"},
         {"path": "/security/soc2", "type": "page_view", "title": "Security & Compliance Overview"},
-        {"path": "/docs/api/quickstart", "type": "page_view", "title": "Developer Documentation"}
+        {"path": "/docs/api/quickstart", "type": "page_view", "title": "Developer Documentation"},
     ]
 
     async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=10.0) as client:
@@ -58,7 +59,7 @@ async def run_scenario():
                 "source": "web-sdk",
                 "data": {"path": page["path"], "title": page["title"], "intent_signal": "high"},
                 "consent": {"analytics": True},
-                "trace_id": f"trc_demo_{uuid.uuid4().hex[:6]}"
+                "trace_id": f"trc_demo_{uuid.uuid4().hex[:6]}",
             }
 
             resp = await client.post("/v1/events", json=event_payload, headers=HEADERS)
@@ -66,7 +67,7 @@ async def run_scenario():
             await asyncio.sleep(0.5)
 
         # C. Identify Visitor
-        print(f"\n[2] Visitor submits demo inquiry form | Triggering Identity Resolution...")
+        print("\n[2] Visitor submits demo inquiry form | Triggering Identity Resolution...")
         identify_payload = {
             "visitor_id": visitor_id,
             "user_id": f"usr_{uuid.uuid4().hex[:6]}",
@@ -75,8 +76,8 @@ async def run_scenario():
                 "email": "alex.mercer@enterprise-corp.com",
                 "company": "Enterprise Corp",
                 "employee_count": 1500,
-                "role": "VP of Engineering"
-            }
+                "role": "VP of Engineering",
+            },
         }
 
         resp_ident = await client.post("/v1/identify", json=identify_payload, headers=HEADERS)
@@ -90,28 +91,28 @@ async def run_scenario():
                 "profile_id": resp_ident.json().get("result", {}).get("profile_id"),
                 "score": 92.5,
                 "status": "qualified",
-                "source": "web-sdk"
+                "source": "web-sdk",
             },
-            headers=HEADERS
+            headers=HEADERS,
         )
 
         # D. Wait for asynchronous worker processing
-        print(f"\n[3] Waiting 5 seconds for CORTEX background worker stream processing & Cognitive Loop...")
+        print("\n[3] Waiting 5 seconds for CORTEX background worker stream processing & Cognitive Loop...")
         for i in range(5, 0, -1):
             print(f"     Processing in {i}s...", end="\r")
             await asyncio.sleep(1.0)
         print("     Cognitive loop execution completed!      ")
 
         # E. Fetch Leads Data
-        print(f"\n[4] Querying Predictive Leads Pipeline (GET /v1/leads)...")
+        print("\n[4] Querying Predictive Leads Pipeline (GET /v1/leads)...")
         resp_leads = await client.get("/v1/leads", headers=HEADERS)
         leads = resp_leads.json().get("leads", [])
         print(f"  -> Total Qualified Leads: {len(leads)}")
-        for l in leads[-3:]:
-            print(f"     - Lead ID: {l.get('id')} | Score: {l.get('score')} | Status: {l.get('status')}")
+        for lead in leads[-3:]:
+            print(f"     - Lead ID: {lead.get('id')} | Score: {lead.get('score')} | Status: {lead.get('status')}")
 
         # F. Fetch Governance & Audit Data
-        print(f"\n[5] Querying Governance & Audit Trail (GET /v1/audit/actions)...")
+        print("\n[5] Querying Governance & Audit Trail (GET /v1/audit/actions)...")
         resp_audit = await client.get("/v1/audit/actions", headers=HEADERS)
         audit_data = resp_audit.json()
         print(f"  -> Audit Record Logs for Resource: {audit_data.get('resource_type')}")

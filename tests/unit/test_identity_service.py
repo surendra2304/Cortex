@@ -1,17 +1,18 @@
 import os
 import sys
-import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/identity/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from fastapi.testclient import TestClient
-from cortex_api.main import app
 from cortex_api.config import get_db_session
-from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel
+from cortex_api.db_models import LeadModel, ProfileModel, VisitorModel
+from cortex_api.main import app
+from fastapi.testclient import TestClient
+
+from tests.conftest import auth_headers
 
 
 def test_identify_pseudonymous_visitor():
@@ -30,7 +31,8 @@ def test_identify_pseudonymous_visitor():
     client = TestClient(app)
 
     # 1. Identify without user_id
-    res = client.post("/v1/identify", json={"visitor_id": "vis_anon_1", "traits": {"country": "US"}})
+    headers = auth_headers()
+    res = client.post("/v1/identify", headers=headers, json={"visitor_id": "vis_anon_1", "traits": {"country": "US"}})
     assert res.status_code == 200
     data = res.json()["result"]
     assert data["visitor_id"] == "vis_anon_1"
@@ -43,12 +45,7 @@ def test_identify_pseudonymous_visitor():
 def test_identify_authenticated_profile_stitching():
     mock_db = AsyncMock()
     # Mock existing visitor
-    mock_vis = VisitorModel(
-        id="vis_anon_2",
-        tenant_id="tenant_default",
-        site_id="site_1",
-        attributes={"plan": "pro"}
-    )
+    mock_vis = VisitorModel(id="vis_anon_2", tenant_id="tenant_default", site_id="site_1", attributes={"plan": "pro"})
     mock_exec_res = MagicMock()
     mock_exec_res.scalar_one_or_none.side_effect = [mock_vis, None]  # 1st: visitor exists, 2nd: profile not yet found
     mock_exec_res.scalars.return_value = []
@@ -64,11 +61,12 @@ def test_identify_authenticated_profile_stitching():
 
     res = client.post(
         "/v1/identify",
+        headers=auth_headers(),
         json={
             "visitor_id": "vis_anon_2",
             "user_id": "usr_real_777",
-            "traits": {"email": "alex@enterprise.com", "company": "Acme Inc"}
-        }
+            "traits": {"email": "alex@enterprise.com", "company": "Acme Inc"},
+        },
     )
     assert res.status_code == 200
     data = res.json()["result"]
@@ -87,15 +85,15 @@ def test_get_visitor_and_lead_endpoints():
         site_id="site_main",
         profile_id="prof_123",
         attributes={"country": "DE"},
-        first_seen_at=datetime.utcnow(),
-        last_seen_at=datetime.utcnow()
+        first_seen_at=datetime.now(UTC),
+        last_seen_at=datetime.now(UTC),
     )
     mock_prof = ProfileModel(
         id="prof_123",
         tenant_id="tenant_default",
         primary_email="user@de.com",
         identities=[{"user_id": "usr_99"}],
-        traits={"tier": "enterprise"}
+        traits={"tier": "enterprise"},
     )
     mock_lead = LeadModel(
         id="lead_123",
@@ -105,7 +103,7 @@ def test_get_visitor_and_lead_endpoints():
         status="qualified",
         source="web-sdk",
         lead_metadata={"budget": 50000},
-        created_at=datetime.utcnow()
+        created_at=datetime.now(UTC),
     )
 
     mock_res_vis = MagicMock()
@@ -121,7 +119,7 @@ def test_get_visitor_and_lead_endpoints():
 
     # Test GET /v1/visitors/:id
     mock_db.execute.return_value = mock_res_vis
-    res_v = client.get("/v1/visitors/vis_lookup_1")
+    res_v = client.get("/v1/visitors/vis_lookup_1", headers=auth_headers())
     assert res_v.status_code == 200
     v_data = res_v.json()["visitor"]
     assert v_data["id"] == "vis_lookup_1"
@@ -129,7 +127,7 @@ def test_get_visitor_and_lead_endpoints():
 
     # Test GET /v1/leads/:id
     mock_db.execute.return_value = mock_res_lead
-    res_l = client.get("/v1/leads/lead_123")
+    res_l = client.get("/v1/leads/lead_123", headers=auth_headers())
     assert res_l.status_code == 200
     l_data = res_l.json()["lead"]
     assert l_data["id"] == "lead_123"

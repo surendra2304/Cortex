@@ -1,12 +1,15 @@
 from __future__ import annotations
+
 import asyncio
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
+
 class EventRejected(ValueError):
     pass
+
 
 @dataclass(frozen=True)
 class CanonicalEvent:
@@ -20,6 +23,7 @@ class CanonicalEvent:
     consent: dict[str, bool]
     data: dict[str, Any]
     trace_id: str
+
 
 class EventNormalizer:
     def normalize(self, raw: dict[str, Any], received_at: datetime | None = None) -> CanonicalEvent:
@@ -53,6 +57,7 @@ class EventNormalizer:
             data=dict(raw.get("data") or {}),
             trace_id=trace,
         )
+
 
 class EventDedupeStore:
     def __init__(self) -> None:

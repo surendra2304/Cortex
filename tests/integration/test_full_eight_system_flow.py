@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -19,18 +20,18 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_agents import AgentInput, CompetitiveIntelligenceAgent
 from cortex_integrations import (
-    SentinelEventListener,
-    SentinelPayload,
-    SentinelFinding,
     DeploymentSecurityGate,
+    FuturisClient,
     GateVerdict,
     IntelXClient,
-    FuturisClient
+    SentinelEventListener,
+    SentinelFinding,
+    SentinelPayload,
 )
-from cortex_agents import CompetitiveIntelligenceAgent, GrowthAgent, AgentInput
 from cortex_intelligence import AssetExposureMonitor, MarketSignalDetector, PredictionInformedPersonalization
-from cortex_workflow_engine import SecurityIncidentWorkflow, CapacityPlanningWorkflow
+from cortex_workflow_engine import CapacityPlanningWorkflow
 
 
 @pytest.mark.asyncio
@@ -61,9 +62,9 @@ async def test_full_eight_system_ecosystem_orchestration_e2e():
                 title="Potential XSS on search route",
                 description="Search query parameter not escaped in server template.",
                 attack_vector="web_query",
-                affected_endpoint="/search"
+                affected_endpoint="/search",
             )
-        ]
+        ],
     )
     ingest_res = await sentinel_listener.handle_findings(payload)
     assert ingest_res["status"] == "ingested"
@@ -74,7 +75,7 @@ async def test_full_eight_system_ecosystem_orchestration_e2e():
         deployment_id="dep_forge_release_v2",
         asset_id="site_main",
         endpoints=["/search"],
-        simulated_findings=[payload.findings[0].model_dump()]
+        simulated_findings=[payload.findings[0].model_dump()],
     )
     assert gate_res.verdict == GateVerdict.NEEDS_APPROVAL
     assert gate_res.requires_human_override is True
@@ -103,7 +104,7 @@ async def test_full_eight_system_ecosystem_orchestration_e2e():
     agent_inp = AgentInput(
         goal="Competitor Battlecard Generation",
         events=[{"type": "page_view", "data": {"url": "https://example.com/vs-datadog"}}],
-        context={"competitor_name": "Datadog"}
+        context={"competitor_name": "Datadog"},
     )
     agent_out = await comp_agent.process(agent_inp)
     assert agent_out.decision == "SYNTHESIZE_COMPETITIVE_BATTLECARD"

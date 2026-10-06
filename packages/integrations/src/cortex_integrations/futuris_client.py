@@ -1,9 +1,16 @@
 import logging
 import os
 import uuid
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from pydantic import BaseModel, Field
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-futuris-client")
 
@@ -23,7 +30,7 @@ class TrafficForecast(BaseModel):
     peak_predicted_rps: float
     capacity_threshold_rps: float = 500.0
     exceeds_capacity: bool = False
-    data_points: List[ForecastHorizon] = Field(default_factory=list)
+    data_points: list[ForecastHorizon] = Field(default_factory=list)
     is_advisory: bool = True
     prediction_is_not_authorization: bool = True
 
@@ -34,7 +41,7 @@ class ConversionTrendForecast(BaseModel):
     predicted_cvr_pct: float
     trajectory: str  # upward, stable, dropping
     drop_probability: float  # 0.0 to 1.0
-    bottleneck_step: Optional[str] = None
+    bottleneck_step: str | None = None
     confidence: float = 0.88
     is_advisory: bool = True
     prediction_is_not_authorization: bool = True
@@ -60,13 +67,13 @@ class FuturisClient:
     - CAMPAIGN_IMPACT: Predicted uplift and surge effects from marketing campaigns
     """
 
-    def __init__(self, api_key: Optional[str] = None, mock_mode: bool = True):
+    def __init__(self, api_key: str | None = None, mock_mode: bool = True):
         self.api_key = api_key or os.getenv("FUTURIS_API_KEY", "mock_futuris_key")
         self.mock_mode = mock_mode
 
     async def predict_traffic(self, site_id: str, horizon_hours: int = 24) -> TrafficForecast:
         """Predicts visitor traffic volume and peak requests per second."""
-        now = datetime.utcnow()
+        now = _utcnow()
         points = []
         base_rps = 180.0
         for i in range(1, min(horizon_hours + 1, 25)):
@@ -74,12 +81,14 @@ class FuturisClient:
             # Simulate afternoon traffic spike
             multiplier = 2.8 if 14 <= t.hour <= 18 else 1.0
             predicted = base_rps * multiplier
-            points.append(ForecastHorizon(
-                timestamp=t,
-                predicted_value=round(predicted, 1),
-                confidence_lower=round(predicted * 0.9, 1),
-                confidence_upper=round(predicted * 1.15, 1)
-            ))
+            points.append(
+                ForecastHorizon(
+                    timestamp=t,
+                    predicted_value=round(predicted, 1),
+                    confidence_lower=round(predicted * 0.9, 1),
+                    confidence_upper=round(predicted * 1.15, 1),
+                )
+            )
 
         peak = max(p.predicted_value for p in points)
         return TrafficForecast(
@@ -90,7 +99,7 @@ class FuturisClient:
             peak_predicted_rps=peak,
             capacity_threshold_rps=400.0,
             exceeds_capacity=peak > 400.0,
-            data_points=points
+            data_points=points,
         )
 
     async def predict_conversion_trends(self, segment_id: str = "enterprise_leads") -> ConversionTrendForecast:
@@ -103,7 +112,7 @@ class FuturisClient:
                 trajectory="dropping",
                 drop_probability=0.78,
                 bottleneck_step="/checkout/payment_processing",
-                confidence=0.91
+                confidence=0.91,
             )
         return ConversionTrendForecast(
             segment_id=segment_id,
@@ -112,10 +121,10 @@ class FuturisClient:
             trajectory="upward",
             drop_probability=0.15,
             bottleneck_step=None,
-            confidence=0.89
+            confidence=0.89,
         )
 
-    async def predict_churn_risk(self, tenant_id: str = "default") -> List[ChurnSegmentForecast]:
+    async def predict_churn_risk(self, tenant_id: str = "default") -> list[ChurnSegmentForecast]:
         """Identifies at-risk customer segments based on behavioral decline signals."""
         return [
             ChurnSegmentForecast(
@@ -123,23 +132,23 @@ class FuturisClient:
                 predicted_churn_rate_pct=42.5,
                 at_risk_account_count=18,
                 primary_churn_driver="Incomplete SDK telemetry integration & low team invites",
-                urgency="high"
+                urgency="high",
             ),
             ChurnSegmentForecast(
                 segment_name="Enterprise Tier 2 (Declining Daily Active Users)",
                 predicted_churn_rate_pct=28.0,
                 at_risk_account_count=5,
                 primary_churn_driver="Recent support tickets on webhook latency",
-                urgency="medium"
-            )
+                urgency="medium",
+            ),
         ]
 
-    async def health_check(self) -> Dict[str, Any]:
+    async def health_check(self) -> dict[str, Any]:
         """Performs health check on Futuris predictive advisory integration."""
         return {
             "status": "UP",
             "service": "futuris",
             "advisory_only": True,
             "invariant": "prediction_is_not_authorization",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": _utcnow().isoformat(),
         }

@@ -1,16 +1,23 @@
-from typing import Dict, Any, List, Optional
-from datetime import datetime, timedelta, timezone
-from pydantic import BaseModel, Field
-from enum import Enum
-import uuid
 import logging
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, desc
+import uuid
+from datetime import UTC, datetime, timedelta, timezone
+from enum import Enum
+from typing import Any, Optional
 
 from cortex_api.db_models import MemoryEntryModel
-from cortex_upgrade.memory import ScopedMemory
-from cortex_upgrade.learning import StrategyLearner
+from pydantic import BaseModel, Field
+from sqlalchemy import and_, desc, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from cortex_upgrade.audit import redact
+from cortex_upgrade.learning import StrategyLearner
+from cortex_upgrade.memory import ScopedMemory
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-memory")
 
@@ -36,11 +43,11 @@ class MemoryEntry(BaseModel):
     scope: str
     scope_id: str
     key: str
-    content: Dict[str, Any] = Field(default_factory=dict)
+    content: dict[str, Any] = Field(default_factory=dict)
     trust_label: str = TrustLabel.VERIFIED_TELEMETRY.value
     source: str = "cognitive_loop"
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    expires_at: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=_utcnow)
+    expires_at: datetime | None = None
 
 
 class MemoryStore:
@@ -52,23 +59,23 @@ class MemoryStore:
     """
 
     def __init__(self):
-        self._in_memory: Dict[str, List[MemoryEntry]] = {}
+        self._in_memory: dict[str, list[MemoryEntry]] = {}
         self.scoped_memory = ScopedMemory()
 
     async def put(
         self,
-        db: Optional[AsyncSession],
+        db: AsyncSession | None,
         scope: str,
         scope_id: str,
         key: str,
-        content: Dict[str, Any],
+        content: dict[str, Any],
         trust_label: str = TrustLabel.VERIFIED_TELEMETRY.value,
         tenant_id: str = "default",
         source: str = "cognitive_loop",
-        ttl_days: Optional[int] = None
+        ttl_days: int | None = None,
     ) -> MemoryEntry:
         entry_id = f"mem_{uuid.uuid4().hex[:10]}"
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         expires_at = now + timedelta(days=ttl_days) if ttl_days else None
         safe_content = redact(content)
 
@@ -82,11 +89,11 @@ class MemoryStore:
             trust_label=trust_label,
             source=source,
             created_at=now,
-            expires_at=expires_at
+            expires_at=expires_at,
         )
 
-        # Store in local fast cache
-        cache_key = f"{scope}:{scope_id}"
+        # Store in local fast cache (tenant-scoped key prevents cross-tenant collisions)
+        cache_key = f"{tenant_id}:{scope}:{scope_id}"
         self._in_memory.setdefault(cache_key, []).append(entry)
 
         # Persist to database if session provided
@@ -102,7 +109,7 @@ class MemoryStore:
                     trust_label=entry.trust_label,
                     source=entry.source,
                     created_at=entry.created_at,
-                    expires_at=entry.expires_at
+                    expires_at=entry.expires_at,
                 )
                 db.add(db_model)
                 await db.commit()
@@ -113,17 +120,22 @@ class MemoryStore:
         return entry
 
     async def get(
-        self,
-        db: Optional[AsyncSession],
-        scope: str,
-        scope_id: str,
-        key: Optional[str] = None
-    ) -> List[MemoryEntry]:
+        self, db: AsyncSession | None, scope: str, scope_id: str, key: str | None = None, tenant_id: str | None = None
+    ) -> list[MemoryEntry]:
+        """Fetch scoped memory entries.
+
+        ``tenant_id`` is mandatory for database reads: without it a caller could
+        read another tenant's memory that happens to share a scope identifier
+        (audit defect H1).  The in-process cache is keyed by tenant as well.
+        """
         if db:
+            if not tenant_id:
+                raise ValueError("tenant_id is required to read memory from the database")
             try:
                 stmt = select(MemoryEntryModel).where(
+                    MemoryEntryModel.tenant_id == tenant_id,
                     MemoryEntryModel.scope == scope,
-                    MemoryEntryModel.scope_id == scope_id
+                    MemoryEntryModel.scope_id == scope_id,
                 )
                 if key:
                     stmt = stmt.where(MemoryEntryModel.key == key)
@@ -141,14 +153,14 @@ class MemoryStore:
                         trust_label=r.trust_label,
                         source=r.source,
                         created_at=r.created_at,
-                        expires_at=r.expires_at
+                        expires_at=r.expires_at,
                     )
                     for r in records
                 ]
             except Exception as exc:
                 logger.warning(f"DB memory fetch failed: {exc}")
 
-        cache_key = f"{scope}:{scope_id}"
+        cache_key = f"{tenant_id or 'default'}:{scope}:{scope_id}"
         entries = self._in_memory.get(cache_key, [])
         if key:
             return [e for e in entries if e.key == key]
@@ -156,12 +168,12 @@ class MemoryStore:
 
     async def record_strategy_outcome(
         self,
-        db: Optional[AsyncSession],
+        db: AsyncSession | None,
         strategy_name: str,
-        context_features: Dict[str, Any],
+        context_features: dict[str, Any],
         action_taken: str,
         outcome_lift_pct: float,
-        sample_size: int = 1
+        sample_size: int = 1,
     ) -> MemoryEntry:
         """Records strategy learning in strategy scope memory."""
         content = {
@@ -170,7 +182,7 @@ class MemoryStore:
             "context_features": context_features,
             "measured_lift_pct": outcome_lift_pct,
             "sample_size": sample_size,
-            "recorded_at": datetime.utcnow().isoformat()
+            "recorded_at": _utcnow().isoformat(),
         }
         return await self.put(
             db=db,
@@ -179,17 +191,17 @@ class MemoryStore:
             key="outcome_learning",
             content=content,
             trust_label=TrustLabel.VERIFIED_TELEMETRY.value,
-            source="cognitive_loop:measure"
+            source="cognitive_loop:measure",
         )
 
     async def record_outcome(
         self,
-        db: Optional[AsyncSession],
+        db: AsyncSession | None,
         action_id: str,
         action_type: str,
-        context_snapshot: Dict[str, Any],
+        context_snapshot: dict[str, Any],
         verdict: str,
-        metric_delta: Dict[str, Any]
+        metric_delta: dict[str, Any],
     ) -> MemoryEntry:
         """Records granular outcome measurement and updates strategy rollups."""
         content = {
@@ -198,7 +210,7 @@ class MemoryStore:
             "context_snapshot": context_snapshot,
             "verdict": verdict,
             "metric_delta": metric_delta,
-            "recorded_at": datetime.now(timezone.utc).isoformat()
+            "recorded_at": datetime.now(UTC).isoformat(),
         }
         return await self.put(
             db=db,
@@ -207,15 +219,12 @@ class MemoryStore:
             key=f"outcome_{action_id}",
             content=content,
             trust_label=TrustLabel.VERIFIED_TELEMETRY.value,
-            source="outcome_tracker"
+            source="outcome_tracker",
         )
 
-    async def get_strategy_performance(
-        self,
-        strategy_name: str
-    ) -> Dict[str, Any]:
+    async def get_strategy_performance(self, strategy_name: str) -> dict[str, Any]:
         """Calculates success rate and auto-promotion/demotion status using StrategyLearner with sample size guard."""
-        entries = await self.get(db=None, scope=MemoryScope.STRATEGY.value, scope_id=strategy_name)
+        entries = await self.get(db=None, scope=MemoryScope.STRATEGY.value, scope_id=strategy_name, tenant_id="default")
         outcomes = [e.content for e in entries if "verdict" in e.content]
         total = len(outcomes)
         if total == 0:
@@ -241,5 +250,5 @@ class MemoryStore:
             "success_rate": rate,
             "status": status,
             "disposition": disp,
-            "min_samples_met": total >= 20
+            "min_samples_met": total >= 20,
         }

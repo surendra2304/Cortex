@@ -1,8 +1,8 @@
-import pytest
 import os
 import sys
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock
+
+import pytest
 
 for p in [
     "packages/core/src",
@@ -21,9 +21,9 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_workflow_engine import WorkflowStateMachine, WorkflowState, WorkflowContext
+from cortex_ai_universe_adapter import AIMode, RequestClassification, RequestClassifier
 from cortex_analytics import OutcomeTracker, OutcomeVerdict, StrategyStatus
-from cortex_ai_universe_adapter import RequestClassifier, RequestClassification, AIMode
+from cortex_workflow_engine import WorkflowState, WorkflowStateMachine
 
 
 @pytest.mark.asyncio
@@ -33,7 +33,7 @@ async def test_workflow_state_machine_high_intent_lifecycle():
     ctx = await sm.start_workflow(
         workflow_name="HIGH_INTENT_FOLLOWUP",
         trigger_event={"type": "high_intent.detected", "score": 0.92},
-        context_data={"email": "lead@enterprise.com", "consent": True}
+        context_data={"email": "lead@enterprise.com", "consent": True},
     )
     assert ctx.current_state == WorkflowState.TRIGGERED
     assert len(ctx.steps) == 1
@@ -52,7 +52,7 @@ async def test_workflow_consent_revocation_cancellation():
     ctx = await sm.start_workflow(
         workflow_name="HIGH_INTENT_FOLLOWUP",
         trigger_event={"type": "high_intent.detected"},
-        context_data={"email": "lead@enterprise.com", "consent": False}
+        context_data={"email": "lead@enterprise.com", "consent": False},
     )
     # When consent is false, workflow cancels at consent check step
     cancelled_ctx = await sm.execute_high_intent_followup(ctx, None)
@@ -93,7 +93,7 @@ async def test_strategy_auto_promotion_and_demotion():
         strategy_key="agent_growth:banner_injection",
         action_type="banner_injection",
         action_id="act_test_1",
-        downstream_events=[{"type": "checkout.completed"}]
+        downstream_events=[{"type": "checkout.completed"}],
     )
     assert status in (StrategyStatus.PROBATION, StrategyStatus.PROVEN)
 

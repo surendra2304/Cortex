@@ -1,6 +1,8 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+
 
 @dataclass
 class StrategyStats:
@@ -9,13 +11,15 @@ class StrategyStats:
     losses: int = 0
     exposures: int = 0
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+
     @property
     def win_rate(self) -> float:
         n = self.wins + self.losses
         return self.wins / n if n else 0.0
 
+
 class StrategyLearner:
-    def __init__(self, promote_at=.60, demote_at=.30, min_samples=20):
+    def __init__(self, promote_at=0.60, demote_at=0.30, min_samples=20):
         if not 0 < demote_at < promote_at < 1:
             raise ValueError("invalid promotion thresholds")
         self.promote_at = promote_at
@@ -26,8 +30,10 @@ class StrategyLearner:
     def observe(self, strategy_id: str, won: bool) -> StrategyStats:
         s = self._stats.setdefault(strategy_id, StrategyStats(strategy_id))
         s.exposures += 1
-        if won: s.wins += 1
-        else: s.losses += 1
+        if won:
+            s.wins += 1
+        else:
+            s.losses += 1
         s.updated_at = datetime.now(UTC)
         return s
 

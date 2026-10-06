@@ -1,7 +1,6 @@
 import os
 import sys
-import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
@@ -10,10 +9,12 @@ sys.path.insert(0, os.path.abspath("packages/agents/src"))
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
-from fastapi.testclient import TestClient
-from cortex_api.main import app
 from cortex_api.config import get_db_session
-from cortex_api.db_models import VisitorModel, LeadModel
+from cortex_api.db_models import LeadModel, VisitorModel
+from cortex_api.main import app
+from fastapi.testclient import TestClient
+
+from tests.conftest import auth_headers
 
 
 def test_tracing_header_propagation():
@@ -31,8 +32,8 @@ def test_public_gateway_visitors():
         site_id="site_main",
         profile_id=None,
         attributes={"country": "US", "browser": "Chrome"},
-        first_seen_at=datetime.utcnow(),
-        last_seen_at=datetime.utcnow()
+        first_seen_at=datetime.now(UTC),
+        last_seen_at=datetime.now(UTC),
     )
     mock_res = MagicMock()
     mock_res.scalar_one_or_none.return_value = mock_vis
@@ -44,7 +45,8 @@ def test_public_gateway_visitors():
     app.dependency_overrides[get_db_session] = override_db
     client = TestClient(app)
 
-    res = client.get("/v1/visitors/vis_123")
+    headers = auth_headers()
+    res = client.get("/v1/visitors/vis_123", headers=headers)
     assert res.status_code == 200
     data = res.json()
     assert data["visitor"]["id"] == "vis_123"
@@ -63,7 +65,7 @@ def test_public_gateway_leads():
         status="new",
         source="web",
         lead_metadata={"email": "lead@corp.com"},
-        created_at=datetime.utcnow()
+        created_at=datetime.now(UTC),
     )
     mock_res_list = MagicMock()
     mock_res_list.scalars.return_value.all.return_value = [mock_lead]
@@ -78,12 +80,17 @@ def test_public_gateway_leads():
     client = TestClient(app)
 
     metadata = {"email": "lead@corp.com", "name": "Test Contact", "company": "Example"}
-    res = client.post("/v1/leads", json={
-        "profile_id": "profile_test_1",
-        "status": "new",
-        "source": "website",
-        "metadata": metadata,
-    })
+    headers = auth_headers()
+    res = client.post(
+        "/v1/leads",
+        headers=headers,
+        json={
+            "profile_id": "profile_test_1",
+            "status": "new",
+            "source": "website",
+            "metadata": metadata,
+        },
+    )
     assert res.status_code == 200
     lead = res.json()["lead"]
     assert lead["status"] == "new"
@@ -93,7 +100,7 @@ def test_public_gateway_leads():
     assert stored_lead.source == "website"
     assert stored_lead.lead_metadata == metadata
 
-    res_list = client.get("/v1/leads")
+    res_list = client.get("/v1/leads", headers=headers)
     assert res_list.status_code == 200
     assert res_list.json()["total"] >= 1
 
@@ -102,28 +109,36 @@ def test_public_gateway_leads():
 
 def test_public_gateway_agents():
     client = TestClient(app)
-    res = client.get("/v1/agents")
+    # Audit C4: these endpoints used to be anonymous. They now require a JWT;
+    # the assertions below cover both the rejection and the authorised path.
+    assert client.get("/v1/agents").status_code == 401
+    headers = auth_headers()
+    res = client.get("/v1/agents", headers=headers)
     assert res.status_code == 200
     agents = res.json()["agents"]
     assert len(agents) == 4
 
-    run_payload = {
-        "goal": "Test run",
-        "context": {"site": "demo"},
-        "events": []
-    }
-    res_run = client.post("/v1/agents/agent_growth/run", json=run_payload)
+    run_payload = {"goal": "Test run", "context": {"site": "demo"}, "events": []}
+    res_run = client.post("/v1/agents/agent_growth/run", json=run_payload, headers=headers)
     assert res_run.status_code == 200
     assert res_run.json()["output"]["agent_id"] == "agent_growth"
 
 
-def test_public_gateway_actions_and_audit():
-    client = TestClient(app)
-    res_appr = client.post("/v1/actions/act_high_1/approve")
+def test_public_gateway_actions_and_audit(api_client):
+    """The audit endpoint reads persisted records, so this test needs the DB override.
+
+    Using a bare TestClient made it depend on the process-wide engine, i.e. on a
+    data/cortex.db that happens to exist next to the checkout.
+    """
+    client = api_client
+    # Audit C4: approving a high-impact action must require an authenticated operator.
+    assert client.post("/v1/actions/act_high_1/approve").status_code == 401
+    headers = auth_headers()
+    res_appr = client.post("/v1/actions/act_high_1/approve", headers=headers)
     assert res_appr.status_code == 200
     assert res_appr.json()["action"]["status"] == "approved"
 
-    res_audit = client.get("/v1/audit/actions")
+    res_audit = client.get("/v1/audit/actions", headers=headers)
     assert res_audit.status_code == 200
     assert res_audit.json()["resource_type"] == "actions"
 

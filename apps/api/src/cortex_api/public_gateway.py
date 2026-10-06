@@ -1,25 +1,32 @@
-from fastapi import APIRouter, Depends, HTTPException, Header, status
-from typing import Dict, Any, List, Optional
-from datetime import datetime
-import uuid
-import sys
 import os
+import sys
+import uuid
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 
 sys.path.insert(0, os.path.abspath("packages/core/src"))
 sys.path.insert(0, os.path.abspath("packages/agents/src"))
 sys.path.insert(0, os.path.abspath("packages/identity/src"))
 sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
 
-from cortex_core.models import Lead, Visitor, AuditRecord, Workflow
-from cortex_agents import AgentRegistry, AgentInput
+from cortex_agents import AgentInput, AgentRegistry
+from cortex_ai_universe_adapter import AIUniverseClient, IntelligenceRequest
 from cortex_identity import IdentityService
-from cortex_ai_universe_adapter import IntelligenceRequest, IntelligenceResponse, AIUniverseClient
+
+from cortex_api.auth import Role, require_role
 from cortex_api.config import get_db_session
-from cortex_api.db_models import VisitorModel, ProfileModel, LeadModel, SessionModel
+from cortex_api.db_models import AuditRecordModel, EventModel, LeadModel, ProfileModel, VisitorModel
 from cortex_api.tracing import get_current_trace_id
-from cortex_api.auth import verify_jwt_token, require_role, Role
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 router = APIRouter(prefix="/v1", tags=["Public API Gateway"])
 
@@ -27,13 +34,13 @@ agent_registry = AgentRegistry()
 ai_client = AIUniverseClient()
 identity_service = IdentityService()
 
-ACTIONS_DB: Dict[str, Dict[str, Any]] = {
+ACTIONS_DB: dict[str, dict[str, Any]] = {
     "act_high_1": {
         "id": "act_high_1",
         "action_type": "banner_injection",
         "status": "pending_approval",
         "params": {"variant": "annual_discount_banner"},
-        "reason": "High impact conversion banner"
+        "reason": "High impact conversion banner",
     }
 }
 
@@ -41,9 +48,9 @@ ACTIONS_DB: Dict[str, Dict[str, Any]] = {
 # 1. Identity Resolution (POST /v1/identify) - Requires at least VIEWER role
 @router.post("/identify")
 async def identify_visitor(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     visitor_id = payload.get("visitor_id")
     if not visitor_id:
@@ -60,7 +67,7 @@ async def identify_visitor(
         tenant_id=auth.get("tenant_id", "default"),
         site_id=payload.get("site_id", "default"),
         consent_granted=payload.get("consent_granted", True),
-        traits=traits
+        traits=traits,
     )
     result["attributes"] = result.get("traits", {})
     return {"status": "success", "result": result, "trace_id": get_current_trace_id()}
@@ -71,7 +78,7 @@ async def identify_visitor(
 async def get_visitor(
     visitor_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
     res = await db.execute(stmt)
@@ -90,7 +97,7 @@ async def get_visitor(
                 "id": profile.id,
                 "primary_email": profile.primary_email,
                 "identities": profile.identities,
-                "traits": profile.traits
+                "traits": profile.traits,
             }
 
     return {
@@ -102,9 +109,9 @@ async def get_visitor(
             "attributes": visitor.attributes,
             "first_seen_at": visitor.first_seen_at.isoformat() if visitor.first_seen_at else None,
             "last_seen_at": visitor.last_seen_at.isoformat() if visitor.last_seen_at else None,
-            "profile": profile_data
+            "profile": profile_data,
         },
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 
@@ -113,7 +120,7 @@ async def get_visitor(
 async def get_lead(
     lead_id: str,
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
     stmt = select(LeadModel).where(LeadModel.id == lead_id)
     res = await db.execute(stmt)
@@ -131,16 +138,15 @@ async def get_lead(
             "status": lead.status,
             "source": lead.source,
             "metadata": lead.lead_metadata,
-            "created_at": lead.created_at.isoformat() if lead.created_at else None
+            "created_at": lead.created_at.isoformat() if lead.created_at else None,
         },
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 
 @router.get("/leads")
 async def list_leads(
-    db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
+    db: AsyncSession = Depends(get_db_session), auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
 ):
     tenant_id = auth.get("tenant_id", "default")
     stmt = select(LeadModel).where(LeadModel.tenant_id == tenant_id)
@@ -149,24 +155,24 @@ async def list_leads(
     return {
         "leads": [
             {
-                "id": l.id,
-                "score": l.score,
-                "status": l.status,
-                "source": l.source,
-                "created_at": l.created_at.isoformat() if l.created_at else None
+                "id": lead.id,
+                "score": lead.score,
+                "status": lead.status,
+                "source": lead.source,
+                "created_at": lead.created_at.isoformat() if lead.created_at else None,
             }
-            for l in leads
+            for lead in leads
         ],
         "total": len(leads),
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 
 @router.post("/leads")
 async def create_lead(
-    payload: Dict[str, Any],
+    payload: dict[str, Any],
     db: AsyncSession = Depends(get_db_session),
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
     lead_id = f"lead_{uuid.uuid4().hex[:8]}"
     db_lead = LeadModel(
@@ -177,45 +183,75 @@ async def create_lead(
         status=payload.get("status", "new"),
         source=payload.get("source", "web"),
         lead_metadata=payload.get("metadata", {}),
-        created_at=datetime.utcnow()
+        created_at=_utcnow(),
     )
     db.add(db_lead)
     await db.commit()
 
     return {
-        "lead": {
-            "id": lead_id,
-            "tenant_id": db_lead.tenant_id,
-            "score": db_lead.score,
-            "status": db_lead.status
-        },
-        "trace_id": get_current_trace_id()
+        "lead": {"id": lead_id, "tenant_id": db_lead.tenant_id, "score": db_lead.score, "status": db_lead.status},
+        "trace_id": get_current_trace_id(),
     }
 
 
 # 4. Analytics - Requires VIEWER role
+EVENT_BACKED_METRICS = {"events", "event_count", "page_views", "page_view", "conversions", "signups"}
+
+
 @router.get("/analytics/{metric}")
 async def get_analytics(
     metric: str,
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))
+    hours: int = 24,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
 ):
+    """Hourly series computed from the tenant's real events.
+
+    Previously this returned three hardcoded 2026-08-27 data points for every metric name,
+    which is indistinguishable from real telemetry in a dashboard. Only event-derived metrics
+    are served now; anything else reports ``supported: false`` rather than inventing numbers.
+    """
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    if metric not in EVENT_BACKED_METRICS:
+        return {
+            "metric": metric,
+            "tenant_id": tenant_id,
+            "supported": False,
+            "values": [],
+            "note": "Only event-derived metrics are available; this deployment has no aggregation "
+            "source for the requested metric. No sample data is returned.",
+            "trace_id": get_current_trace_id(),
+        }
+
+    hours = max(1, min(hours, 24 * 30))
+    since = _utcnow() - timedelta(hours=hours)
+    stmt = select(EventModel.occurred_at).where(EventModel.tenant_id == tenant_id, EventModel.occurred_at >= since)
+    if metric in {"page_views", "page_view"}:
+        stmt = stmt.where(EventModel.type == "page_view")
+    elif metric in {"conversions", "signups"}:
+        stmt = stmt.where(EventModel.type.in_(["conversion", "signup"]))
+
+    buckets: dict[str, int] = {}
+    for occurred_at in (await db.execute(stmt)).scalars().all():
+        if occurred_at is None:
+            continue
+        key = occurred_at.replace(minute=0, second=0, microsecond=0).isoformat()
+        buckets[key] = buckets.get(key, 0) + 1
+
     return {
         "metric": metric,
-        "tenant_id": auth.get("tenant_id", "default"),
-        "values": [
-            {"timestamp": "2026-08-27T10:00:00Z", "value": 142},
-            {"timestamp": "2026-08-27T11:00:00Z", "value": 189},
-            {"timestamp": "2026-08-27T12:00:00Z", "value": 234}
-        ],
-        "trace_id": get_current_trace_id()
+        "tenant_id": tenant_id,
+        "supported": True,
+        "window_hours": hours,
+        "values": [{"timestamp": key, "value": value} for key, value in sorted(buckets.items())],
+        "trace_id": get_current_trace_id(),
     }
 
 
 # 5. Intelligence Requests - Requires OPERATOR role
 @router.post("/intelligence/requests")
 async def create_intelligence_request(
-    req: IntelligenceRequest,
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
+    req: IntelligenceRequest, auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     res = await ai_client.evaluate(req)
     return {"response": res.model_dump(mode="json"), "trace_id": get_current_trace_id()}
@@ -223,23 +259,21 @@ async def create_intelligence_request(
 
 # 6. Agents - List requires VIEWER, Run requires OPERATOR
 @router.get("/agents")
-async def list_agents(auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+async def list_agents(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
     return {
         "agents": [
             {"id": "agent_growth", "domain": "growth", "capabilities": ["experiment_mutate", "banner_injection"]},
             {"id": "agent_sales", "domain": "sales", "capabilities": ["email_dispatch", "account_update"]},
             {"id": "agent_support", "domain": "support", "capabilities": ["session_inspect", "email_dispatch"]},
-            {"id": "agent_reliability", "domain": "reliability", "capabilities": ["session_inspect"]}
+            {"id": "agent_reliability", "domain": "reliability", "capabilities": ["session_inspect"]},
         ],
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 
 @router.post("/agents/{agent_id}/run")
 async def run_agent(
-    agent_id: str,
-    input_data: AgentInput,
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
+    agent_id: str, input_data: AgentInput, auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
 ):
     agent = agent_registry.get(agent_id)
     if not agent:
@@ -250,23 +284,23 @@ async def run_agent(
 
 # 7. Workflows - Requires VIEWER role
 @router.get("/workflows")
-async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+async def list_workflows(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
     return {
         "workflows": [
             {
                 "id": "wf_conversion_boost",
                 "name": "High Bounce Interceptor",
                 "trigger": {"type": "pricing_view"},
-                "status": "active"
+                "status": "active",
             },
             {
                 "id": "wf_enterprise_routing",
                 "name": "High Value Account Router",
                 "trigger": {"type": "checkout_intent"},
-                "status": "active"
-            }
+                "status": "active",
+            },
         ],
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 
@@ -274,35 +308,61 @@ async def list_workflows(auth: Dict[str, Any] = Depends(require_role(Role.CORTEX
 @router.post("/actions/{action_id}/approve")
 async def approve_action(
     action_id: str,
-    payload: Dict[str, Any] = {},
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
+    payload: dict[str, Any] | None = None,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
     action = ACTIONS_DB.get(action_id)
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
     action["status"] = "approved"
     action["approved_by"] = auth["sub"]
-    action["approved_at"] = datetime.utcnow().isoformat()
+    action["approved_at"] = _utcnow().isoformat()
     return {"status": "approved", "action": action, "trace_id": get_current_trace_id()}
 
 
-# 9. Audit Logs - Requires ADMIN role for security inspection
+# 9. Audit Logs - Requires OPERATOR role for security inspection
 @router.get("/audit/{resource_type}")
 async def get_audit_logs(
     resource_type: str,
-    auth: Dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))
+    tenant_id: str | None = None,
+    limit: int = 50,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+    db: AsyncSession = Depends(get_db_session),
 ):
+    """Return persisted audit records for the caller's tenant.
+
+    This endpoint used to synthesize a single ``aud_sample_1`` row timestamped at request
+    time, which made an empty audit trail look like a recorded one. An audit log must never
+    invent entries: an empty result now means "no records", full stop.
+    """
+    limit = max(1, min(limit, 200))
+    tenant_scope = tenant_id or auth.get("tenant_id", "tenant_default")
+    if tenant_id and tenant_id != auth.get("tenant_id") and auth.get("role") != Role.CORTEX_ADMIN.value:
+        raise HTTPException(status_code=403, detail="Cross-tenant audit access requires the admin role.")
+
+    stmt = select(AuditRecordModel).where(AuditRecordModel.tenant_id == tenant_scope)
+    if resource_type and resource_type not in {"all", "*"}:
+        stmt = stmt.where(AuditRecordModel.action.contains(resource_type))
+    stmt = stmt.order_by(desc(AuditRecordModel.timestamp)).limit(limit)
+
+    records = (await db.execute(stmt)).scalars().all()
     return {
         "resource_type": resource_type,
+        "tenant_id": tenant_scope,
+        "count": len(records),
         "logs": [
             {
-                "id": "aud_sample_1",
-                "actor_id": auth["sub"],
-                "action": f"read:{resource_type}",
-                "timestamp": datetime.utcnow().isoformat()
+                "id": record.id,
+                "actor_id": record.actor_id,
+                "action": record.action,
+                "target_resource": record.target_resource,
+                "verification_status": record.verification_status,
+                "timestamp": record.timestamp.isoformat() if record.timestamp else None,
+                "trace_id": record.trace_id,
             }
+            for record in records
         ],
-        "trace_id": get_current_trace_id()
+        "trace_id": get_current_trace_id(),
     }
 
 

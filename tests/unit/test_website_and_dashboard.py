@@ -1,7 +1,7 @@
 import pytest
-from fastapi.testclient import TestClient
-from cortex_api.main import app
 from cortex_api.landing_page import FALLBACK_WEBSITE_HTML
+from cortex_api.main import app
+from fastapi.testclient import TestClient
 
 
 @pytest.fixture

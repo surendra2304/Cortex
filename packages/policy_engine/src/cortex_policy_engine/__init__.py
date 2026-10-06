@@ -1,13 +1,19 @@
-from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime
-from enum import Enum
 import logging
-import sys
 import os
+import sys
+from datetime import UTC, datetime
+from enum import Enum
+from typing import Any, Optional
 
 sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
 
-from cortex_tool_runtime import Tool, Execution, SideEffectLevel, PolicyDecision
+from cortex_tool_runtime import Execution, PolicyDecision, SideEffectLevel, Tool
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now (never a naive timestamp)."""
+    return datetime.now(UTC)
+
 
 logger = logging.getLogger("cortex-policy-engine")
 
@@ -20,31 +26,49 @@ class HighImpactCategory(str, Enum):
     ACCOUNT_PERMISSIONS = "account_permissions"
 
 
-HIGH_IMPACT_CATEGORIES: Dict[HighImpactCategory, List[str]] = {
+HIGH_IMPACT_CATEGORIES: dict[HighImpactCategory, list[str]] = {
     HighImpactCategory.BILLING: [
-        "payment_initiate", "billing_update", "pricing_change",
-        "subscription_modify", "refund_issue", "stripe_charge"
+        "payment_initiate",
+        "billing_update",
+        "pricing_change",
+        "subscription_modify",
+        "refund_issue",
+        "stripe_charge",
     ],
     HighImpactCategory.CUSTOMER_COMMUNICATION: [
-        "email_dispatch", "sms_dispatch", "voice_dispatch",
-        "broadcast_message", "marketing_outreach", "crm_sync"
+        "email_dispatch",
+        "sms_dispatch",
+        "voice_dispatch",
+        "broadcast_message",
+        "marketing_outreach",
+        "crm_sync",
     ],
     HighImpactCategory.PRODUCTION_CONFIGURATION: [
-        "config_update", "deployment_traffic_switch", "route_mutate",
-        "prod_env_update", "feature_flag_toggle", "experiment_mutate"
+        "config_update",
+        "deployment_traffic_switch",
+        "route_mutate",
+        "prod_env_update",
+        "feature_flag_toggle",
+        "experiment_mutate",
     ],
     HighImpactCategory.CONTENT_PUBLISHING: [
-        "content_publish", "page_deploy", "theme_publish",
-        "banner_injection", "site_modify"
+        "content_publish",
+        "page_deploy",
+        "theme_publish",
+        "banner_injection",
+        "site_modify",
     ],
     HighImpactCategory.ACCOUNT_PERMISSIONS: [
-        "account_update", "permission_grant", "role_modify",
-        "user_invite_admin", "credential_revoke"
+        "account_update",
+        "permission_grant",
+        "role_modify",
+        "user_invite_admin",
+        "credential_revoke",
     ],
 }
 
 
-def check_high_impact_category(tool_name: str) -> Optional[Tuple[HighImpactCategory, str]]:
+def check_high_impact_category(tool_name: str) -> tuple[HighImpactCategory, str] | None:
     norm = tool_name.lower().strip()
     for cat, ops in HIGH_IMPACT_CATEGORIES.items():
         if norm in ops or any(op in norm for op in ops):
@@ -78,7 +102,7 @@ class PolicyEngine:
                 requires_human_approval=False,
                 reason=f"Operation approved via explicit supervisor token ({execution.approval.get('approver_id', 'operator')}).",
                 risk_score=0.2,
-                evaluated_at=datetime.utcnow()
+                evaluated_at=_utcnow(),
             )
 
         if level == SideEffectLevel.READ:
@@ -87,7 +111,7 @@ class PolicyEngine:
                 requires_human_approval=False,
                 reason="Read-only operations are automatically approved without state mutations.",
                 risk_score=0.0,
-                evaluated_at=datetime.utcnow()
+                evaluated_at=_utcnow(),
             )
 
         elif level == SideEffectLevel.SENSITIVE:
@@ -96,7 +120,7 @@ class PolicyEngine:
                 requires_human_approval=False,
                 reason="Sensitive operation auto-approved under audited telemetry guidelines.",
                 risk_score=0.3,
-                evaluated_at=datetime.utcnow()
+                evaluated_at=_utcnow(),
             )
 
         elif level == SideEffectLevel.HIGH_IMPACT:
@@ -107,14 +131,14 @@ class PolicyEngine:
                     requires_human_approval=True,
                     reason=f"High-impact operation in category '{cat_name}' requires explicit operator approval.",
                     risk_score=0.8,
-                    evaluated_at=datetime.utcnow()
+                    evaluated_at=_utcnow(),
                 )
             return PolicyDecision(
                 approved=True,
                 requires_human_approval=False,
                 reason="High-impact tool auto-approved under autonomous execution.",
                 risk_score=0.8,
-                evaluated_at=datetime.utcnow()
+                evaluated_at=_utcnow(),
             )
 
         elif level == SideEffectLevel.DANGEROUS:
@@ -123,7 +147,7 @@ class PolicyEngine:
                 requires_human_approval=True,
                 reason="Dangerous side-effect operation blocked. Requires administrator manual override.",
                 risk_score=1.0,
-                evaluated_at=datetime.utcnow()
+                evaluated_at=_utcnow(),
             )
 
         return PolicyDecision(
@@ -131,15 +155,11 @@ class PolicyEngine:
             requires_human_approval=True,
             reason=f"Unknown side-effect level {level}. Blocked by default safe invariant.",
             risk_score=1.0,
-            evaluated_at=datetime.utcnow()
+            evaluated_at=_utcnow(),
         )
 
 
-from cortex_policy_engine.privacy import (
-    SecretScrubber,
-    PrivacyComplianceService,
-    DataSubjectExport
-)
+from cortex_policy_engine.privacy import DataSubjectExport, PrivacyComplianceService, SecretScrubber
 
 __all__ = [
     "PolicyEngine",
@@ -148,5 +168,5 @@ __all__ = [
     "check_high_impact_category",
     "SecretScrubber",
     "PrivacyComplianceService",
-    "DataSubjectExport"
+    "DataSubjectExport",
 ]

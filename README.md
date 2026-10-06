@@ -87,6 +87,9 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 - **IntelX Competitive & Market Intelligence**: Automated feature gap extraction, competitive sales battlecards, and market trend tracking.
 - **Futuris Predictive Web Operations**: 24h traffic forecasting with 95% CI, capacity auto-scaling, and conversion drop mitigation.
 - **Governance & Security**: OIDC RS256 JWT RBAC, Prometheus metrics (`/metrics`), and distributed `trace_id` correlation.
+- **Multi-Agent Collaboration**: specialists request help from each other (`HandoffRequest`), peers receive the accumulated findings blackboard, and every session closes with an explicit consensus that names dissent instead of averaging it away. Bounded on purpose: one visit per agent, a hard round cap, cycles refused, and one failing agent recorded as `AGENT_ERROR` rather than sinking the session. Lives in `packages/agents/src/cortex_agents/collaboration.py` and runs inside the loop as phase `4a.Collaborate`.
+- **Self-Healing**: per-subsystem circuit breakers (3 consecutive failures or a 0.6 failure ratio over 5+ samples), real probes, bounded repairs with a cooldown, escalation when repairs do not work, and a background loop whose cadence and on/off switch are runtime knobs. A repair only counts when a follow-up probe verifies it — health is measured, never asserted. Lives in `packages/core/src/cortex_core/resilience.py` and `apps/api/src/cortex_api/self_healing.py`.
+- **Self-Model ("self brain")**: reports capabilities from observed evidence only (`operational` / `degraded` / `unverified` + explicit gaps), diagnoses its own weak spots, and can change a small allow-list of low-impact, reversible runtime knobs — with refusal reasons, conflict detection (409) and rollback. Nothing outside the allow-list, no environment or file writes. Lives in `packages/core/src/cortex_core/self_model.py`.
 
 ---
 
@@ -181,7 +184,20 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 | **Advanced Analytics & NL Query** | Conversational SQL Parser, Multi-Touch Attribution (Time-Decay 7d) | ✅ Operational |
 | **Privacy, Governance & SaaS** | GDPR/CCPA Exports & Deletions, PII Scrubber, Multi-Tenant Isolation | ✅ Operational |
 | **Sentinel & Forge DevSecOps** | Vulnerability Intake, Live Exposure Map, Pre-Flight Deployment Gates | ✅ Operational |
-| **IntelX & Futuris Operations** | Competitive Intelligence Battlecards, 24h Traffic Capacity Forecasting | ✅ Operational (128/128 tests green) |
+| **IntelX & Futuris Operations** | Competitive Intelligence Battlecards, 24h Traffic Capacity Forecasting | ✅ Operational |
+
+**Evidence basis.** The statuses above say what is implemented and covered by this
+repository's test suite, not that every subsystem has been exercised end to end here.
+Concretely verified in this environment: `pytest tests` (307 tests), `scripts/pressure_test.py`
+(9/9 scenarios, 5000 events at concurrency 200, 60 s soak, zero 5xx) against a live API plus
+the development Redis double, `scripts/self_healing_live_test.py` (a real Redis outage:
+detected, bounded repair, verified recovery) and `scripts/self_integrity_live_test.py`
+(52/52 checks: collaboration, refusals, self-model honesty, self-modification + rollback,
+and a FRIDAY command that drives the cognitive loop until peers actually join in).
+**CONFIGURED-BUT-UNVERIFIED** without third-party credentials or services: outbound
+connectors (SendGrid, Twilio, HubSpot, Calendly, Stripe, Zendesk), Postgres persistence,
+a production Redis, and the AI Universe deliberation service — those paths are covered by
+mocked tests and deterministic fallbacks only.
 
 ---
 
@@ -192,13 +208,38 @@ Every ingested event is processed through a strict closed-loop cognitive state m
 docker-compose up -d
 ```
 
-### 2. Verify Health Probes
+### 2. Or run the API locally (no Docker)
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install -r requirements.txt
+
+# Terminal 1 — Redis (use a real server in production; this is a development double)
+python scripts/dev_redis.py --host 0.0.0.0 --port 6379
+
+# Terminal 2 — API (adds apps/*/src and packages/*/src to sys.path, creates data/cortex.db)
+REDIS_URL=redis://127.0.0.1:6379/0 APP_ENV=development \
+  python scripts/run_api.py --port 8000
+```
+`APP_ENV=production` refuses to start when the database schema cannot be created, and no
+development API key is provisioned outside development.
+
+### 3. Verify Health Probes
 - **API Health Check**: `http://localhost:8000/v1/health`
 - **Readiness Probe**: `http://localhost:8000/health/ready`
 - **Prometheus Metrics**: `http://localhost:8000/metrics`
-- **Dashboard UI**: `http://localhost:3000`
+- **Dashboard UI**: `http://localhost:3000` (or served by the API at `http://localhost:8000/`)
 
-### 3. Run Test Suite
+### 4. Run Test Suite
 ```bash
-pytest -v
+pytest tests -v          # full suite (unit + integration + upgrade)
 ```
+
+### 5. Press it against a live server
+```bash
+python scripts/pressure_test.py \
+  --jwt-secret "$JWT_SECRET" \
+  --concurrency 200 --events 5000 --soak-seconds 60 --api-pid "$(pgrep -f run_api.py)"
+```
+Exercises ingest throughput, idempotency races, cross-tenant attacks, rate limiting,
+hostile input, a paced soak with RSS sampling, and read-back consistency. It exits
+non-zero when an invariant is violated.

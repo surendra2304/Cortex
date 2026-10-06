@@ -7,7 +7,21 @@ export interface CortexInitConfig {
   batchSize?: number;
   flushIntervalMs?: number;
   maxQueueSize?: number;
+  /**
+   * Optional tenant hint. The ingestion gateway derives the authoritative tenant
+   * from the public key; omit this unless your deployment names tenants in the
+   * browser layer.
+   */
   tenantId?: string;
+  /**
+   * Consent state applied before the visitor makes a choice.
+   *
+   * Defaults to `false`: no telemetry leaves the browser until the host page
+   * calls `cortex.consent(true)`. Set it to `true` only where local law permits
+   * processing before consent (for example strictly necessary first-party
+   * analytics), and document that decision in your privacy notice.
+   */
+  defaultConsent?: boolean;
 }
 
 export interface WireEventPayload {
@@ -56,7 +70,9 @@ export class CortexSDK {
   private visitorId = '';
   private sessionId = '';
   private userId: string | null = null;
-  private consentGranted = true;
+  // Privacy by design: tracking stays off until consent is granted explicitly
+  // (audit defect H9 — the previous default was `true`).
+  private consentGranted = false;
   private queue: WireEventPayload[] = [];
   private isFlushing = false;
   private flushTimer: any = null;
@@ -74,7 +90,10 @@ export class CortexSDK {
       batchSize: 20,
       flushIntervalMs: 3000,
       maxQueueSize: 100,
+      // "default" is a neutral placeholder: the gateway takes the tenant from
+      // the public key and rejects any specific conflicting claim.
       tenantId: 'default',
+      defaultConsent: false,
       ...config,
     };
 
@@ -276,12 +295,14 @@ export class CortexSDK {
   }
 
   private _loadConsent(): void {
+    const defaultValue = this.config?.defaultConsent ?? false;
     try {
       const stored = localStorage.getItem(STORAGE_CONSENT);
-      this.consentGranted = stored === null ? true : stored === 'true';
+      this.consentGranted = stored === null ? defaultValue : stored === 'true';
     } catch {
-      this.consentGranted = true;
+      this.consentGranted = defaultValue;
     }
+    this._log('Consent state resolved', { consentGranted: this.consentGranted, defaultValue });
   }
 
   private _attachAutoCapture(): void {

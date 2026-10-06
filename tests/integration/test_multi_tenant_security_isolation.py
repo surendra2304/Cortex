@@ -1,6 +1,6 @@
-import pytest
 import os
 import sys
+
 from fastapi.testclient import TestClient
 
 for p in [
@@ -13,8 +13,10 @@ for p in [
 
 from cortex_api.main import app
 
+from tests.conftest import auth_headers, friday_headers
 
-def test_multi_tenant_security_isolation_e2e():
+
+def test_multi_tenant_security_isolation_e2e(monkeypatch):
     """
     End-to-End Multi-Tenant Security Isolation:
     Tenant A's vulnerability findings and security incidents never appear in Tenant B.
@@ -22,20 +24,20 @@ def test_multi_tenant_security_isolation_e2e():
     client = TestClient(app)
 
     # 1. Onboard Tenant Alpha
-    res_a = client.post("/v1/tenants", json={
-        "tenant_name": "Tenant Alpha Security Corp",
-        "admin_email": "ciso@alpha.com",
-        "plan": "enterprise"
-    })
+    res_a = client.post(
+        "/v1/tenants",
+        headers=auth_headers(),
+        json={"tenant_name": "Tenant Alpha Security Corp", "admin_email": "ciso@alpha.com", "plan": "enterprise"},
+    )
     assert res_a.status_code == 201
     tenant_a = res_a.json()
 
     # 2. Onboard Tenant Beta
-    res_b = client.post("/v1/tenants", json={
-        "tenant_name": "Tenant Beta Security LLC",
-        "admin_email": "ciso@beta.com",
-        "plan": "enterprise"
-    })
+    res_b = client.post(
+        "/v1/tenants",
+        headers=auth_headers(),
+        json={"tenant_name": "Tenant Beta Security LLC", "admin_email": "ciso@beta.com", "plan": "enterprise"},
+    )
     assert res_b.status_code == 201
     tenant_b = res_b.json()
 
@@ -51,12 +53,12 @@ def test_multi_tenant_security_isolation_e2e():
                 "title": "Alpha Specific Finding",
                 "description": "Finding belonging strictly to Tenant Alpha.",
                 "attack_vector": "api",
-                "affected_endpoint": "/alpha-route"
+                "affected_endpoint": "/alpha-route",
             }
-        ]
+        ],
     }
 
-    res_finding = client.post("/v1/sentinel/findings", json=finding_payload)
+    res_finding = client.post("/v1/sentinel/findings", headers=friday_headers(monkeypatch), json=finding_payload)
     assert res_finding.status_code == 202
     data = res_finding.json()
     assert data["asset_id"] == tenant_a["primary_site_id"]

@@ -19,13 +19,13 @@ Auth pattern for endpoint tests:
   they are completely independent of env-var state — no timing or ordering
   sensitivity between tests.
 """
+
 import os
 import sys
-import json
-import pytest
-from datetime import datetime, timedelta
-from typing import Any, Dict
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 for _p in [
     "packages/core/src",
@@ -44,12 +44,11 @@ for _p in [
 os.environ.setdefault("MOCK_MODE", "true")
 os.environ.pop("FRIDAY_API_KEY", None)
 
-from fastapi.testclient import TestClient
-from cortex_api.main import app
-from cortex_api.config import get_db_session
 from cortex_api.auth import verify_friday_token
-from cortex_api.db_models import LeadModel, AuditRecordModel, EventModel
-
+from cortex_api.config import get_db_session
+from cortex_api.db_models import EventModel, LeadModel
+from cortex_api.main import app
+from fastapi.testclient import TestClient
 
 # ===========================================================================
 # Shared helpers
@@ -87,6 +86,7 @@ def _mock_db_empty():
 def _make_db_override(mock_db):
     async def _override():
         yield mock_db
+
     return _override
 
 
@@ -106,10 +106,17 @@ def _client_with_auth_and_db(mock_db):
 #    don't touch app.dependency_overrides at all.
 # ===========================================================================
 
+
 @pytest.mark.asyncio
 async def test_friday_token_mock_bypass():
-    """MOCK_MODE=true + no FRIDAY_API_KEY → bypass returns friday_system identity."""
+    """CORTEX_DEV_AUTH_BYPASS + no FRIDAY_API_KEY → bypass returns friday_system identity.
+
+    The bypass used to key off MOCK_MODE, which the whole test suite sets; it is
+    now the explicit development switch that is force-disabled in production
+    (audit C4).
+    """
     import cortex_api.auth as _auth
+
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -119,11 +126,13 @@ async def test_friday_token_mock_bypass():
         os.environ.pop("FRIDAY_API_KEY", None)
         os.environ["MOCK_MODE"] = "true"
 
+        _auth.DEV_AUTH_BYPASS = True
         result = await verify_friday_token(x_friday_api_key=None)
         assert result["sub"] == "friday_system"
         assert result["role"] == "friday_system"
         assert result["system"] == "FRIDAY"
     finally:
+        _auth.DEV_AUTH_BYPASS = False
         _auth.FRIDAY_API_KEY = original_key
         if original_env_key is not None:
             os.environ["FRIDAY_API_KEY"] = original_env_key
@@ -137,8 +146,8 @@ async def test_friday_token_mock_bypass():
 
 @pytest.mark.asyncio
 async def test_production_friday_auth_fails_closed_without_strong_secret(monkeypatch):
-    from fastapi import HTTPException
     import cortex_api.auth as _auth
+    from fastapi import HTTPException
 
     monkeypatch.setattr(_auth, "APP_ENV", "production")
     monkeypatch.delenv("RENDER", raising=False)
@@ -153,8 +162,8 @@ async def test_production_friday_auth_fails_closed_without_strong_secret(monkeyp
 
 @pytest.mark.asyncio
 async def test_production_friday_auth_rejects_shared_placeholder(monkeypatch):
-    from fastapi import HTTPException
     import cortex_api.auth as _auth
+    from fastapi import HTTPException
 
     monkeypatch.setattr(_auth, "APP_ENV", "production")
     monkeypatch.delenv("RENDER", raising=False)
@@ -170,6 +179,7 @@ async def test_production_friday_auth_rejects_shared_placeholder(monkeypatch):
 async def test_friday_token_valid_key():
     """Correct X-Friday-Api-Key → returns friday_system identity."""
     import cortex_api.auth as _auth
+
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -183,6 +193,7 @@ async def test_friday_token_valid_key():
         assert result["sub"] == "friday_system"
         assert result["role"] == "friday_system"
     finally:
+        _auth.DEV_AUTH_BYPASS = False
         _auth.FRIDAY_API_KEY = original_key
         if original_env_key is not None:
             os.environ["FRIDAY_API_KEY"] = original_env_key
@@ -197,8 +208,9 @@ async def test_friday_token_valid_key():
 @pytest.mark.asyncio
 async def test_friday_token_invalid_key_raises():
     """Wrong X-Friday-Api-Key → HTTP 403."""
-    from fastapi import HTTPException
     import cortex_api.auth as _auth
+    from fastapi import HTTPException
+
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -213,6 +225,7 @@ async def test_friday_token_invalid_key_raises():
         assert exc_info.value.status_code == 403
         assert "Invalid FRIDAY service token" in exc_info.value.detail
     finally:
+        _auth.DEV_AUTH_BYPASS = False
         _auth.FRIDAY_API_KEY = original_key
         if original_env_key is not None:
             os.environ["FRIDAY_API_KEY"] = original_env_key
@@ -227,8 +240,9 @@ async def test_friday_token_invalid_key_raises():
 @pytest.mark.asyncio
 async def test_friday_token_missing_key_raises():
     """Missing X-Friday-Api-Key when a key IS configured → HTTP 401."""
-    from fastapi import HTTPException
     import cortex_api.auth as _auth
+    from fastapi import HTTPException
+
     original_key = _auth.FRIDAY_API_KEY
     original_env_key = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -242,6 +256,7 @@ async def test_friday_token_missing_key_raises():
             await verify_friday_token(x_friday_api_key=None)
         assert exc_info.value.status_code == 401
     finally:
+        _auth.DEV_AUTH_BYPASS = False
         _auth.FRIDAY_API_KEY = original_key
         if original_env_key is not None:
             os.environ["FRIDAY_API_KEY"] = original_env_key
@@ -256,6 +271,7 @@ async def test_friday_token_missing_key_raises():
 # ===========================================================================
 # 2. POST /v1/friday/command
 # ===========================================================================
+
 
 def test_friday_command_routes_to_cognitive_loop():
     """
@@ -279,6 +295,7 @@ def test_friday_command_routes_to_cognitive_loop():
 
     try:
         client = _client_with_auth_and_db(mock_db)
+        assert client is not None  # the failure under test is the orchestrator raising, not client setup
 
         with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
@@ -335,6 +352,7 @@ def test_friday_command_with_idempotency_key():
 
     try:
         client = _client_with_auth_and_db(mock_db)
+        assert client is not None  # the failure under test is the orchestrator raising, not client setup
 
         with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
@@ -362,12 +380,11 @@ def test_friday_command_orchestrator_error_returns_500():
 
     try:
         client = _client_with_auth_and_db(mock_db)
+        assert client is not None  # the failure under test is the orchestrator raising, not client setup
 
         with patch("cortex_api.friday_router._get_orchestrator") as mock_get_orch:
             mock_orch = MagicMock()
-            mock_orch.run_cognitive_loop = AsyncMock(
-                side_effect=RuntimeError("AI Universe timeout")
-            )
+            mock_orch.run_cognitive_loop = AsyncMock(side_effect=RuntimeError("AI Universe timeout"))
             mock_get_orch.return_value = mock_orch
 
             client_no_raise = TestClient(app, raise_server_exceptions=False)
@@ -400,6 +417,7 @@ def test_friday_command_missing_required_fields_returns_422():
 # ===========================================================================
 # 3. GET /v1/friday/health_summary
 # ===========================================================================
+
 
 def test_friday_health_summary_empty_db():
     """Health summary returns valid shape and 'healthy' indicator with empty DB."""
@@ -451,7 +469,7 @@ def test_friday_health_summary_degraded_with_errors():
     mock_db = AsyncMock()
 
     scalars_with_errors = MagicMock()
-    scalars_with_errors.all.return_value = ["e1", "e2", "e3"]   # 3 error events
+    scalars_with_errors.all.return_value = ["e1", "e2", "e3"]  # 3 error events
 
     scalars_empty = MagicMock()
     scalars_empty.all.return_value = []
@@ -484,6 +502,7 @@ def test_friday_health_summary_requires_friday_auth():
     # With MOCK_MODE=true and no key configured, mock bypass returns 200.
     # This test verifies the endpoint is wired to the dependency at all.
     import cortex_api.auth as _auth
+
     original = _auth.FRIDAY_API_KEY
     original_env = os.environ.get("FRIDAY_API_KEY")
     original_mock = os.environ.get("MOCK_MODE")
@@ -494,7 +513,7 @@ def test_friday_health_summary_requires_friday_auth():
         os.environ["MOCK_MODE"] = "false"
 
         client = TestClient(app)
-        res = client.get("/v1/friday/health_summary")   # no X-Friday-Api-Key
+        res = client.get("/v1/friday/health_summary")  # no X-Friday-Api-Key
         assert res.status_code == 401
     finally:
         _auth.FRIDAY_API_KEY = original
@@ -511,6 +530,7 @@ def test_friday_health_summary_requires_friday_auth():
 # ===========================================================================
 # 4. GET /v1/friday/priority_leads
 # ===========================================================================
+
 
 def test_friday_priority_leads_empty_db_returns_empty_list():
     """When no leads exist, priority_leads returns a real empty list (no fabricated demo data)."""
@@ -538,7 +558,7 @@ def test_friday_priority_leads_with_real_leads():
         status="new",
         source="web",
         lead_metadata={"pricing_views": 5, "demo_requested": True},
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
     lead2 = LeadModel(
         id="lead_high_2",
@@ -548,7 +568,7 @@ def test_friday_priority_leads_with_real_leads():
         status="engaged",
         source="stripe_webhook",
         lead_metadata={"checkout_started": True},
-        created_at=datetime.utcnow(),
+        created_at=datetime.now(UTC),
     )
 
     scalars = MagicMock()
@@ -572,10 +592,7 @@ def test_friday_priority_leads_with_real_leads():
         assert leads[0]["score"] == 88.5
         assert "Immediate outreach" in leads[0]["recommended_action"]
         assert leads[1]["lead_id"] == "lead_high_2"
-        assert any(
-            kw in leads[1]["recommended_action"].lower()
-            for kw in ("personalised", "send", "case study")
-        )
+        assert any(kw in leads[1]["recommended_action"].lower() for kw in ("personalised", "send", "case study"))
     finally:
         app.dependency_overrides.clear()
 
@@ -583,6 +600,7 @@ def test_friday_priority_leads_with_real_leads():
 # ===========================================================================
 # 5. GET /v1/friday/incidents
 # ===========================================================================
+
 
 def test_friday_incidents_empty_returns_empty_list():
     """No incidents in DB → endpoint returns [] (all clear signal to FRIDAY)."""
@@ -606,13 +624,13 @@ def test_friday_incidents_returns_hypothesis():
         tenant_id="tenant_test",
         site_id="site_main",
         type="error.database_timeout",
-        occurred_at=datetime.utcnow(),
+        occurred_at=datetime.now(UTC),
         actor_type="system",
         actor_id="worker_01",
         source="worker",
         data={"error_message": "connection timeout after 5000ms", "table": "events"},
         trace_id="trc_err_001",
-        server_received_at=datetime.utcnow(),
+        server_received_at=datetime.now(UTC),
     )
 
     scalars = MagicMock()
@@ -645,6 +663,7 @@ def test_friday_incidents_returns_hypothesis():
 # 6. FridayCommand Pydantic model validation
 # ===========================================================================
 
+
 def test_friday_command_model_defaults_and_validation():
     """FridayCommand defaults and required-field enforcement."""
     from cortex_api.friday_router import FridayCommand
@@ -657,9 +676,9 @@ def test_friday_command_model_defaults_and_validation():
         requested_action="checkout.intent",
     )
     assert cmd.goal == "Optimise checkout conversion"
-    assert cmd.site_id == "friday_command"   # default
-    assert cmd.tenant_id == "default"        # default
-    assert cmd.idempotency_key is None       # optional
+    assert cmd.site_id == "friday_command"  # default
+    assert cmd.tenant_id == "default"  # default
+    assert cmd.idempotency_key is None  # optional
 
     # Missing required field `goal`
     with pytest.raises(ValidationError):
@@ -669,13 +688,15 @@ def test_friday_command_model_defaults_and_validation():
 def test_friday_actor_type_present_in_schema():
     """ActorType.FRIDAY_SYSTEM must be in the event schema enum."""
     from cortex_event_schema import ActorType
+
     assert ActorType.FRIDAY_SYSTEM.value == "friday_system"
     assert ActorType.FRIDAY_SYSTEM in list(ActorType)
 
 
 def test_friday_role_in_hierarchy():
     """Role.FRIDAY_SYSTEM must exist and include all lower roles in the hierarchy."""
-    from cortex_api.auth import Role, ROLE_HIERARCHY
+    from cortex_api.auth import ROLE_HIERARCHY, Role
+
     assert Role.FRIDAY_SYSTEM in ROLE_HIERARCHY
     hierarchy = ROLE_HIERARCHY[Role.FRIDAY_SYSTEM]
     assert Role.CORTEX_VIEWER in hierarchy

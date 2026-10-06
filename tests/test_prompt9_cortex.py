@@ -1,9 +1,10 @@
+import copy
 import os
 import sys
 import uuid
-import copy
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -26,26 +27,21 @@ for p in [
 
 os.environ.setdefault("MOCK_MODE", "true")
 
-from cortex_api.main import app
 from cortex_api.auth import verify_friday_token
 from cortex_api.config import get_db_session
+from cortex_api.main import app
+from cortex_core.task_manager import TaskState, global_task_manager
 from cortex_core.web_property import (
-    WebProperty, PropertyRegistry, global_property_registry,
-    UnauthorizedPropertyError, OperationNotAllowedError
+    global_property_registry,
 )
-from cortex_core.governed_operations import (
-    GovernedOperationsEngine, global_governed_engine,
-    ImpactCategory, classify_action_impact,
-    ApprovalRequiredError, SentinelSecurityBlockError
-)
-from cortex_core.task_manager import TaskManager, global_task_manager, TaskState
 from cortex_integrations.connector_manager import (
-    ConnectorManager, global_connector_manager, CredentialManager, HealthStatus
+    ConnectorManager,
+    CredentialManager,
 )
 from cortex_integrations.futuris_client import FuturisClient
 from cortex_integrations.intelx_client import IntelXClient
-from cortex_upgrade.context_firewall import ContextFirewall, Context, Trust
 
+from cortex_upgrade.context_firewall import Context, ContextFirewall, Trust
 
 _FRIDAY_IDENTITY = {
     "sub": "friday_system",
@@ -91,11 +87,14 @@ def test_friday_can_request_website_health_summary():
     assert "active_agents" in data
 
     # Via Universal Task Protocol POST /v1/friday/task
-    task_resp = client.post("/v1/friday/task", json={
-        "task_id": f"task_health_{uuid.uuid4().hex[:8]}",
-        "action": "health_summary",
-        "payload": {"property_id": "site_storefront"}
-    })
+    task_resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": f"task_health_{uuid.uuid4().hex[:8]}",
+            "action": "health_summary",
+            "payload": {"property_id": "site_storefront"},
+        },
+    )
     assert task_resp.status_code == 200
     t_data = task_resp.json()
     assert t_data["status"] == "SUCCESS"
@@ -116,17 +115,20 @@ def test_cortex_can_recommend_change_without_executing_it():
     prop_before = copy.deepcopy(global_property_registry.get("site_storefront").state_snapshot)
 
     task_id = f"task_rec_{uuid.uuid4().hex[:8]}"
-    resp = client.post("/v1/friday/task", json={
-        "task_id": task_id,
-        "action": "recommend_intervention",
-        "payload": {
-            "property_id": "site_storefront",
-            "proposed_operation": "banner_injection",
-            "params": {"variant": "mobile_flash_sale_v2"},
-            "rationale": "High mobile drop-off detected on cart page",
-            "expected_outcomes": {"conversion_lift_pct": 11.2}
-        }
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": task_id,
+            "action": "recommend_intervention",
+            "payload": {
+                "property_id": "site_storefront",
+                "proposed_operation": "banner_injection",
+                "params": {"variant": "mobile_flash_sale_v2"},
+                "rationale": "High mobile drop-off detected on cart page",
+                "expected_outcomes": {"conversion_lift_pct": 11.2},
+            },
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["state"] == "WAITING_APPROVAL"
@@ -149,18 +151,21 @@ def test_approved_low_risk_operation_executes_once_and_returns_measurement():
     client = _get_test_client()
 
     task_id = f"task_exec_low_{uuid.uuid4().hex[:8]}"
-    resp = client.post("/v1/friday/task", json={
-        "task_id": task_id,
-        "action": "execute_operation",
-        "payload": {
-            "property_id": "site_storefront",
-            "operation": "cache_flush",
-            "params": {"cache_tier": "static_assets"},
-            "approved": True,
-            "approver_id": "operator_devops"
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": task_id,
+            "action": "execute_operation",
+            "payload": {
+                "property_id": "site_storefront",
+                "operation": "cache_flush",
+                "params": {"cache_tier": "static_assets"},
+                "approved": True,
+                "approver_id": "operator_devops",
+            },
+            "idempotency_key": f"idemp_{task_id}",
         },
-        "idempotency_key": f"idemp_{task_id}"
-    })
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["status"] == "COMPLETED"
@@ -175,13 +180,16 @@ def test_approved_low_risk_operation_executes_once_and_returns_measurement():
 # ==============================================================================
 # Acceptance Test 4: Unapproved High-Impact Operations Blocked Across 5 Categories
 # ==============================================================================
-@pytest.mark.parametrize("operation,category", [
-    ("payment_initiate", "billing"),
-    ("email_dispatch", "customer_communication"),
-    ("config_update", "production_configuration"),
-    ("content_publish", "content_publishing"),
-    ("account_update", "account_permissions"),
-])
+@pytest.mark.parametrize(
+    "operation,category",
+    [
+        ("payment_initiate", "billing"),
+        ("email_dispatch", "customer_communication"),
+        ("config_update", "production_configuration"),
+        ("content_publish", "content_publishing"),
+        ("account_update", "account_permissions"),
+    ],
+)
 def test_unapproved_high_impact_operations_blocked(operation, category):
     """
     Acceptance Test 4: Require approval for high-impact changes involving:
@@ -190,16 +198,19 @@ def test_unapproved_high_impact_operations_blocked(operation, category):
     client = _get_test_client()
     task_id = f"task_hi_{category}_{uuid.uuid4().hex[:6]}"
 
-    resp = client.post("/v1/friday/task", json={
-        "task_id": task_id,
-        "action": "execute_operation",
-        "payload": {
-            "property_id": "site_main",
-            "operation": operation,
-            "params": {"test": "unapproved_change"},
-            "approved": False  # Not approved!
-        }
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": task_id,
+            "action": "execute_operation",
+            "payload": {
+                "property_id": "site_main",
+                "operation": operation,
+                "params": {"test": "unapproved_change"},
+                "approved": False,  # Not approved!
+            },
+        },
+    )
     assert resp.status_code == 403
     detail = resp.json()["detail"]
     assert "requires explicit supervisor approval" in detail
@@ -214,18 +225,21 @@ def test_sentinel_blocks_production_deployment():
     client = _get_test_client()
 
     task_id = f"task_sec_{uuid.uuid4().hex[:8]}"
-    resp = client.post("/v1/friday/task", json={
-        "task_id": task_id,
-        "action": "execute_operation",
-        "payload": {
-            "property_id": "site_main",
-            "operation": "config_update",
-            "params": {"routing_version": "v3.0.0-unverified"},
-            "approved": True,
-            "approver_id": "operator_lead",
-            "sentinel_verdict": "BLOCKED"  # Sentinel security gate failed!
-        }
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": task_id,
+            "action": "execute_operation",
+            "payload": {
+                "property_id": "site_main",
+                "operation": "config_update",
+                "params": {"routing_version": "v3.0.0-unverified"},
+                "approved": True,
+                "approver_id": "operator_lead",
+                "sentinel_verdict": "BLOCKED",  # Sentinel security gate failed!
+            },
+        },
+    )
     assert resp.status_code == 403
     assert "blocked by Sentinel security gate" in resp.json()["detail"]
 
@@ -246,9 +260,9 @@ def test_duplicate_events_do_not_create_duplicate_side_effects():
             "operation": "cache_flush",
             "params": {"target": "cdn"},
             "approved": True,
-            "approver_id": "auto_test"
+            "approver_id": "auto_test",
         },
-        "idempotency_key": idemp_key
+        "idempotency_key": idemp_key,
     }
 
     # First call: executes
@@ -271,11 +285,14 @@ def test_unauthorized_property_rejected_fail_closed():
     """Rejects operations targeting an unregistered website or web application."""
     client = _get_test_client()
 
-    resp = client.post("/v1/friday/task", json={
-        "task_id": f"task_unauth_{uuid.uuid4().hex[:8]}",
-        "action": "health_summary",
-        "payload": {"property_id": "rogue_unregistered_app_999"}
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": f"task_unauth_{uuid.uuid4().hex[:8]}",
+            "action": "health_summary",
+            "payload": {"property_id": "rogue_unregistered_app_999"},
+        },
+    )
     assert resp.status_code == 404
     assert "not registered" in resp.json()["detail"]
 
@@ -287,16 +304,19 @@ def test_operation_not_allowed_on_property():
     """Rejects operations not in property's allowed_operations list."""
     client = _get_test_client()
 
-    resp = client.post("/v1/friday/task", json={
-        "task_id": f"task_disallow_{uuid.uuid4().hex[:8]}",
-        "action": "execute_operation",
-        "payload": {
-            "property_id": "site_storefront",
-            "operation": "deployment_traffic_switch",  # Not allowed on storefront
-            "approved": True,
-            "approver_id": "devops"
-        }
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": f"task_disallow_{uuid.uuid4().hex[:8]}",
+            "action": "execute_operation",
+            "payload": {
+                "property_id": "site_storefront",
+                "operation": "deployment_traffic_switch",  # Not allowed on storefront
+                "approved": True,
+                "approver_id": "devops",
+            },
+        },
+    )
     assert resp.status_code == 403
     assert "is not permitted on property" in resp.json()["detail"]
 
@@ -387,18 +407,21 @@ def test_dry_run_simulation_mode():
     client = _get_test_client()
     task_id = f"task_dry_{uuid.uuid4().hex[:8]}"
 
-    resp = client.post("/v1/friday/task", json={
-        "task_id": task_id,
-        "action": "execute_operation",
-        "dry_run": True,
-        "payload": {
-            "property_id": "site_storefront",
-            "operation": "banner_injection",
-            "params": {"variant": "simulated_test_banner"},
-            "approved": True,
-            "approver_id": "simulation_lead"
-        }
-    })
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": task_id,
+            "action": "execute_operation",
+            "dry_run": True,
+            "payload": {
+                "property_id": "site_storefront",
+                "operation": "banner_injection",
+                "params": {"variant": "simulated_test_banner"},
+                "approved": True,
+                "approver_id": "simulation_lead",
+            },
+        },
+    )
     assert resp.status_code == 200
     data = resp.json()
     assert data["dry_run"] is True
@@ -429,17 +452,20 @@ def test_stale_telemetry_context_detection():
     """Detects and flags telemetry older than the staleness threshold (<60s)."""
     client = _get_test_client()
 
-    stale_time = (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat()
-    resp = client.post("/v1/friday/task", json={
-        "task_id": f"task_stale_{uuid.uuid4().hex[:8]}",
-        "action": "recommend_intervention",
-        "payload": {
-            "property_id": "site_storefront",
-            "telemetry": {"source": "web_telemetry", "timestamp": stale_time},
-            "max_staleness_seconds": 60.0,
-            "reject_on_stale": True
-        }
-    })
+    stale_time = (datetime.now(UTC) - timedelta(seconds=120)).isoformat()
+    resp = client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": f"task_stale_{uuid.uuid4().hex[:8]}",
+            "action": "recommend_intervention",
+            "payload": {
+                "property_id": "site_storefront",
+                "telemetry": {"source": "web_telemetry", "timestamp": stale_time},
+                "max_staleness_seconds": 60.0,
+                "reject_on_stale": True,
+            },
+        },
+    )
     assert resp.status_code == 400
     assert "is stale" in resp.json()["detail"]
 
@@ -453,6 +479,7 @@ def test_task_cancellation_and_rollback():
 
     # 1. Test Cancellation
     task = global_task_manager.create_task("task_to_cancel", "site_storefront", "recommend_intervention")
+    assert task.state.value == "RECEIVED", task.state  # fresh tasks start RECEIVED
     cancel_resp = client.post("/v1/friday/tasks/task_to_cancel/cancel", json={"reason": "Operator aborted"})
     assert cancel_resp.status_code == 200
     assert cancel_resp.json()["state"] == "CANCELLED"
@@ -460,17 +487,20 @@ def test_task_cancellation_and_rollback():
     # 2. Test Rollback
     # Execute an approved banner change
     exec_task_id = f"task_for_rollback_{uuid.uuid4().hex[:8]}"
-    client.post("/v1/friday/task", json={
-        "task_id": exec_task_id,
-        "action": "execute_operation",
-        "payload": {
-            "property_id": "site_storefront",
-            "operation": "banner_injection",
-            "params": {"variant": "banner_before_rollback"},
-            "approved": True,
-            "approver_id": "lead"
-        }
-    })
+    client.post(
+        "/v1/friday/task",
+        json={
+            "task_id": exec_task_id,
+            "action": "execute_operation",
+            "payload": {
+                "property_id": "site_storefront",
+                "operation": "banner_injection",
+                "params": {"variant": "banner_before_rollback"},
+                "approved": True,
+                "approver_id": "lead",
+            },
+        },
+    )
     assert global_property_registry.get("site_storefront").state_snapshot["active_banner"] == "banner_before_rollback"
 
     # Trigger Rollback
@@ -503,18 +533,22 @@ def test_task_status_and_properties_registry_endpoints():
 
     # Create task
     task = global_task_manager.create_task("task_status_check", "site_storefront", "health_summary")
+    assert task.task_id == "task_status_check"
     status_resp = client.get("/v1/friday/task/task_status_check/status")
     assert status_resp.status_code == 200
     assert status_resp.json()["task_id"] == "task_status_check"
 
     # Register new property
-    reg_resp = client.post("/v1/friday/properties/register", json={
-        "property_id": "site_new_webapp",
-        "name": "New Web Application",
-        "allowed_domains": ["https://newapp.example.com"],
-        "allowed_operations": ["analytics_query", "session_inspect", "banner_injection"],
-        "target_environment": "staging"
-    })
+    reg_resp = client.post(
+        "/v1/friday/properties/register",
+        json={
+            "property_id": "site_new_webapp",
+            "name": "New Web Application",
+            "allowed_domains": ["https://newapp.example.com"],
+            "allowed_operations": ["analytics_query", "session_inspect", "banner_injection"],
+            "target_environment": "staging",
+        },
+    )
     assert reg_resp.status_code == 200
     assert reg_resp.json()["status"] == "registered"
 

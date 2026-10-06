@@ -1,6 +1,7 @@
-import pytest
 import os
 import sys
+
+import pytest
 from fastapi.testclient import TestClient
 
 for p in [
@@ -21,14 +22,16 @@ for p in [
     sys.path.insert(0, os.path.abspath(p))
 
 from cortex_api.main import app
-from cortex_integrations import SentinelEventListener, SentinelPayload, SentinelFinding
+from cortex_integrations import SentinelEventListener, SentinelFinding, SentinelPayload
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import SecurityIncidentWorkflow
+
+from tests.conftest import auth_headers, friday_headers
 
 
 def test_asset_exposure_monitor():
     monitor = AssetExposureMonitor()
-    
+
     # 1. Check pre-registered critical asset
     checkout_exp = monitor.evaluate_exposure("site_main", "/checkout")
     assert checkout_exp["exposure_level"] == "critical"
@@ -60,9 +63,9 @@ async def test_sentinel_listener_and_security_incident_workflow():
                 title="SQL Injection on unauthenticated checkout parameter",
                 description="Union-based SQLi vulnerability identified on payment discount field.",
                 attack_vector="web_request",
-                affected_endpoint="/checkout"
+                affected_endpoint="/checkout",
             )
-        ]
+        ],
     )
 
     # 1. Ingest findings via listener
@@ -76,10 +79,7 @@ async def test_sentinel_listener_and_security_incident_workflow():
     finding_dict["asset_id"] = payload.asset_id
     exposure = monitor.evaluate_exposure(payload.asset_id, "/checkout")
 
-    triage_res = await workflow.execute_security_incident_triage(
-        finding=finding_dict,
-        asset_exposure=exposure
-    )
+    triage_res = await workflow.execute_security_incident_triage(finding=finding_dict, asset_exposure=exposure)
 
     assert triage_res["severity"] == "critical"
     assert triage_res["exposure_level"] == "critical"
@@ -87,7 +87,7 @@ async def test_sentinel_listener_and_security_incident_workflow():
     assert triage_res["friday_alert_sent"] is True
 
 
-def test_sentinel_findings_api_endpoint():
+def test_sentinel_findings_api_endpoint(monkeypatch):
     client = TestClient(app)
 
     # POST findings to /v1/sentinel/findings
@@ -102,12 +102,14 @@ def test_sentinel_findings_api_endpoint():
                 "title": "Cross-Site Scripting (Reflected)",
                 "description": "Reflected XSS on user profile search query parameter.",
                 "attack_vector": "browser_xss",
-                "affected_endpoint": "/search"
+                "affected_endpoint": "/search",
             }
-        ]
+        ],
     }
 
-    res = client.post("/v1/sentinel/findings", json=payload)
+    # Audit C4: scanner findings are service-authenticated.
+    assert client.post("/v1/sentinel/findings", json=payload).status_code == 401
+    res = client.post("/v1/sentinel/findings", headers=friday_headers(monkeypatch), json=payload)
     assert res.status_code == 202
     data = res.json()
     assert data["status"] == "ingested"
@@ -115,6 +117,6 @@ def test_sentinel_findings_api_endpoint():
     assert len(data["security_incidents_triaged"]) == 1
 
     # GET exposure
-    exp_res = client.get("/v1/sentinel/exposure")
+    exp_res = client.get("/v1/sentinel/exposure", headers=auth_headers())
     assert exp_res.status_code == 200
     assert "assets" in exp_res.json()
