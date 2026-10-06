@@ -1,0 +1,164 @@
+From 55f1194291126fcee9a8ef592ad21922a52000de Mon Sep 17 00:00:00 2001
+From: Cortex Agent <cortex-agent@users.noreply.github.com>
+Date: Tue, 6 Oct 2026 17:21:04 +0000
+Subject: [PATCH] fix(friday): use caller telemetry as the forecast series
+
+POST /v1/friday/delegate validated telemetry_data for sufficiency and staleness
+and then discarded it: ForecastingPipeline always ingested from
+SyntheticTelemetryConnector(seed=42), so every delegation for every target
+returned the same deterministic synthetic series (~1526) regardless of the
+target or the caller's own data.
+
+Proof (before the fix), three different targets with telemetry around 120, 9000
+and 3 respectively:
+  site:alpha:traffic_peak_rps -> (1527.11, -5867.82, 10886.51)
+  site:omega:traffic_peak_rps -> (1526.58, -5867.69, 10886.01)
+  totally:unrelated:metric   -> (1526.59, -5868.14, 10886.03)
+
+After the fix the same calls return forecasts driven by the supplied series
+(128.0 / 9600.0 / 3.4, naive@v1) and the evidence snapshot source is
+'telemetry:caller' instead of 'telemetry:synthetic'.
+
+- IngestionStage.execute accepts explicit observations from the caller, clipped
+  to the requested window.
+- ContextualizationInput gains source_id so the evidence snapshot names the real
+  origin rather than a hardcoded 'telemetry:synthetic'.
+- The friday router builds Observation objects from telemetry_data (honouring a
+  capacity_limit tag when present) and passes them through the pipeline.
+
+Full Futuris test suite: 171 passed.
+---
+ futuris/api/routers/friday.py | 33 +++++++++++++++++++++++++++++++++
+ futuris/core/pipeline.py      | 25 +++++++++++++++++++++----
+ 2 files changed, 54 insertions(+), 4 deletions(-)
+
+diff --git a/futuris/api/routers/friday.py b/futuris/api/routers/friday.py
+index c6f5fa0..e207d2c 100644
+--- a/futuris/api/routers/friday.py
++++ b/futuris/api/routers/friday.py
+@@ -21,6 +21,7 @@ from futuris.core.enums import (
+     ResolutionMethod,
+     ScenarioType,
+ )
++from futuris.connectors.base import Observation
+ from futuris.core.pipeline import ForecastingPipeline
+ from futuris.core.schemas import ForecastEvent, Outcome
+ from futuris.evaluation.calibration import CalibrationAnalyzer, update_calibration_metrics
+@@ -387,11 +388,43 @@ async def delegate_forecast(
+     h_delta = horizon_map[req.horizon]
+     now = datetime.now(UTC)
+ 
++    # Caller-supplied telemetry IS the forecast series (previously discarded after
++    # validation, which made every delegation forecast the synthetic connector).
++    caller_observations: list[Observation] | None = None
++    capacity_threshold = 4000.0
++    if t_data:
++        caller_observations = []
++        for item in t_data:
++            raw_ts = item.get("timestamp") or item.get("observed_at")
++            if raw_ts is None:
++                continue
++            ts = raw_ts if isinstance(raw_ts, datetime) else datetime.fromisoformat(str(raw_ts).replace("Z", "+00:00"))
++            ts = ts.replace(tzinfo=UTC) if ts.tzinfo is None else ts.astimezone(UTC)
++            caller_observations.append(
++                Observation(
++                    observed_at=ts,
++                    source="telemetry:caller",
++                    series_id=req.target,
++                    value=float(item.get("value", 0.0)),
++                    unit=str(item.get("unit", "rpm")),
++                    tags={k: v for k, v in item.items() if k not in ("timestamp", "observed_at", "value", "unit")},
++                )
++            )
++        caller_observations.sort(key=lambda obs: obs.observed_at)
++        for obs in caller_observations:
++            limit = obs.tags.get("capacity_limit")
++            if isinstance(limit, (int, float)) and limit > 0:
++                capacity_threshold = float(limit)
++                break
++
+     result = await pipeline.run(
+         target=req.target,
+         as_of=now,
+         horizon=h_delta,
+         lookback_days=14,
++        capacity_threshold=capacity_threshold,
++        observations=caller_observations,
++        source_id="telemetry:caller" if caller_observations else "telemetry:synthetic",
+     )
+     f = result.forecast
+     f.idempotency_key = effective_idempotency_key
+diff --git a/futuris/core/pipeline.py b/futuris/core/pipeline.py
+index 78de331..5ab7366 100644
+--- a/futuris/core/pipeline.py
++++ b/futuris/core/pipeline.py
+@@ -61,6 +61,7 @@ class NormalizationInput:
+ class ContextualizationInput:
+     signal_set: TrustedSignalSet
+     as_of: datetime
++    source_id: str = "telemetry:synthetic"
+ 
+ 
+ @dataclass
+@@ -100,7 +101,20 @@ class IngestionStage:
+     def __init__(self, connector: BaseConnector | None = None) -> None:
+         self.connector = connector or SyntheticTelemetryConnector(seed=42)
+ 
+-    async def execute(self, inp: IngestionInput) -> list[Observation]:
++    async def execute(self, inp: IngestionInput, observations: list[Observation] | None = None) -> list[Observation]:
++        """Fetch the series for the window.
++
++        When the caller supplies observations (e.g. ``telemetry_data`` on a FRIDAY
++        delegation), those ARE the series: previously they were validated for
++        sufficiency/staleness and then silently discarded, so every delegation for
++        every target was forecast from the deterministic synthetic connector.
++        """
++        if observations is not None:
++            return [
++                obs
++                for obs in observations
++                if inp.start_time <= (obs.observed_at if obs.observed_at.tzinfo else obs.observed_at.replace(tzinfo=UTC)) <= inp.end_time
++            ]
+         return await self.connector.fetch(inp.start_time, inp.end_time)
+ 
+ 
+@@ -131,7 +145,7 @@ class ContextualizationStage:
+             signal_set=inp.signal_set,
+             as_of=inp.as_of,
+             forecast_id=uuid4(),
+-            source_id="telemetry:synthetic",
++            source_id=inp.source_id,
+             signal_class=SignalClass.TELEMETRY,
+         )
+         return df, ev_ref
+@@ -347,6 +361,8 @@ class ForecastingPipeline:
+         horizon: timedelta = timedelta(hours=24),
+         lookback_days: int = 14,
+         capacity_threshold: float = 4000.0,
++        observations: list[Observation] | None = None,
++        source_id: str = "telemetry:synthetic",
+     ) -> PipelineResult:
+         """Run all pipeline stages sequentially with structured stage durations."""
+         durations: dict[str, float] = {}
+@@ -356,7 +372,8 @@ class ForecastingPipeline:
+         # 1. Ingestion
+         t0 = time.perf_counter()
+         raw = await self.ingestion.execute(
+-            IngestionInput(target=target, start_time=start_time, end_time=as_of)
++            IngestionInput(target=target, start_time=start_time, end_time=as_of),
++            observations=observations,
+         )
+         durations["ingestion"] = round((time.perf_counter() - t0) * 1000, 2)
+ 
+@@ -368,7 +385,7 @@ class ForecastingPipeline:
+         # 3. Contextualization & Snapshotting
+         t0 = time.perf_counter()
+         features_df, ev_ref = await self.contextualization.execute(
+-            ContextualizationInput(signal_set=signal_set, as_of=as_of)
++            ContextualizationInput(signal_set=signal_set, as_of=as_of, source_id=source_id)
+         )
+         durations["contextualization"] = round((time.perf_counter() - t0) * 1000, 2)
+ 
+-- 
+2.39.5
+

@@ -379,7 +379,10 @@ async def test_intelx_research_only_integration():
     assert len(profile.evidence_citations) > 0
 
     h = await client.health_check()
-    assert h["status"] == "UP"
+    # Contract update: without INTELX_BASE_URL nothing is probed, so the old "UP" was a fake
+    # liveness signal for a peer that was never deployed. The mode reports the real behaviour.
+    assert h["status"] == "NOT_CONFIGURED"
+    assert h["mode"] == "deterministic_fallback"
     assert h["research_only"] is True
 
 
@@ -395,7 +398,9 @@ async def test_futuris_advisory_only_forecasting():
     assert traffic.prediction_is_not_authorization is True
 
     h = await client.health_check()
-    assert h["status"] == "UP"
+    # Contract update: same as IntelX above — "UP" without a probe was not a real signal.
+    assert h["status"] == "NOT_CONFIGURED"
+    assert h["mode"] == "deterministic_fallback"
     assert h["invariant"] == "prediction_is_not_authorization"
 
 
