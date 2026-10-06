@@ -649,13 +649,33 @@ async def get_friday_competitive_summary(
 ):
     """FRIDAY voice query: 'What's my competitive position?'"""
     profile = await _intelx_client.fetch_competitor_intelligence(competitor)
+    # The summary must describe the evidence actually returned. It used to be a hardcoded
+    # sentence, which meant a fallback answer sounded exactly like a researched one.
+    if profile.source == "intelx":
+        voice_summary = (
+            f"IntelX research run {profile.research_run_id} reports {profile.competitor_name} in the "
+            f"{profile.market_share_tier} tier with {len(profile.feature_gaps)} findings "
+            f"(evidence confidence {profile.findings_confidence}). Pricing: {profile.pricing_model}"
+        )
+    else:
+        voice_summary = (
+            f"No researched intelligence for {profile.competitor_name} is available right now: "
+            f"{profile.degraded_reason or 'IntelX is not configured'}. "
+            f"The battlecard below is the documented deterministic baseline, not a finding."
+        )
     return {
         "competitor": profile.competitor_name,
         "market_share_tier": profile.market_share_tier,
-        "voice_summary": f"Against {profile.competitor_name}, our key differentiator is sub-100 millisecond autonomous agentic operations without per-seat taxation. {len(profile.feature_gaps)} critical feature gaps identified.",
+        "voice_summary": voice_summary,
         "battlecard": profile.battlecard_summary,
         "feature_gaps": profile.feature_gaps,
         "citations": profile.evidence_citations,
+        # Provenance: a consumer (or a voice layer) must be able to tell research from baseline.
+        "source": profile.source,
+        "degraded": profile.degraded,
+        "degraded_reason": profile.degraded_reason,
+        "research_run_id": profile.research_run_id,
+        "findings_confidence": profile.findings_confidence,
     }
 
 
@@ -666,11 +686,18 @@ async def get_friday_market_trends(
     """FRIDAY voice query: 'Any market trends affecting my site?'"""
     signals = await _market_detector.detect_market_signals(industry)
     top_signal = signals[0] if signals else None
+    researched = [s for s in signals if s.source == "intelx"]
     return {
         "industry": industry,
         "voice_summary": f"Market intelligence indicates a major shift: {top_signal.trend_title if top_signal else 'Autonomous agent adoption'}. Recommended positioning: {top_signal.recommended_positioning if top_signal else 'Lead with closed-loop cognitive operations'}.",
         "active_signals": [s.model_dump() for s in signals],
         "total_signals": len(signals),
+        # Provenance for the whole answer, so "no live research" is visible without reading
+        # every signal's own source field.
+        "source": "intelx" if researched else "fallback",
+        "degraded": not researched,
+        "degraded_reason": None if researched else "no IntelX-researched signal available; baseline shown",
+        "researched_signal_count": len(researched),
     }
 
 

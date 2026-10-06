@@ -811,10 +811,29 @@ async def get_traffic_forecast(
     site_id: str = "site_main",
     horizon_hours: int = 24,
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """Returns 24h/7d traffic forecast with 95% confidence intervals."""
-    forecast = await _futuris_client.predict_traffic(site_id=site_id, horizon_hours=horizon_hours)
-    return forecast.model_dump()
+    """Returns 24h/7d traffic forecast with 95% confidence intervals.
+
+    The forecast is driven by this deployment's own ingested traffic for the site. Without
+    current traffic there is nothing honest to calibrate on, so the request goes out with no
+    telemetry and Futuris (and Cortex's own gate) answer with the documented fallback.
+    """
+    from cortex_api.traffic_telemetry import average_rps, observed_traffic_telemetry
+
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    telemetry = await observed_traffic_telemetry(db, tenant_id=tenant_id, site_id=site_id, window_hours=48)
+    forecast = await _futuris_client.predict_traffic(
+        site_id=site_id, horizon_hours=horizon_hours, telemetry=telemetry or None
+    )
+    payload = forecast.model_dump()
+    payload["telemetry"] = {
+        "source": "cortex_event_store" if telemetry else "none",
+        "buckets": len(telemetry),
+        "observed_average_rps": average_rps(telemetry) if telemetry else None,
+        "window_hours": 48 if telemetry else 0,
+    }
+    return payload
 
 
 @router.get("/v1/predictive/capacity-plan")
