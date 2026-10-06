@@ -686,6 +686,9 @@ async def get_tenant_usage(
 
 # ── 6. SENTINEL INTEGRATION & SECURITY INCIDENT COORDINATION ──────────────────
 
+from cortex_integrations.sentinel_client import (  # noqa: E402 - deliberate late import (avoids an import cycle)
+    SentinelClient,
+)
 from cortex_integrations.sentinel_listener import (  # noqa: E402 - deliberate late import (avoids an import cycle)
     SentinelEventListener,
     SentinelPayload,
@@ -699,6 +702,7 @@ from cortex_workflow_engine.security_incident import (
 
 _exposure_monitor = AssetExposureMonitor()
 _sentinel_listener = SentinelEventListener(exposure_monitor=_exposure_monitor)
+_sentinel_client = SentinelClient()
 _sec_workflow = SecurityIncidentWorkflow()
 
 
@@ -738,14 +742,30 @@ async def get_asset_exposure(auth: dict[str, Any] = Depends(require_role(Role.CO
 
 @router.get("/v1/sentinel/findings")
 async def get_sentinel_findings(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
-    """Returns list of received Sentinel findings and posture evaluation."""
+    """Returns list of received Sentinel findings and posture evaluation.
+
+    ``posture_score`` used to be a hardcoded 95.0 whenever nothing had been pushed, which read
+    as a live security metric. It is now the score that came with the pushed findings (or null),
+    and the live posture is a separate, attributable read at ``/v1/sentinel/posture``.
+    """
+    pushed_score = (
+        _sentinel_listener.received_findings[0].get("posture_score") if _sentinel_listener.received_findings else None
+    )
     return {
         "findings": _sentinel_listener.received_findings,
         "total": len(_sentinel_listener.received_findings),
-        "posture_score": (
-            _sentinel_listener.received_findings[0]["posture_score"] if _sentinel_listener.received_findings else 95.0
-        ),
+        "posture_score": pushed_score,
+        "posture_source": "sentinel_push" if pushed_score is not None else "none",
     }
+
+
+@router.get("/v1/sentinel/posture")
+async def get_live_security_posture(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+    """Live security posture read from the Sentinel service (or the documented baseline)."""
+    posture = await _sentinel_client.fetch_security_posture()
+    payload = posture.model_dump()
+    payload["assets"] = [asset.model_dump() for asset in await _sentinel_client.fetch_asset_inventory()]
+    return payload
 
 
 # ── 7. DEVSECOPS DEPLOYMENT SECURITY GATES & COMPLIANCE ───────────────────────

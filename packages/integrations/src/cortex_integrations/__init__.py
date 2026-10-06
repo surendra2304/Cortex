@@ -1134,4 +1134,5 @@ from .futuris_client import ChurnSegmentForecast, ConversionTrendForecast, Futur
 
 # IntelX Competitive & Market Intelligence Integration
 from .intelx_client import CompetitorProfile, IntelXClient, MarketSignal
+from .sentinel_client import AssetRecord, SecurityPosture, SentinelClient
 from .sentinel_listener import SentinelEventListener, SentinelFinding, SentinelPayload

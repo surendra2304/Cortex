@@ -102,14 +102,35 @@ class ConnectorManager:
     async def check_payments(self) -> ConnectorHealth:
         return self._health("payments", "Stripe")
 
+    async def _peer_health(self, name: str, provider: str) -> ConnectorHealth:
+        """Probe a FRIDAY-Universe peer through its real client.
+
+        These three connectors used to answer UNKNOWN ("no live health probe is configured")
+        even when the peer was deployed and answering, which made ``/connectors/health``
+        useless for exactly the peers Cortex depends on.
+        """
+        if self.mock_outages.get(name):
+            return ConnectorHealth(
+                name, HealthStatus.DOWN, None, {"error": f"Simulated {provider} outage", "simulated": True}
+            )
+
+        from cortex_integrations.futuris_client import FuturisClient
+        from cortex_integrations.intelx_client import IntelXClient
+        from cortex_integrations.sentinel_client import SentinelClient
+
+        client = {"futuris": FuturisClient, "intelx": IntelXClient, "sentinel": SentinelClient}[name]()
+        detail = await client.health_check()
+        status_map = {"UP": HealthStatus.UP, "DOWN": HealthStatus.DOWN, "NOT_CONFIGURED": HealthStatus.UNKNOWN}
+        return ConnectorHealth(name, status_map.get(detail["status"], HealthStatus.UNKNOWN), None, detail)
+
     async def check_futuris(self) -> ConnectorHealth:
-        return self._health("futuris", "Futuris")
+        return await self._peer_health("futuris", "Futuris")
 
     async def check_intelx(self) -> ConnectorHealth:
-        return self._health("intelx", "IntelX")
+        return await self._peer_health("intelx", "IntelX")
 
     async def check_sentinel(self) -> ConnectorHealth:
-        return self._health("sentinel", "Sentinel")
+        return await self._peer_health("sentinel", "Sentinel")
 
     async def check_all(self) -> dict[str, Any]:
         """Runs health checks on all registered connectors and returns aggregated status."""
