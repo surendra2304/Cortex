@@ -43,16 +43,23 @@ def test_pii_payload_recursive_scrubber():
     assert "[REDACTED_CARD]" in scrubbed["nested"]["credit_card"]
 
 
-def test_privacy_service_export_redacts_identifiers():
+def test_privacy_service_export_returns_subject_data_unredacted():
+    """Art. 15 export carries the subject's own data — unredacted.
+
+    The SecretScrubber is for logs and AI prompts; applying it to the subject's
+    own access request returned "[REDACTED_EMAIL]" instead of their email,
+    which defeats the right of access (fixed 2026-10-07). The scrubber itself
+    is locked by test_scrubber_redacts_email_addresses below.
+    """
     service = PrivacyComplianceService()
 
     profile = {"email": "ceo@corp.com", "phone": "555-000-1111"}
     events = [{"type": "page_view", "card": "4111-1111-1111-1111"}]
     export = service.generate_data_export("vis_privacy_1", profile, events)
     assert export.events_count == 1
-    assert "[REDACTED_CARD]" in export.events[0]["card"]
-    # Audit H8: emails are direct identifiers and must be scrubbed too.
-    assert export.profile_data["email"] == "[REDACTED_EMAIL]"
+    assert export.events[0]["card"] == "4111-1111-1111-1111"
+    assert export.profile_data["email"] == "ceo@corp.com"
+    assert export.profile_data["phone"] == "555-000-1111"
 
 
 def test_scrubber_redacts_email_addresses():

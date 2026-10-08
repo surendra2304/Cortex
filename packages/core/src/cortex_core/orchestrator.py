@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import desc, select
@@ -35,7 +35,14 @@ from cortex_ai_universe_adapter import (
     RequestClassifier,
 )
 from cortex_analytics import ScoringEngine
-from cortex_api.db_models import AuditRecordModel, EventModel, LeadModel, ProfileModel, VisitorModel
+from cortex_api.db_models import (
+    ApprovalQueueModel,
+    AuditRecordModel,
+    EventModel,
+    LeadModel,
+    ProfileModel,
+    VisitorModel,
+)
 from cortex_event_schema import EventSchema
 from cortex_identity import IdentityResolver
 from cortex_integrations import (
@@ -215,56 +222,98 @@ class Orchestrator:
 
             if db_session:
                 try:
-                    # Query Visitor & Profile
-                    stmt = select(VisitorModel).where(VisitorModel.id == event.actor.id)
+                    # Query Visitor & Profile — tenant-scoped, and resolving the
+                    # identity graph when the actor is an identified user: their
+                    # events carry the user_id/email as actor id, which never equals
+                    # the anonymous visitor id, so without link resolution identified
+                    # visitors were invisible to every agent.
+                    stmt = select(VisitorModel).where(
+                        VisitorModel.id == event.actor.id, VisitorModel.tenant_id == event.tenant_id
+                    )
                     res = await db_session.execute(stmt)
                     v_record = res.scalar_one_or_none()
                     if v_record:
                         visitor_attributes = dict(v_record.attributes or {})
-                        if v_record.profile_id:
-                            p_stmt = select(ProfileModel).where(ProfileModel.id == v_record.profile_id)
-                            p_res = await db_session.execute(p_stmt)
-                            p_record = p_res.scalar_one_or_none()
-                            if p_record:
-                                profile_traits = dict(p_record.traits or {})
-                                profile_email = p_record.primary_email
 
-                            # Query Lead if linked
-                            l_stmt = select(LeadModel).where(LeadModel.profile_id == v_record.profile_id)
-                            l_res = await db_session.execute(l_stmt)
-                            l_record = l_res.scalar_one_or_none()
-                            if l_record:
-                                lead_info = {
-                                    "lead_id": l_record.id,
-                                    "score": l_record.score,
-                                    "status": l_record.status,
-                                    "lifecycle_stage": "customer" if l_record.status == "customer" else "lead",
-                                }
+                    profile_id: str | None = v_record.profile_id if v_record else None
+                    if not profile_id:
+                        resolved = await self.identity_resolver.resolve_actor_profile(
+                            db=db_session, actor_id=event.actor.id, tenant_id=event.tenant_id
+                        )
+                        profile_id = resolved.get("profile_id")
+                        if resolved.get("visitor_attributes"):
+                            visitor_attributes = resolved["visitor_attributes"]
+                        if resolved.get("profile_traits"):
+                            profile_traits = resolved["profile_traits"]
+                        if resolved.get("primary_email"):
+                            profile_email = resolved["primary_email"]
+                        if resolved.get("lead"):
+                            lead_info = resolved["lead"]
 
-                    # Query last 20 events in session
+                    if profile_id:
+                        p_stmt = select(ProfileModel).where(
+                            ProfileModel.id == profile_id, ProfileModel.tenant_id == event.tenant_id
+                        )
+                        p_res = await db_session.execute(p_stmt)
+                        p_record = p_res.scalar_one_or_none()
+                        if p_record:
+                            profile_traits = dict(p_record.traits or {})
+                            profile_email = p_record.primary_email
+
+                        # Query Lead if linked
+                        l_stmt = select(LeadModel).where(
+                            LeadModel.tenant_id == event.tenant_id, LeadModel.profile_id == profile_id
+                        )
+                        l_res = await db_session.execute(l_stmt)
+                        l_record = l_res.scalar_one_or_none()
+                        if l_record:
+                            lead_info = {
+                                "lead_id": l_record.id,
+                                "score": l_record.score,
+                                "status": l_record.status,
+                                "lifecycle_stage": "customer" if l_record.status == "customer" else "lead",
+                            }
+
+                    # Query last 20 events in session (tenant-scoped)
                     if event.session_id:
                         s_stmt = (
                             select(EventModel)
-                            .where(EventModel.session_id == event.session_id)
+                            .where(
+                                EventModel.tenant_id == event.tenant_id,
+                                EventModel.session_id == event.session_id,
+                            )
                             .order_by(desc(EventModel.occurred_at))
                             .limit(20)
                         )
                         s_res = await db_session.execute(s_stmt)
                         session_events = [
-                            {"type": r.type, "data": r.data, "occurred_at": r.occurred_at.isoformat()}
+                            {
+                                "event_id": r.id,  # EventModel PK is the event id (db_models.EventModel.id)
+                                "type": r.type,
+                                "data": r.data,
+                                "occurred_at": r.occurred_at.isoformat(),
+                            }
                             for r in s_res.scalars().all()
                         ]
 
-                    # Query last 50 events for actor
+                    # Query last 50 events for actor (tenant-scoped)
                     a_stmt = (
                         select(EventModel)
-                        .where(EventModel.actor_id == event.actor.id)
+                        .where(
+                            EventModel.tenant_id == event.tenant_id,
+                            EventModel.actor_id == event.actor.id,
+                        )
                         .order_by(desc(EventModel.occurred_at))
                         .limit(50)
                     )
                     a_res = await db_session.execute(a_stmt)
                     actor_history_events = [
-                        {"type": r.type, "data": r.data, "occurred_at": r.occurred_at.isoformat()}
+                        {
+                            "event_id": r.id,  # EventModel PK is the event id (db_models.EventModel.id)
+                            "type": r.type,
+                            "data": r.data,
+                            "occurred_at": r.occurred_at.isoformat(),
+                        }
                         for r in a_res.scalars().all()
                     ]
 
@@ -290,7 +339,20 @@ class Orchestrator:
                 lead_info=lead_info,
             )
 
-            all_recent_events = [event.model_dump(mode="json")] + session_events
+            # Agents see the actor's full recent history (current event + session
+            # window + cross-session history, deduplicated) — a single event must
+            # not be the whole picture for intent and recency scoring.
+            all_recent_events = [event.model_dump(mode="json"), *session_events, *actor_history_events]
+            seen_event_ids: set[str] = set()
+            deduped_recent: list[dict[str, Any]] = []
+            for e in all_recent_events:
+                event_id = e.get("event_id")
+                if event_id:
+                    if event_id in seen_event_ids:
+                        continue
+                    seen_event_ids.add(event_id)
+                deduped_recent.append(e)
+            all_recent_events = deduped_recent
 
             context = {
                 "tenant_id": event.tenant_id,
@@ -440,6 +502,7 @@ class Orchestrator:
 
             # 5. AUTHORIZE
             authorized_actions = []
+            pending_approvals: list[dict[str, Any]] = []
             if agent_output.proposed_actions:
                 for prop in agent_output.proposed_actions:
                     tool = self.tool_bus.get_tool(prop.action_type) or Tool(
@@ -457,6 +520,43 @@ class Orchestrator:
                     execution.policy_decision = decision
                     if decision.approved:
                         authorized_actions.append((execution, tool))
+                    elif decision.requires_human_approval:
+                        # Close the loop: a gated proposal becomes an approval request
+                        # the operator can decide. Before this, a gated proposal
+                        # vanished — no request, no notification, no execution path.
+                        approval_id = f"appr_{loop_id}_{prop.action_type}"
+                        if db_session is not None:
+                            try:
+                                existing = await db_session.execute(
+                                    select(ApprovalQueueModel).where(ApprovalQueueModel.id == approval_id)
+                                )
+                                if existing.scalar_one_or_none() is None:
+                                    db_session.add(
+                                        ApprovalQueueModel(
+                                            id=approval_id,
+                                            tenant_id=event.tenant_id,
+                                            action_type=tool.name,
+                                            target=prop.target,
+                                            params=prop.params,
+                                            rationale=prop.rationale,
+                                            evidence_refs=agent_output.evidence_refs,
+                                            risk_score=decision.risk_score,
+                                            status="pending",
+                                            expires_at=datetime.now(UTC) + timedelta(hours=24),
+                                        )
+                                    )
+                                    await db_session.commit()
+                                    pending_approvals.append(
+                                        {
+                                            "id": approval_id,
+                                            "action_type": tool.name,
+                                            "target": prop.target,
+                                            "risk_score": decision.risk_score,
+                                        }
+                                    )
+                            except Exception as exc:
+                                logger.warning(f"Could not persist approval request: {exc}")
+                                await db_session.rollback()
                     trace.append(
                         {
                             "phase": "5.Authorize",
@@ -464,6 +564,7 @@ class Orchestrator:
                             "approved": decision.approved,
                             "requires_human": decision.requires_human_approval,
                             "reason": decision.reason,
+                            "approval_id": pending_approvals[-1]["id"] if pending_approvals else None,
                         }
                     )
             else:
@@ -513,6 +614,7 @@ class Orchestrator:
                 changes={
                     "agent_output": agent_output.model_dump(mode="json"),
                     "executions": execution_results,
+                    "pending_approvals": pending_approvals,
                     "verification": "passed" if verification_passed else "failed",
                     "ai_used": should_call_ai,
                     "classification": classification.value,

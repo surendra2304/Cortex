@@ -737,17 +737,26 @@ FALLBACK_WEBSITE_HTML = """<!DOCTYPE html>
     }
 
     async function handleApprove(actionId, decision) {
+      const row = document.getElementById(actionId === 'act_high_1' ? 'row-act-1' : 'row-act-2');
+      let message = decision + ' request for ' + actionId;
+      let ok = false;
       try {
-        await fetch(`/v1/actions/${actionId}/${decision}`, {
+        const res = await fetch(`/v1/actions/${actionId}/${decision}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ operator_id: 'operator_console', reason: 'Authorized in Web Console' })
         });
-      } catch {}
-
-      const row = document.getElementById(actionId === 'act_high_1' ? 'row-act-1' : 'row-act-2');
+        const body = await res.json().catch(() => ({}));
+        ok = res.ok;
+        message = body.detail || body.status || message;
+        if (res.ok && body.execution) {
+          message += ' — tool ' + (body.execution.tool || 'unknown') + ' ' + (body.execution.status || 'executed');
+        }
+      } catch (err) {
+        message = 'Request failed: ' + err;
+      }
       if (row) {
-        row.innerHTML = `<td colspan="6" class="p-4 mono text-emerald-400 bg-emerald-950/40 text-center font-bold">Action ${actionId} successfully ${decision.toUpperCase()}D by Operator. ToolBus execution confirmed.</td>`;
+        row.innerHTML = '<td colspan="6" class="p-4 mono ' + (ok ? 'text-emerald-400 bg-emerald-950/40' : 'text-rose-400 bg-rose-950/40') + ' text-center font-bold">' + (ok ? 'Approved' : 'Not approved') + ': ' + message + '</td>';
       }
     }
 

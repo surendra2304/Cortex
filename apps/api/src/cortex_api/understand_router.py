@@ -28,7 +28,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cortex_api.auth import Role, require_role, security, verify_friday_token, verify_jwt_token
-from cortex_api.config import get_db_session
+from cortex_api.config import get_db_session, get_redis_client
 from cortex_api.db_models import (
     ApprovalQueueModel,
     EventModel,
@@ -418,6 +418,8 @@ async def get_pending_approvals(
             "target": item.target,
             "params": item.params,
             "rationale": item.rationale,
+            "execution_status": item.execution_status,
+            "execution_result": item.execution_result,
             "evidence_refs": item.evidence_refs,
             "risk_score": item.risk_score,
             "expires_at": item.expires_at.isoformat() if item.expires_at else None,
@@ -463,16 +465,68 @@ async def _decide_action(
     return item
 
 
+async def _execute_approved_action(
+    db: AsyncSession, item: ApprovalQueueModel, redis_client: Any
+) -> dict[str, Any]:
+    """Execute an approved action through the tool bus, idempotent per approval.
+
+    Closing the loop: approving used to only flip the row status — the action
+    never ran. Now the approval executes the tool (Redis idempotency key per
+    approval id, so a replayed approval cannot double-execute) and the outcome
+    is recorded on the row.
+    """
+    from cortex_core.orchestrator import build_default_tool_bus
+    from cortex_tool_runtime import Execution
+
+    bus = build_default_tool_bus(redis_client=redis_client)
+    execution = Execution(
+        request_id=f"approval_{item.id}",
+        tool_name=item.action_type,
+        actor={"type": "operator", "id": item.decision_by or "cortex_operator"},
+        reason=item.rationale,
+        params=item.params,
+        idempotency_key=f"approval_exec_{item.id}",
+        approval={"approved": True, "approver_id": item.decision_by or "operator"},
+    )
+    try:
+        result = await bus.execute(item.action_type, item.params, execution)
+        status = str(result.get("status", "executed"))
+        item.execution_status = status if status in {"executed", "blocked", "skipped"} else "executed"
+        item.execution_result = result
+        summary = {
+            "status": item.execution_status,
+            "tool": item.action_type,
+            "result_status": status,
+            "verification": result.get("verification"),
+        }
+    except Exception as exc:
+        item.execution_status = "failed"
+        item.execution_result = {"error": type(exc).__name__, "detail": str(exc)[:500]}
+        summary = {"status": "failed", "tool": item.action_type, "error": type(exc).__name__}
+    try:
+        await db.commit()
+    except Exception:
+        await db.rollback()
+    return summary
+
+
 @router.post("/actions/{action_id}/approve")
 async def approve_action(
     action_id: str,
     payload: dict[str, Any] | None = None,
     db: AsyncSession = Depends(get_db_session),
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+    redis_client: Any = Depends(get_redis_client),
 ):
-    """Approve a pending high-impact action."""
-    await _decide_action(db, auth, action_id, approve=True, payload=payload)
-    return {"status": "approved", "action_id": action_id, "decided_by": auth.get("sub")}
+    """Approve a pending high-impact action and execute it through the tool bus."""
+    item = await _decide_action(db, auth, action_id, approve=True, payload=payload)
+    execution_summary = await _execute_approved_action(db, item, redis_client)
+    return {
+        "status": "approved",
+        "action_id": action_id,
+        "decided_by": auth.get("sub"),
+        "execution": execution_summary,
+    }
 
 
 @router.post("/actions/{action_id}/reject")

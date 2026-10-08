@@ -34,16 +34,6 @@ agent_registry = AgentRegistry()
 ai_client = AIUniverseClient()
 identity_service = IdentityService()
 
-ACTIONS_DB: dict[str, dict[str, Any]] = {
-    "act_high_1": {
-        "id": "act_high_1",
-        "action_type": "banner_injection",
-        "status": "pending_approval",
-        "params": {"variant": "annual_discount_banner"},
-        "reason": "High impact conversion banner",
-    }
-}
-
 
 # 1. Identity Resolution (POST /v1/identify) - Requires at least VIEWER role
 @router.post("/identify")
@@ -80,7 +70,10 @@ async def get_visitor(
     db: AsyncSession = Depends(get_db_session),
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
+    # Tenant-scoped: a visitor id is only meaningful inside the caller's tenant
+    # (cross-tenant id reads were a live-confirmed IDOR).
+    tenant_id = auth.get("tenant_id", "default")
+    stmt = select(VisitorModel).where(VisitorModel.id == visitor_id, VisitorModel.tenant_id == tenant_id)
     res = await db.execute(stmt)
     visitor = res.scalar_one_or_none()
 
@@ -89,7 +82,9 @@ async def get_visitor(
 
     profile_data = None
     if visitor.profile_id:
-        prof_stmt = select(ProfileModel).where(ProfileModel.id == visitor.profile_id)
+        prof_stmt = select(ProfileModel).where(
+            ProfileModel.id == visitor.profile_id, ProfileModel.tenant_id == tenant_id
+        )
         prof_res = await db.execute(prof_stmt)
         profile = prof_res.scalar_one_or_none()
         if profile:
@@ -122,7 +117,10 @@ async def get_lead(
     db: AsyncSession = Depends(get_db_session),
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
 ):
-    stmt = select(LeadModel).where(LeadModel.id == lead_id)
+    # Tenant-scoped: a lead id is only meaningful inside the caller's tenant
+    # (cross-tenant id reads were a live-confirmed IDOR).
+    tenant_id = auth.get("tenant_id", "default")
+    stmt = select(LeadModel).where(LeadModel.id == lead_id, LeadModel.tenant_id == tenant_id)
     res = await db.execute(stmt)
     lead = res.scalar_one_or_none()
 
@@ -280,44 +278,6 @@ async def run_agent(
         raise HTTPException(status_code=404, detail="Agent not found in registry")
     output = await agent.process(input_data)
     return {"output": output.model_dump(mode="json"), "trace_id": get_current_trace_id()}
-
-
-# 7. Workflows - Requires VIEWER role
-@router.get("/workflows")
-async def list_workflows(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
-    return {
-        "workflows": [
-            {
-                "id": "wf_conversion_boost",
-                "name": "High Bounce Interceptor",
-                "trigger": {"type": "pricing_view"},
-                "status": "active",
-            },
-            {
-                "id": "wf_enterprise_routing",
-                "name": "High Value Account Router",
-                "trigger": {"type": "checkout_intent"},
-                "status": "active",
-            },
-        ],
-        "trace_id": get_current_trace_id(),
-    }
-
-
-# 8. Action Approvals (Governance) - Requires OPERATOR role
-@router.post("/actions/{action_id}/approve")
-async def approve_action(
-    action_id: str,
-    payload: dict[str, Any] | None = None,
-    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
-):
-    action = ACTIONS_DB.get(action_id)
-    if not action:
-        raise HTTPException(status_code=404, detail="Action not found")
-    action["status"] = "approved"
-    action["approved_by"] = auth["sub"]
-    action["approved_at"] = _utcnow().isoformat()
-    return {"status": "approved", "action": action, "trace_id": get_current_trace_id()}
 
 
 # 9. Audit Logs - Requires OPERATOR role for security inspection

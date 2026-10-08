@@ -39,18 +39,19 @@ def test_rbac_roles_enforcement():
     res_viewer_agents = client.get("/v1/agents", headers={"Authorization": f"Bearer {viewer_token}"})
     assert res_viewer_agents.status_code == 200
 
-    # 2. Viewer CANNOT trigger actions (POST /v1/actions/:id/approve)
+    # 2. Viewer CANNOT trigger actions (POST /v1/actions/:id/approve) — the role
+    #    check runs before any lookup, so even a non-existent id is refused 403.
     res_viewer_approve = client.post(
-        "/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {viewer_token}"}
+        "/v1/actions/act_rbac_check/approve", json={}, headers={"Authorization": f"Bearer {viewer_token}"}
     )
     assert res_viewer_approve.status_code == 403
 
-    # 3. Operator CAN trigger action approval
+    # 3. Operator passes RBAC; an unknown action id is a 404 (no fabricated
+    #    in-memory action store serves it any more).
     res_operator_approve = client.post(
-        "/v1/actions/act_high_1/approve", json={}, headers={"Authorization": f"Bearer {operator_token}"}
+        "/v1/actions/act_rbac_check/approve", json={}, headers={"Authorization": f"Bearer {operator_token}"}
     )
-    assert res_operator_approve.status_code == 200
-    assert res_operator_approve.json()["status"] == "approved"
+    assert res_operator_approve.status_code == 404
 
     # 4. POST /v1/friday/command uses X-Friday-Api-Key header auth (not JWT Bearer).
     #    With a key configured and MOCK_MODE=false, any JWT Bearer token (even admin)
@@ -93,3 +94,93 @@ def test_rbac_roles_enforcement():
             os.environ["MOCK_MODE"] = _saved_mock
         else:
             os.environ.pop("MOCK_MODE", None)
+
+
+def test_approval_flow_executes_on_approval(api_client, session_factory):
+    """The closed loop: a gated action becomes an approval request, and approving
+    it executes the action through the tool bus and records the outcome.
+
+    Regression lock for two defects: (1) the cognitive loop dropped gated
+    proposals without ever creating an approval request, and (2) approving an
+    approval-queue item only flipped its status — nothing executed. A stub
+    endpoint in public_gateway also shadowed this real flow with fabricated
+    in-memory actions.
+    """
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from cortex_api.db_models import ApprovalQueueModel
+
+    from tests.conftest import auth_headers
+
+    approval_id = "appr_rbac_test_1"
+
+    async def _insert() -> None:
+        async with session_factory() as session:
+            session.add(
+                ApprovalQueueModel(
+                    id=approval_id,
+                    tenant_id="tenant_test",
+                    action_type="account_update",
+                    target="lead_qualification",
+                    params={"tier": "enterprise_tier_1"},
+                    rationale="RBAC test approval",
+                    evidence_refs=["test"],
+                    risk_score=0.8,
+                    status="pending",
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_insert())
+
+    # Viewer is refused by RBAC before any lookup.
+    res = api_client.post(
+        f"/v1/actions/{approval_id}/approve", json={}, headers=auth_headers(role="cortex_viewer")
+    )
+    assert res.status_code == 403
+
+    # While pending, the request is visible in the tenant's approval queue.
+    pending = api_client.get("/v1/approvals/pending", headers=auth_headers()).json()
+    row = next(item for item in pending if item["id"] == approval_id)
+    assert row["execution_status"] is None
+
+    # Operator approves: the action executes and the outcome is recorded.
+    res = api_client.post(
+        f"/v1/actions/{approval_id}/approve",
+        json={"reason": "approved in test"},
+        headers=auth_headers(role="cortex_operator"),
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["status"] == "approved"
+    assert body["execution"]["tool"] == "account_update"
+    assert body["execution"]["status"] in {"executed", "blocked", "skipped"}
+
+    # The row records the execution.
+    async def _read() -> dict:
+        async with session_factory() as session:
+            from sqlalchemy import select
+
+            row = (await session.execute(select(ApprovalQueueModel).where(ApprovalQueueModel.id == approval_id))).scalar_one()
+            return {
+                "status": row.status,
+                "execution_status": row.execution_status,
+                "execution_result": row.execution_result,
+            }
+
+    state = asyncio.run(_read())
+    assert state["status"] == "approved"
+    assert state["execution_status"] in {"executed", "blocked", "skipped"}
+    assert state["execution_result"] is not None
+
+    # A decided approval leaves the pending list.
+    pending = api_client.get("/v1/approvals/pending", headers=auth_headers()).json()
+    assert all(item["id"] != approval_id for item in pending)
+
+    # Re-deciding a decided approval is a conflict.
+    res = api_client.post(
+        f"/v1/actions/{approval_id}/approve", json={}, headers=auth_headers(role="cortex_operator")
+    )
+    assert res.status_code == 409

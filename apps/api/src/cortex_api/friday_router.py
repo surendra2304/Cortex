@@ -43,7 +43,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -449,14 +449,13 @@ async def friday_health_summary(
 async def friday_priority_leads(
     friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
+    tenant_id: str | None = Query(None, description="Scope to one tenant; omit for the platform-wide view."),
 ):
     try:
-        stmt = (
-            select(LeadModel)
-            .where(LeadModel.status.in_(["new", "engaged", "qualified"]))
-            .order_by(desc(LeadModel.score))
-            .limit(5)
-        )
+        stmt = select(LeadModel).where(LeadModel.status.in_(["new", "engaged", "qualified"]))
+        if tenant_id:
+            stmt = stmt.where(LeadModel.tenant_id == tenant_id)
+        stmt = stmt.order_by(desc(LeadModel.score)).limit(5)
         res = await db.execute(stmt)
         leads = res.scalars().all()
     except Exception as exc:
@@ -469,7 +468,9 @@ async def friday_priority_leads(
         profile_email: str | None = None
         if lead.profile_id:
             try:
-                p_stmt = select(ProfileModel).where(ProfileModel.id == lead.profile_id)
+                p_stmt = select(ProfileModel).where(
+                    ProfileModel.id == lead.profile_id, ProfileModel.tenant_id == lead.tenant_id
+                )
                 p_res = await db.execute(p_stmt)
                 profile = p_res.scalar_one_or_none()
                 if profile:
@@ -512,19 +513,18 @@ async def friday_priority_leads(
 async def friday_incidents(
     friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
+    tenant_id: str | None = Query(None, description="Scope to one tenant; omit for the platform-wide view."),
 ):
     since = _utcnow() - timedelta(hours=24)
 
     try:
-        stmt = (
-            select(EventModel)
-            .where(
-                EventModel.server_received_at >= since,
-                EventModel.type.like("error.%") | EventModel.type.like("incident.%"),
-            )
-            .order_by(desc(EventModel.server_received_at))
-            .limit(50)
+        stmt = select(EventModel).where(
+            EventModel.server_received_at >= since,
+            EventModel.type.like("error.%") | EventModel.type.like("incident.%"),
         )
+        if tenant_id:
+            stmt = stmt.where(EventModel.tenant_id == tenant_id)
+        stmt = stmt.order_by(desc(EventModel.server_received_at)).limit(50)
         res = await db.execute(stmt)
         events = res.scalars().all()
     except Exception as exc:

@@ -95,11 +95,18 @@ class PrivacyComplianceService:
     def generate_data_export(
         self, visitor_id: str, profile_data: dict[str, Any], events: list[dict[str, Any]]
     ) -> DataSubjectExport:
+        """GDPR Art. 15 export: the data subject's OWN data, unredacted.
+
+        The SecretScrubber exists for logs and AI prompts, not for the subject's
+        own access request — scrubbing here returned "[REDACTED_EMAIL]" instead
+        of the subject's email, which defeats the right of access. The export is
+        tenant-scoped and delivered over an authenticated operator channel.
+        """
         return DataSubjectExport(
             visitor_id=visitor_id,
             events_count=len(events),
-            profile_data=SecretScrubber.scrub_payload(profile_data),
-            events=[SecretScrubber.scrub_payload(e) for e in events],
+            profile_data=profile_data,
+            events=events,
         )
 
     async def execute_hard_erasure(

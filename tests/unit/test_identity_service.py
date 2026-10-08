@@ -47,7 +47,11 @@ def test_identify_authenticated_profile_stitching():
     # Mock existing visitor
     mock_vis = VisitorModel(id="vis_anon_2", tenant_id="tenant_default", site_id="site_1", attributes={"plan": "pro"})
     mock_exec_res = MagicMock()
-    mock_exec_res.scalar_one_or_none.side_effect = [mock_vis, None]  # 1st: visitor exists, 2nd: profile not yet found
+    # Query order: visitor lookup, profile-by-email lookup, then the three
+    # identity-link dedup checks (anonymous/user_id/email) added with the
+    # loop-resolution fix; the lead lookup after them raises StopIteration,
+    # which the service catches (lead = None).
+    mock_exec_res.scalar_one_or_none.side_effect = [mock_vis, None, None, None, None]
     mock_exec_res.scalars.return_value = []
     mock_db.execute.return_value = mock_exec_res
     mock_db.add = MagicMock()

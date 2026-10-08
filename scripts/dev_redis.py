@@ -36,7 +36,7 @@ import logging
 import socketserver
 import threading
 import time
-from collections import defaultdict, deque
+from collections import defaultdict
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] dev-redis: %(message)s")
 logger = logging.getLogger("dev-redis")
@@ -48,6 +48,22 @@ class RedisError(Exception):
     pass
 
 
+def _parse_stream_id(entry_id: str) -> tuple[int, int]:
+    """Sort key for "<ms>-<seq>" stream ids (lexicographic order is wrong)."""
+    try:
+        ms, seq = entry_id.split("-", 1)
+        return (int(ms), int(seq))
+    except ValueError:
+        return (0, 0)
+
+
+def _flat_fields(fields: dict[str, str]) -> list[str]:
+    flat: list[str] = []
+    for key, value in fields.items():
+        flat.extend([key, value])
+    return flat
+
+
 class Store:
     """Thread-safe in-memory keyspace with Redis-compatible semantics."""
 
@@ -57,7 +73,8 @@ class Store:
         self._expires: dict[str, float] = {}
         self._streams: dict[str, list[tuple[str, dict[str, str]]]] = defaultdict(list)
         self._groups: dict[tuple[str, str], int] = {}  # (stream, group) -> last delivered index
-        self._pending: dict[tuple[str, str], deque] = defaultdict(deque)
+        # (stream, group) -> {entry_id: {"fields", "consumer", "delivered_at", "deliveries"}}
+        self._pending: dict[tuple[str, str], dict[str, dict]] = defaultdict(dict)
         self._last_id = 0
 
     # ── helpers ─────────────────────────────────────────────────────────────
@@ -175,7 +192,14 @@ class Store:
                 batch = entries[index : index + count]
                 if batch:
                     self._groups[key] = index + len(batch)
-                    self._pending[key].extend(batch)
+                    pending = self._pending[key]
+                    for entry_id, fields in batch:
+                        pending[entry_id] = {
+                            "fields": fields,
+                            "consumer": consumer,
+                            "delivered_at": time.time(),
+                            "deliveries": 1,
+                        }
                     return [(stream, batch)]
             if deadline is None or time.time() >= deadline:
                 return []
@@ -183,14 +207,99 @@ class Store:
 
     def xack(self, stream: str, group: str, entry_id: str) -> int:
         with self._lock:
-            key = (stream, group)
-            queue = self._pending.get(key)
-            if not queue:
+            pending = self._pending.get((stream, group))
+            if not pending or entry_id not in pending:
                 return 0
-            remaining = deque(item for item in queue if item[0] != entry_id)
-            removed = len(queue) - len(remaining)
-            self._pending[key] = remaining
-            return removed
+            del pending[entry_id]
+            return 1
+
+    def xpending_summary(self, stream: str, group: str) -> list:
+        """XPENDING key group — [count, min-id, max-id, [[consumer, count], ...]]."""
+        with self._lock:
+            key = (stream, group)
+            if key not in self._groups:
+                raise RedisError("NOGROUP No such consumer group")
+            pending = self._pending.get(key, {})
+            if not pending:
+                return [0, None, None, []]
+            ids = sorted(pending, key=_parse_stream_id)
+            consumers: dict[str, int] = {}
+            for record in pending.values():
+                consumers[record["consumer"]] = consumers.get(record["consumer"], 0) + 1
+            return [
+                len(pending),
+                ids[0],
+                ids[-1],
+                [[consumer, total] for consumer, total in sorted(consumers.items())],
+            ]
+
+    def xpending_range(
+        self,
+        stream: str,
+        group: str,
+        min_id: str,
+        max_id: str,
+        count: int,
+        consumer: str | None = None,
+    ) -> list:
+        """XPENDING key group min max COUNT n [consumer] — [[id, consumer, idle-ms, deliveries], ...]."""
+        with self._lock:
+            key = (stream, group)
+            if key not in self._groups:
+                raise RedisError("NOGROUP No such consumer group")
+            pending = self._pending.get(key, {})
+            lo = None if min_id == "-" else _parse_stream_id(min_id)
+            hi = None if max_id == "+" else _parse_stream_id(max_id)
+            now = time.time()
+            out: list = []
+            for entry_id in sorted(pending, key=_parse_stream_id):
+                record = pending[entry_id]
+                if consumer is not None and record["consumer"] != consumer:
+                    continue
+                parsed = _parse_stream_id(entry_id)
+                if lo is not None and parsed < lo:
+                    continue
+                if hi is not None and parsed > hi:
+                    continue
+                out.append(
+                    [
+                        entry_id,
+                        record["consumer"],
+                        int((now - record["delivered_at"]) * 1000),
+                        record["deliveries"],
+                    ]
+                )
+                if len(out) >= count:
+                    break
+            return out
+
+    def xclaim(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        min_idle_ms: int,
+        message_ids: list[str],
+    ) -> list:
+        """XCLAIM key group consumer min-idle-time id... — [[id, [field, value, ...]], ...]."""
+        with self._lock:
+            key = (stream, group)
+            if key not in self._groups:
+                raise RedisError("NOGROUP No such consumer group")
+            pending = self._pending.get(key, {})
+            now = time.time()
+            claimed: list = []
+            for entry_id in message_ids:
+                record = pending.get(entry_id)
+                if record is None:
+                    continue
+                if (now - record["delivered_at"]) * 1000 < min_idle_ms:
+                    continue
+                record["consumer"] = consumer
+                record["delivered_at"] = now
+                record["deliveries"] += 1
+                claimed.append([entry_id, _flat_fields(record["fields"])])
+            return claimed
 
     def clear(self) -> None:
         with self._lock:
@@ -453,6 +562,43 @@ class RespHandler(socketserver.StreamRequestHandler):
             ]
         if name == "XACK":
             return STORE.xack(decoded[0], decoded[1], decoded[2])
+        if name == "XPENDING":
+            stream, group = decoded[0], decoded[1]
+            if len(decoded) <= 2:
+                # Summary form: XPENDING key group
+                return STORE.xpending_summary(stream, group)
+            # Range form, both syntaxes: XPENDING key group [IDLE ms] start end COUNT n
+            # [consumer] (Redis 7+) and the legacy positional XPENDING key group start
+            # end count [consumer] — redis-py sends the legacy form.
+            min_id, max_id = decoded[2], decoded[3]
+            count = 10
+            consumer = None
+            i = 4
+            while i < len(decoded):
+                token = decoded[i].upper()
+                if token == "COUNT" and i + 1 < len(decoded):
+                    count = int(decoded[i + 1])
+                    i += 2
+                elif token == "IDLE" and i + 1 < len(decoded):
+                    i += 2
+                elif token.isdigit():
+                    count = int(token)
+                    i += 1
+                elif consumer is None:
+                    consumer = decoded[i]
+                    i += 1
+                else:
+                    i += 1
+            return STORE.xpending_range(stream, group, min_id, max_id, count, consumer)
+        if name == "XCLAIM":
+            stream, group, consumer = decoded[0], decoded[1], decoded[2]
+            min_idle_ms = int(decoded[3])
+            message_ids: list[str] = []
+            for token in decoded[4:]:
+                if token.upper() in {"IDLE", "TIME", "RETRYCOUNT", "FORCE", "JUSTID"}:
+                    break
+                message_ids.append(token)
+            return STORE.xclaim(stream, group, consumer, min_idle_ms, message_ids)
         raise RedisError(f"ERR unknown command '{name}'")
 
     @staticmethod

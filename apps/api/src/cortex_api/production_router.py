@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from cortex_api.auth import Role, require_role, verify_friday_token
 from cortex_api.config import get_db_session, get_redis_client, settings
-from cortex_api.db_models import AuditRecordModel, EventModel, ProfileModel, WorkflowRunModel
+from cortex_api.db_models import AuditRecordModel, EventModel, ProfileModel, VisitorModel, WorkflowRunModel
 from cortex_api.ws_auth import authenticate_websocket
 from cortex_upgrade.audit import redact
 
@@ -448,12 +448,22 @@ async def export_visitor_data(
     """GDPR Art. 15 / CCPA Right of Access: Generates full structured JSON export scoped to tenant."""
     tenant_id = auth.get("tenant_id", "tenant_default")
     try:
-        p_stmt = select(ProfileModel).where(ProfileModel.tenant_id == tenant_id, ProfileModel.id == visitor_id)
-        pres = await db.execute(p_stmt)
-        prof = pres.scalar_one_or_none()
+        # Resolve visitor -> profile: profiles carry their own ids (prof_*), so
+        # looking the profile up by the visitor id always missed and the export
+        # 404'd for every real data subject.
+        v_stmt = select(VisitorModel).where(VisitorModel.tenant_id == tenant_id, VisitorModel.id == visitor_id)
+        vres = await db.execute(v_stmt)
+        visitor = vres.scalar_one_or_none()
+
         profile_data: dict[str, Any] = {}
-        if prof:
-            profile_data = {"visitor_id": prof.id, "email": prof.primary_email, "traits": prof.traits}
+        if visitor and visitor.profile_id:
+            p_stmt = select(ProfileModel).where(
+                ProfileModel.tenant_id == tenant_id, ProfileModel.id == visitor.profile_id
+            )
+            pres = await db.execute(p_stmt)
+            prof = pres.scalar_one_or_none()
+            if prof:
+                profile_data = {"visitor_id": visitor.id, "email": prof.primary_email, "traits": prof.traits}
 
         e_stmt = (
             select(EventModel).where(EventModel.tenant_id == tenant_id, EventModel.actor_id == visitor_id).limit(100)

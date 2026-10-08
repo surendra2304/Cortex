@@ -171,10 +171,15 @@ async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 # ── Async Redis connection pool ──────────────────────────────────────────────
+# protocol=2 pins RESP2 explicitly: redis-py 8 defaults to RESP3 (HELLO 3), and
+# the bundled development double (scripts/dev_redis.py) plus any RESP2-only
+# deployment cannot serve RESP3 replies. Real Redis accepts RESP2 on every
+# version, so this is safe in production and deterministic in development.
 redis_pool: aioredis.Redis = aioredis.from_url(
     settings.redis_url,
     encoding="utf-8",
     decode_responses=True,
+    protocol=2,
 )
 
 

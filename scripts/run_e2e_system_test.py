@@ -1,15 +1,25 @@
 """
-CORTEX End-to-End System Test Runner
+CORTEX End-to-End System Test Runner (LIVE)
+
 Exercises all 9 platform subsystems, 10-phase cognitive loop, security boundaries,
-multi-tenant data isolation, GDPR compliance, and real-time streaming telemetry.
+multi-tenant data isolation, GDPR compliance, and real-time streaming telemetry
+against the REAL running API (default http://127.0.0.1:8000, override with
+CORTEX_BASE_URL). Phases 5-7 additionally exercise the in-process libraries
+(orchestrator, workflow engine, ecosystem clients) directly.
+
+This suite previously ran against TestClient with a mocked DB/Redis, which let
+auth and ingestion checks pass against fixtures instead of the server (and used
+a Bearer token against the public-key ingestion endpoint). It now provisions a
+real ingestion key, authenticates like a real operator, and drives the live
+service end to end.
 """
 
 import asyncio
+import json
 import os
 import sys
 import time
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
+from datetime import UTC, datetime, timedelta
 
 # Configure Python path for all monorepo modules
 for p in [
@@ -33,9 +43,9 @@ for p in [
     if abs_p not in sys.path:
         sys.path.insert(0, abs_p)
 
-from cortex_api.auth import JWT_SECRET, Role, verify_friday_token
-from cortex_api.config import get_db_session, get_redis_client
-from cortex_api.main import app
+import httpx
+import websockets
+from cortex_api.auth import Role
 from cortex_core import Orchestrator
 from cortex_event_schema import Actor, ActorType, EventSchema
 from cortex_integrations import (
@@ -49,7 +59,6 @@ from cortex_integrations import (
 )
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import WorkflowStateMachine
-from fastapi.testclient import TestClient
 from jose import jwt
 
 
@@ -97,42 +106,24 @@ async def run_e2e_tests():
     print("      INITIALIZING CORTEX COMPLETE END-TO-END SYSTEM TEST")
     print("=" * 70)
 
-    # 1. Dependency Injections & Test Fixtures
-    mock_db = AsyncMock()
-    mock_db.add = MagicMock()
-    mock_db.commit = AsyncMock(return_value=None)
-    mock_db.rollback = AsyncMock(return_value=None)
-    mock_res = MagicMock()
-    mock_res.scalar_one_or_none.return_value = None
-    mock_res.scalars.return_value.all.return_value = []
-    mock_db.execute = AsyncMock(return_value=mock_res)
+    # ── 1. Live harness: this suite drives the REAL running API over HTTP ──
+    BASE = os.getenv("CORTEX_BASE_URL", "http://127.0.0.1:8000")
+    WS_BASE = BASE.replace("http://", "ws://").replace("https://", "wss://")
+    client = httpx.Client(base_url=BASE, timeout=60)
 
-    mock_redis = AsyncMock()
-    mock_redis.incr = AsyncMock(return_value=1)
-    mock_redis.expire = AsyncMock(return_value=True)
-    mock_redis.xadd = AsyncMock(return_value="1725450000000-0")
-    mock_redis.get = AsyncMock(return_value=None)
-    mock_redis.set = AsyncMock(return_value=True)
-    mock_redis.ping = AsyncMock(return_value=True)
-
-    async def override_db():
-        yield mock_db
-
-    async def override_redis():
-        return mock_redis
-
-    app.dependency_overrides[get_db_session] = override_db
-    app.dependency_overrides[get_redis_client] = override_redis
-    app.dependency_overrides[verify_friday_token] = lambda: {
-        "sub": "friday_system",
-        "tenant_id": "ten_e2e_corp",
-        "role": "friday_system",
-    }
-    client = TestClient(app)
-
-    # Generate Auth Tokens
+    # Generate Auth Tokens (HS256 with the same secret the API verifies with;
+    # in development that is the empty default, in production set JWT_SECRET).
     def make_token(sub: str, tenant_id: str, role: Role) -> str:
-        return jwt.encode({"sub": sub, "tenant_id": tenant_id, "role": role.value}, JWT_SECRET, algorithm="HS256")
+        return jwt.encode(
+            {
+                "sub": sub,
+                "tenant_id": tenant_id,
+                "role": role.value,
+                "exp": datetime.now(UTC) + timedelta(hours=1),
+            },
+            os.getenv("JWT_SECRET", ""),
+            algorithm="HS256",
+        )
 
     admin_token = make_token("admin_user", "ten_e2e_corp", Role.CORTEX_ADMIN)
     operator_token = make_token("op_user", "ten_e2e_corp", Role.CORTEX_OPERATOR)
@@ -141,6 +132,24 @@ async def run_e2e_tests():
     admin_headers = {"Authorization": f"Bearer {admin_token}"}
     operator_headers = {"Authorization": f"Bearer {operator_token}"}
     viewer_headers = {"Authorization": f"Bearer {viewer_token}"}
+
+    # FRIDAY service auth: use the configured key when the API accepts it, else
+    # fall back to the development bypass (no header) — same resolution as the
+    # other live scripts.
+    def _friday_headers() -> dict[str, str]:
+        key = os.getenv("CORTEX_FRIDAY_KEY", "")
+        if key:
+            headers = {"X-Friday-Api-Key": key}
+            if client.get("/v1/friday/self_model", headers=headers).status_code == 200:
+                return headers
+        if client.get("/v1/friday/self_model").status_code == 200:
+            return {}
+        raise SystemExit(
+            f"cannot authenticate to {BASE}/v1/friday/self_model with or without X-Friday-Api-Key; "
+            "start the API with a matching FRIDAY_API_KEY or the development bypass enabled."
+        )
+
+    friday_headers = _friday_headers()
 
     # ── PHASE 1: Health & Observability Probes ──
     print("\n[PHASE 1] Checking Core Health, Probes & Prometheus Metrics...")
@@ -237,13 +246,23 @@ async def run_e2e_tests():
         "consent": {"analytics": True, "marketing": True},
         "trace_id": "trc_e2e_sys_001",
     }
-    r = client.post("/v1/events", json=event_payload, headers=admin_headers)
+    # Ingestion authenticates with a tenant public key, not a Bearer token.
+    r = client.post(
+        "/v1/api-keys",
+        json={"tenant_id": "ten_e2e_corp", "site_id": "site_production", "name": "e2e-ingestion"},
+        headers=admin_headers,
+    )
+    if r.status_code != 201:
+        raise SystemExit(f"could not provision an ingestion key: HTTP {r.status_code} {r.text[:200]}")
+    key_headers = {"X-Cortex-Public-Key": r.json()["api_key"]}
+
+    r = client.post("/v1/events", json=event_payload, headers=key_headers)
     tracker.record(
         "4. Event Ingestion", "POST /v1/events Ingest Event", r.status_code in (200, 202), f"HTTP {r.status_code}"
     )
 
     # Replay duplicate
-    r = client.post("/v1/events", json=event_payload, headers=admin_headers)
+    r = client.post("/v1/events", json=event_payload, headers=key_headers)
     tracker.record(
         "4. Event Ingestion", "POST /v1/events Deduplication Check", r.status_code in (200, 202), "Deduplication active"
     )
@@ -400,7 +419,7 @@ async def run_e2e_tests():
         "requested_action": "high_intent.detected",
         "context": {"visitor_id": "vis_e2e_999", "company_size": "500+"},
     }
-    r = client.post("/v1/friday/command", json=friday_payload)
+    r = client.post("/v1/friday/command", json=friday_payload, headers=friday_headers)
     tracker.record(
         "7. Ecosystem Integrations",
         "FRIDAY Autonomous Command Gateway",
@@ -410,6 +429,19 @@ async def run_e2e_tests():
 
     # ── PHASE 8: Privacy, GDPR & Hash-Chained Audit Export ──
     print("\n[PHASE 8] Testing GDPR Compliance & Hash-Chained Audit Exports...")
+    # A real data subject first: identify the visitor so the Art. 15 export has
+    # data to return (exporting an unknown id is a 404, by design).
+    client.post(
+        "/v1/identify",
+        json={
+            "visitor_id": "vis_e2e_999",
+            "email": "cto@enterprise.com",
+            "site_id": "site_production",
+            "consent_granted": True,
+            "traits": {"company_size": "500+"},
+        },
+        headers=viewer_headers,
+    )
     r = client.post("/privacy/export/vis_e2e_999", headers=admin_headers)
     tracker.record(
         "8. Privacy & Governance",
@@ -437,18 +469,18 @@ async def run_e2e_tests():
     # ── PHASE 9: Real-Time WebSockets & Streaming Telemetry ──
     print("\n[PHASE 9] Testing Multi-Tenant Real-Time WebSocket Telemetry...")
     try:
-        with client.websocket_connect(f"/ws/v1/live?token={admin_token}&tenant_id=ten_e2e_corp") as ws:
-            ws.send_json({"action": "ping"})
-            resp = ws.receive_json()
-            tracker.record(
-                "9. Real-Time Streaming",
-                "WebSocket Tenant Connection & Ping-Pong",
-                resp.get("type") == "pong" or "status" in resp,
-                f"WS Response: {resp.get('type') or resp.get('status')}",
-            )
-    except Exception:
+        async with websockets.connect(f"{WS_BASE}/ws/v1/live?token={admin_token}&tenant_id=ten_e2e_corp") as ws:
+            await ws.send(json.dumps({"action": "ping"}))
+            resp = json.loads(await asyncio.wait_for(ws.recv(), timeout=10))
         tracker.record(
-            "9. Real-Time Streaming", "WebSocket Tenant Connection & Ping-Pong", True, "WebSocket protocol verified"
+            "9. Real-Time Streaming",
+            "WebSocket Tenant Connection & Ping-Pong",
+            resp.get("type") == "pong" or "status" in resp,
+            f"WS Response: {resp.get('type') or resp.get('status')}",
+        )
+    except Exception as exc:
+        tracker.record(
+            "9. Real-Time Streaming", "WebSocket Tenant Connection & Ping-Pong", False, f"WS error: {type(exc).__name__}: {exc}"
         )
 
     return tracker.print_summary()

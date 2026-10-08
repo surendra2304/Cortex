@@ -124,19 +124,52 @@ def test_public_gateway_agents():
     assert res_run.json()["output"]["agent_id"] == "agent_growth"
 
 
-def test_public_gateway_actions_and_audit(api_client):
+def test_public_gateway_actions_and_audit(api_client, session_factory):
     """The audit endpoint reads persisted records, so this test needs the DB override.
 
     Using a bare TestClient made it depend on the process-wide engine, i.e. on a
     data/cortex.db that happens to exist next to the checkout.
+
+    The approval flow is the real one: a pending approval-queue row (created by
+    the cognitive loop when the policy gates an action) is approved and executed
+    through the tool bus. The fabricated in-memory action store that used to
+    shadow this endpoint was removed (route-shadowing + fabricated-data defect).
     """
+    import asyncio
+    from datetime import timedelta
+
+    from cortex_api.db_models import ApprovalQueueModel
+
     client = api_client
+    approval_id = "appr_gateway_test_1"
+
+    async def _insert() -> None:
+        async with session_factory() as session:
+            session.add(
+                ApprovalQueueModel(
+                    id=approval_id,
+                    tenant_id="tenant_test",
+                    action_type="account_update",
+                    target="lead_qualification",
+                    params={"tier": "enterprise_tier_1"},
+                    rationale="gateway test approval",
+                    evidence_refs=["test"],
+                    risk_score=0.8,
+                    status="pending",
+                    expires_at=datetime.now(UTC) + timedelta(hours=1),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_insert())
+
     # Audit C4: approving a high-impact action must require an authenticated operator.
-    assert client.post("/v1/actions/act_high_1/approve").status_code == 401
+    assert client.post(f"/v1/actions/{approval_id}/approve").status_code == 401
     headers = auth_headers()
-    res_appr = client.post("/v1/actions/act_high_1/approve", headers=headers)
-    assert res_appr.status_code == 200
-    assert res_appr.json()["action"]["status"] == "approved"
+    res_appr = client.post(f"/v1/actions/{approval_id}/approve", headers=headers)
+    assert res_appr.status_code == 200, res_appr.text
+    assert res_appr.json()["status"] == "approved"
+    assert res_appr.json()["execution"]["tool"] == "account_update"
 
     res_audit = client.get("/v1/audit/actions", headers=headers)
     assert res_audit.status_code == 200

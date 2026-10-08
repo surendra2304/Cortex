@@ -36,13 +36,15 @@ async def test_privacy_flow_consent_and_erasure_e2e(session_factory):
     assert "[REDACTED_API_KEY]" in scrubbed["notes"]
     assert "[REDACTED_EMAIL]" in scrubbed["user_email"]
 
-    # 2. Data Subject Export (Art. 15)
+    # 2. Data Subject Export (Art. 15) — the subject's OWN data, unredacted.
+    #    The scrubber is for logs/AI prompts; scrubbing the export itself would
+    #    defeat the right of access (upgrade 2026-10-07).
     export = service.generate_data_export(
         visitor_id="vis_e2e_privacy_01", profile_data={"email": "privacy_user@domain.com"}, events=[raw_event]
     )
     assert export.events_count == 1
-    assert "[REDACTED_CARD]" in export.events[0]["card"]
-    assert export.profile_data["email"] == "[REDACTED_EMAIL]"
+    assert export.events[0]["card"] == "4111 2222 3333 4444"
+    assert export.profile_data["email"] == "privacy_user@domain.com"
 
     # 3. Data Subject Hard Erasure (Art. 17) — executed against a real database.
     from datetime import datetime

@@ -211,6 +211,9 @@ class ApprovalQueueModel(Base):
     created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
     expires_at = Column(DateTime(timezone=True), nullable=False)
     decided_at = Column(DateTime(timezone=True), nullable=True)
+    # Filled when an approved action is executed through the tool bus on approval.
+    execution_status = Column(String(32), nullable=True)  # executed | failed | blocked | skipped
+    execution_result = Column(JSONB, nullable=True)
 
 
 class StrategyPerformanceModel(Base):

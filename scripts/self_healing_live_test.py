@@ -19,7 +19,28 @@ import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8000"
-H = {"Content-Type": "application/json", "X-Friday-Api-Key": "friday-service-token-for-local-pressure-testing"}
+_DEFAULT_H = {"Content-Type": "application/json", "X-Friday-Api-Key": "friday-service-token-for-local-pressure-testing"}
+
+
+def _resolve_friday_headers() -> dict[str, str]:
+    """Probe once for a FRIDAY credential this API accepts, then fall back to the
+    development bypass (no header). A hardcoded key that the API rejects made
+    every call 401 and crashed the script on the error body (same pattern fixed
+    in scripts/self_integrity_live_test.py)."""
+    try:
+        req = urllib.request.Request(BASE + "/v1/friday/self_model", headers=_DEFAULT_H, method="GET")
+        with urllib.request.urlopen(req, timeout=10) as response:
+            response.read()
+            return _DEFAULT_H
+    except urllib.error.HTTPError:
+        pass
+    req = urllib.request.Request(BASE + "/v1/friday/self_model", method="GET")
+    with urllib.request.urlopen(req, timeout=10) as response:
+        response.read()
+        return {"Content-Type": "application/json"}
+
+
+H = _resolve_friday_headers()
 
 
 def call(method: str, path: str, body: dict | None = None) -> tuple[int, dict | str]:
@@ -73,8 +94,17 @@ print("   realtime_streaming:", model["capabilities"]["realtime_streaming"])
 print("   gaps:", model["gaps"])
 
 step("5. restore Redis and let self-healing verify the repair")
+import os
+
 subprocess.Popen(
-    [".venv/bin/python", "scripts/dev_redis.py", "--host", "0.0.0.0", "--port", "6379"],
+    [
+        sys.executable,
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "dev_redis.py"),
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "6379",
+    ],
     stdout=subprocess.DEVNULL,
     stderr=subprocess.DEVNULL,
 )
