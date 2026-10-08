@@ -31,6 +31,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from cortex_api.api_keys import authenticate_public_key
+from cortex_api.auth import DEV_AUTH_BYPASS
 from cortex_api.config import get_db_session, get_redis_client, settings
 from cortex_api.db_models import EventModel
 from cortex_upgrade.webhook import canonical_json, verify_timestamp
@@ -137,15 +138,21 @@ async def receive_webhook(
             logger.warning("Rejected webhook from provider '%s': invalid signature.", provider)
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid webhook signature.")
         signature_verified = True
-    elif is_production():
+    elif is_production() or not DEV_AUTH_BYPASS:
+        # Fail closed anywhere except an explicitly-flagged development box
+        # (audit S7, fixed 2026-10-07): a staging deployment with APP_ENV unset is
+        # not a dev box and must not accept unsigned webhooks.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"No signing secret configured for provider '{provider}'; refusing unsigned webhooks in production.",
+            detail=(
+                f"No signing secret configured for provider '{provider}'; refusing unsigned webhooks "
+                f"({'production' if is_production() else 'development auth bypass not enabled'})."
+            ),
         )
     else:
         logger.warning(
             "Webhook provider '%s' has no signing secret configured; accepted WITHOUT signature verification "
-            "(development only).",
+            "(explicit development bypass active).",
             provider,
         )
 

@@ -105,10 +105,10 @@ def main() -> int:
 
     status, tenant_res = call("POST", "/v1/tenants", {"tenant_name": "Load Corp", "admin_email": f"ops@{suffix}.ex", "plan": "pro"})
     assert status == 201, f"tenant: {status}"
-    status, key_res = call("POST", "/v1/api-keys", {"tenant_id": tenant, "site_id": site, "name": "load"})
+    auth = {"Authorization": f"Bearer {jwt_for(tenant)}"}
+    status, key_res = call("POST", "/v1/api-keys", {"tenant_id": tenant, "site_id": site, "name": "load"}, headers=auth)
     assert status == 201, f"key: {status}"
     public_key = key_res["api_key"]
-    auth = {"Authorization": f"Bearer {jwt_for(tenant)}"}
 
     print("── phase A: background ingestion at ~50 rps for 30s ──")
     t = threading.Thread(target=ingest_worker, args=(public_key, tenant, site, 30.0, 50.0), daemon=True)

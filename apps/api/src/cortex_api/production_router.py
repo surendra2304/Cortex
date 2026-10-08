@@ -321,8 +321,12 @@ from cortex_integrations import get_connector_registry  # noqa: E402 - deliberat
 
 @router.get("/connectors")
 async def list_registered_connectors(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
-    """Returns real-time health, scopes, and circuit breaker status for all ecosystem connectors."""
-    return get_connector_registry()
+    """Live health, scopes and probe details for all ecosystem connectors.
+
+    Serves the real ConnectorManager checks — the old static table reported every
+    connector HEALTHY and hid outages (audit S10).
+    """
+    return await get_connector_registry()
 
 
 # ── 5. EXPERIMENTATION & PERSONALIZATION ─────────────────────────────────────

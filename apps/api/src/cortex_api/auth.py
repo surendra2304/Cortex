@@ -25,18 +25,18 @@ JWT_SECRET = os.getenv("JWT_SECRET", "")
 FRIDAY_API_KEY = os.getenv("FRIDAY_API_KEY", "")
 
 # ── Development-only auth bypass ─────────────────────────────────────────────
-# Historical behaviour: with MOCK_MODE=true any unauthenticated request was
-# treated as a full CORTEX_ADMIN.  That is convenient locally and unacceptable
-# anywhere else, so it is now (a) disabled outright in production, (b) loudly
-# announced at import time, and (c) switchable with CORTEX_DEV_AUTH_BYPASS=false.
+# Historical behaviour: with MOCK_MODE=true (the default) any unauthenticated
+# request was treated as a full CORTEX_ADMIN. That is convenient locally and
+# unacceptable anywhere else, so the bypass is now OPT-IN: it requires the
+# explicit CORTEX_DEV_AUTH_BYPASS=true flag, is disabled outright in production,
+# and is loudly announced at import time (audit S6, fixed 2026-10-07). MOCK_MODE
+# no longer implies it — a staging box with APP_ENV unset is not a dev box.
 _is_production_env = APP_ENV == "production" or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
 _dev_bypass_flag = os.getenv("CORTEX_DEV_AUTH_BYPASS", "").strip().lower()
 if _is_production_env:
     DEV_AUTH_BYPASS = False
-elif _dev_bypass_flag:
-    DEV_AUTH_BYPASS = _dev_bypass_flag in {"1", "true", "yes", "on"}
 else:
-    DEV_AUTH_BYPASS = os.getenv("MOCK_MODE", "true").lower() in {"true", "1", "yes"}
+    DEV_AUTH_BYPASS = _dev_bypass_flag in {"1", "true", "yes", "on"}
 
 if DEV_AUTH_BYPASS:
     logger.warning(

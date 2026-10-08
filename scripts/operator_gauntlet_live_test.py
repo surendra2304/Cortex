@@ -104,7 +104,11 @@ def main() -> int:
     step("1. provision a tenant + ingestion key like an operator would")
     status, tenant_res = call("POST", "/v1/tenants", {"tenant_name": "Gauntlet Corp", "admin_email": f"ops@{suffix}.example", "plan": "pro"})
     check("tenant onboarding", status == 201 and "ten_" in tenant_res.get("tenant_id", ""), f"{status}")
-    status, key_res = call("POST", "/v1/api-keys", {"tenant_id": tenant, "site_id": site, "name": "gauntlet"})
+    # S5: key provisioning is tenant-bound — mint the tenant's own credential.
+    status, key_res = call(
+        "POST", "/v1/api-keys", {"tenant_id": tenant, "site_id": site, "name": "gauntlet"},
+        headers={"Authorization": f"Bearer {jwt_for(tenant)}"},
+    )
     check("ingestion key provisioned", status == 201 and key_res.get("api_key", "").startswith("pk_live_"), f"{status}")
     public_key = key_res["api_key"]
 
