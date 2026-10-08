@@ -107,12 +107,21 @@ class TransportFailure(RuntimeError):
 
 
 class Harness:
-    def __init__(self, base_url: str, public_key: str, other_tenant_key: str, jwt: str, admin_tenant: str):
+    def __init__(
+        self,
+        base_url: str,
+        public_key: str,
+        other_tenant_key: str,
+        jwt: str,
+        admin_tenant: str,
+        jwt_secret: str = "",
+    ):
         self.base_url = base_url.rstrip("/")
         self.public_key = public_key
         self.other_tenant_key = other_tenant_key
         self.jwt = jwt
         self.admin_tenant = admin_tenant
+        self.jwt_secret = jwt_secret
         self.results: list[Result] = []
         self.latencies = Latencies()
         self.status_counter: Counter[str] = Counter()
@@ -130,12 +139,28 @@ class Harness:
         return {"Authorization": f"Bearer {self.jwt}"}
 
     async def provision_key(self, client: httpx.AsyncClient, tenant_id: str, site_id: str, name: str) -> str:
+        # S5: key provisioning is tenant-bound, so mint a credential for the
+        # target tenant (HS256 with the same secret the API verifies with).
+        from datetime import datetime, timedelta
+
+        from jose import jwt as _jwt
+
+        token = _jwt.encode(
+            {
+                "sub": "pressure-harness",
+                "role": "cortex_admin",
+                "tenant_id": tenant_id,
+                "exp": datetime.now(UTC) + timedelta(hours=1),
+            },
+            self.jwt_secret or "",
+            algorithm="HS256",
+        )
         response = await self.request(
             client,
             "POST",
             f"{self.base_url}/v1/api-keys",
             json={"tenant_id": tenant_id, "site_id": site_id, "name": name},
-            headers=self.jwt_headers(),
+            headers={"Authorization": f"Bearer {token}"},
             timeout=30,
         )
         if response.status_code != 201:
@@ -654,7 +679,7 @@ def _mint_jwt(secret: str, tenant_id: str, role: str = "cortex_admin", subject: 
 
 
 async def main_async(args) -> int:
-    harness = Harness(args.url, args.key, args.other_key, args.jwt, args.tenant)
+    harness = Harness(args.url, args.key, args.other_key, args.jwt, args.tenant, jwt_secret=args.jwt_secret or "")
     print(f"CORTEX pressure harness -> {args.url}")
     print(f"  concurrency={args.concurrency} events={args.events} soak={args.soak_seconds}s")
 
