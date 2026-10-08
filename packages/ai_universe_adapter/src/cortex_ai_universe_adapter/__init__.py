@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 from datetime import UTC, datetime
 from typing import Any, Optional
 
@@ -76,11 +77,37 @@ class AIUniverseClient:
         api_key: str | None = None,
         timeout_seconds: float = 5.0,
         max_retries: int = 3,
+        cooldown_after_failures: int = 3,
+        cooldown_seconds: float = 30.0,
     ):
         self.endpoint = (endpoint or os.getenv("AI_UNIVERSE_BASE_URL", "https://api.ai-universe.dev")).rstrip("/")
         self.api_key = api_key or os.getenv("AI_UNIVERSE_API_KEY", "")
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
+        # Pressure hardening (2026-10-07): a dead or hanging AI Universe peer must
+        # not wedge the cognitive loop. Every ambiguous/strategic event used to
+        # burn ~1.5-2s in retries (3 attempts + exponential backoff), capping the
+        # serial worker at well under one event per second. After this many
+        # consecutive server-side failures, live calls are skipped for the cooldown
+        # window and the honest deterministic fallback answers immediately.
+        self.cooldown_after_failures = cooldown_after_failures
+        self.cooldown_seconds = cooldown_seconds
+        self._consecutive_failures = 0
+        self._cooldown_until = 0.0
+
+    def _register_failure(self) -> None:
+        self._consecutive_failures += 1
+        if self._consecutive_failures >= self.cooldown_after_failures:
+            self._cooldown_until = time.monotonic() + self.cooldown_seconds
+            logger.warning(
+                "AI Universe marked unavailable for %.0fs after %d consecutive failures (fail-fast cooldown).",
+                self.cooldown_seconds,
+                self._consecutive_failures,
+            )
+
+    def _register_success(self) -> None:
+        self._consecutive_failures = 0
+        self._cooldown_until = 0.0
 
     def _get_deterministic_fallback(
         self, request: IntelligenceRequest, reason: str = "upstream_unavailable"
@@ -101,6 +128,9 @@ class AIUniverseClient:
         )
 
     async def evaluate(self, request: IntelligenceRequest) -> IntelligenceResponse:
+        if self._consecutive_failures >= self.cooldown_after_failures and time.monotonic() < self._cooldown_until:
+            return self._get_deterministic_fallback(request, "cooldown_after_consecutive_failures")
+
         url = f"{self.endpoint}/v1/cortex/intelligence"
         headers = {"Content-Type": "application/json", "User-Agent": "CORTEX-AIUniverse-Adapter/1.0"}
         if self.api_key:
@@ -120,6 +150,7 @@ class AIUniverseClient:
                             logger.warning(
                                 f"AI Universe response for {request.request_id} has unresolved disagreements: {response.unresolved_disagreements}"
                             )
+                        self._register_success()
                         return response
                     elif 500 <= resp.status_code < 600:
                         logger.warning(
@@ -128,6 +159,7 @@ class AIUniverseClient:
                         if attempt < self.max_retries:
                             await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
                             continue
+                        self._register_failure()
                         return self._get_deterministic_fallback(request, f"server_error_{resp.status_code}")
                     else:
                         logger.warning(f"AI Universe returned client error {resp.status_code}: {resp.text}.")
@@ -138,8 +170,10 @@ class AIUniverseClient:
                 if attempt < self.max_retries:
                     await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
                     continue
+                self._register_failure()
                 return self._get_deterministic_fallback(request, str(exc))
 
+        self._register_failure()
         return self._get_deterministic_fallback(request, "max_retries_exceeded")
 
 

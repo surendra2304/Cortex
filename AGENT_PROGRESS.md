@@ -15,7 +15,7 @@ Detailed running log: `notes/UPGRADE_PLAN.md`. Analysis baseline: `REPO_ANALYSIS
 - [x] B3 — Cross-tenant IDOR killed: visitors/leads tenant-scoped, orchestrator
       Contextualize tenant-scoped, friday endpoints gain explicit tenant_id scope,
       live-verified + regression tests (test_tenant_isolation_reads.py)
-- [~] B4 — Operator gauntlet: 4 repo live scripts green (self_integrity 55/55,
+- [x] B4 — Operator gauntlet: 4 repo live scripts green (self_integrity 55/55,
       self_healing outage→recovery, e2e 35/35 LIVE, escalation 14/14) +
       scripts/operator_gauntlet_live_test.py driving tasks/approvals/workflows/
       GDPR/dead-ends like the owner — 46/51, 5 remaining (script contract fixes
@@ -29,11 +29,12 @@ Detailed running log: `notes/UPGRADE_PLAN.md`. Analysis baseline: `REPO_ANALYSIS
       (AGENT_UPGRADE_2026-10-07.md), commit + push
 
 ## Current step
-B4: finish operator gauntlet to 100% — fix 5 remaining script assertions
-(classification value, /v1/task/execute contract, collaborate response shape,
-knob rollback-first, export check), restart API (privacy export fix), re-run.
+B5: extreme pressure — 5000@200/60s + 20k capacity + worker throughput +
+concurrent operator load; fix every bug found.
 
 ## Verification state
-- pytest: 357 passed, 3 skipped (last full run before B4 gauntlet fixes)
+- pytest: 357 passed, 3 skipped
+- gauntlet: 51/51 (tasks, approvals, workflows, GDPR, dead ends)
+- pushed: arena/998f44c2-cortex (B1-B4 commit)
 - live scripts: self_integrity 55/55, self_healing PASS, e2e 35/35, escalation 14/14
 - stack running: dev-redis :6379, cortex-api :8000 (dev), cortex-worker

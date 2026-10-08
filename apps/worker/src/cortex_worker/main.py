@@ -55,6 +55,11 @@ REDIS_PROTOCOL = int(os.getenv("REDIS_PROTOCOL", "2"))
 # deliveries it is acknowledged so one permanently broken event cannot wedge
 # the stream forever.
 MAX_DELIVERY_ATTEMPTS = int(os.getenv("WORKER_MAX_DELIVERY_ATTEMPTS", "5"))
+# Pressure hardening (2026-10-07): the loop used to run one event at a time, so a
+# burst of ambiguous events (each with AI-Universe retries) capped drain rate at a
+# fraction of what the API can ingest. Delivery is now bounded-concurrent; the
+# per-message acknowledgement policy is unchanged.
+WORKER_MAX_CONCURRENCY = int(os.getenv("WORKER_MAX_CONCURRENCY", "4"))
 PEL_RECOVERY_INTERVAL_SECONDS = float(os.getenv("WORKER_PEL_RECOVERY_INTERVAL_SECONDS", "30"))
 PEL_MIN_IDLE_MS = int(os.getenv("WORKER_PEL_MIN_IDLE_MS", "60000"))
 PEL_RECOVERY_BATCH = int(os.getenv("WORKER_PEL_RECOVERY_BATCH", "100"))
@@ -260,12 +265,26 @@ async def run_worker() -> None:
     orchestrator = Orchestrator(tool_bus=tool_bus)
 
     delivery_attempts: dict[str, int] = {}
+    delivery_semaphore = asyncio.Semaphore(WORKER_MAX_CONCURRENCY)
+    inflight: set[asyncio.Task] = set()
+
+    def _reap(task: asyncio.Task) -> None:
+        inflight.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error(f"Delivery task failed: {task.exception()}")
+
+    async def _deliver_bounded(message_id: str, payload_str: str) -> None:
+        async with delivery_semaphore:
+            await deliver_message(redis_client, message_id, payload_str, orchestrator, delivery_attempts)
 
     # Launch background maintenance scheduler + PEL recovery loop
     maintenance_task = asyncio.create_task(run_scheduled_maintenance_tasks())
     recovery_task = asyncio.create_task(run_pel_recovery(redis_client, orchestrator, delivery_attempts))
 
-    logger.info(f"CORTEX autonomous worker listening on '{STREAM_NAME}' as '{CONSUMER_NAME}'...")
+    logger.info(
+        f"CORTEX autonomous worker listening on '{STREAM_NAME}' as '{CONSUMER_NAME}' "
+        f"(delivery concurrency={WORKER_MAX_CONCURRENCY})..."
+    )
 
     try:
         while True:
@@ -282,9 +301,12 @@ async def run_worker() -> None:
                     for _stream, messages in response:
                         for message_id, fields in messages:
                             payload_str = fields.get("payload", "{}")
-                            await deliver_message(
-                                redis_client, message_id, payload_str, orchestrator, delivery_attempts
-                            )
+                            task = asyncio.create_task(_deliver_bounded(message_id, payload_str))
+                            inflight.add(task)
+                            task.add_done_callback(_reap)
+                    # Keep the in-flight set small; finished tasks reap themselves.
+                    if len(inflight) > WORKER_MAX_CONCURRENCY * 4:
+                        await asyncio.sleep(0)
                 else:
                     await asyncio.sleep(0.1)
 
@@ -301,6 +323,8 @@ async def run_worker() -> None:
     finally:
         maintenance_task.cancel()
         recovery_task.cancel()
+        if inflight:
+            await asyncio.gather(*inflight, return_exceptions=True)
         await redis_client.close()
         logger.info("Worker stopped and Redis connection closed.")
 

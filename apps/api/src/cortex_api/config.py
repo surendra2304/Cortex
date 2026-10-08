@@ -142,7 +142,11 @@ _warn_about_production_secrets()
 # ── Async engine & session pool ──────────────────────────────────────────────
 engine_kwargs: dict = {"echo": False}
 if "sqlite" in settings.postgres_dsn:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
+    # Pressure hardening (2026-10-07): the API, the worker and approval-driven
+    # executions all write to the same SQLite file in development. Without a busy
+    # timeout, concurrent writers surface as "database is locked" 500s under
+    # load; WAL lets readers proceed while a write commits.
+    engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
     if ":memory:" in settings.postgres_dsn:
         engine_kwargs["poolclass"] = StaticPool
 else:
@@ -151,6 +155,16 @@ else:
     engine_kwargs["pool_pre_ping"] = True
 
 engine = create_async_engine(settings.postgres_dsn, **engine_kwargs)
+
+if "sqlite" in settings.postgres_dsn and ":memory:" not in settings.postgres_dsn:
+    from sqlalchemy import event as _sa_event
+
+    @_sa_event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_wal_and_busy_timeout(dbapi_conn, _record):  # pragma: no cover - driver hook
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=30000")
+        cursor.close()
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

@@ -128,7 +128,13 @@ class Orchestrator:
         self.context_builder = context_builder or ContextBuilder()
         self.memory_store = memory_store or MemoryStore()
         self.context_firewall = ContextFirewall()
-        self.audit_records: list[AuditRecord] = []
+        # Bounded in-memory audit trail (pressure hardening 2026-10-07): the list
+        # used to grow forever — one entry per cognitive loop — which is a slow
+        # memory leak on a long-running worker. The durable record is the DB row;
+        # this is only a recent-history window (tests read it, so keep the type).
+        from collections import deque
+
+        self.audit_records: deque[AuditRecord] = deque(maxlen=1000)
 
     async def _collaborate_from_output(
         self,
