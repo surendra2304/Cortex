@@ -172,3 +172,37 @@ class ConnectorManager:
 
 
 global_connector_manager = ConnectorManager()
+
+_STATUS_LABELS = {
+    HealthStatus.UP.value: "HEALTHY",
+    HealthStatus.DEGRADED.value: "DEGRADED",
+    HealthStatus.DOWN.value: "UNHEALTHY",
+    HealthStatus.UNKNOWN.value: "UNVERIFIED",
+}
+
+
+async def get_live_connector_registry() -> list[dict[str, Any]]:
+    """Live connector inventory built from real health checks.
+
+    Replaces the old static ``CONNECTOR_HEALTH`` table that reported every
+    connector HEALTHY with zero failures — fabricated health that hid real
+    outages from operators (audit S10, fixed 2026-10-07). Statuses are honest:
+    UNVERIFIED means no live probe is configured, never "healthy".
+    """
+    report = await global_connector_manager.check_all()
+    registry: list[dict[str, Any]] = []
+    for name, info in report["connectors"].items():
+        status = info["status"]
+        registry.append(
+            {
+                "id": name,
+                "name": info["details"].get("provider", name),
+                "scope": f"integrations:{name}",
+                "status": _STATUS_LABELS.get(status, "UNVERIFIED"),
+                "failure_count": 0 if status == HealthStatus.UP.value else 1,
+                "last_sync": info["checked_at"],
+                "latency_ms": info["latency_ms"],
+                "details": info["details"],
+            }
+        )
+    return registry

@@ -20,6 +20,26 @@ class ContextPackage(BaseModel):
     created_at: datetime = Field(default_factory=_utcnow)
 
 
+def _dedupe_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop duplicate events by event_id, keeping first occurrence.
+
+    The current event also appears in the actor history (Contextualize queries it
+    after the event was committed), so it must be deduplicated — but events
+    without an id (session windows, test fixtures) are always kept: two rage
+    clicks in the same millisecond are two events, not one.
+    """
+    seen: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for e in events:
+        event_id = e.get("event_id")
+        if event_id:
+            if event_id in seen:
+                continue
+            seen.add(event_id)
+        out.append(e)
+    return out
+
+
 class ContextBuilder:
     """
     Context Engine per CORTEX spec section 11:
@@ -38,7 +58,13 @@ class ContextBuilder:
         lead_info: dict[str, Any] | None = None,
         site_metrics: dict[str, Any] | None = None,
     ) -> ContextPackage:
-        all_events = [event] + session_events
+        # The decision context is the actor's full recent history: the current
+        # event, the session window, and cross-session actor events. Excluding
+        # actor_events made repeat research invisible — a visitor who viewed
+        # pricing across three sessions scored zero intent on each single event.
+        # The current event also appears in actor_events (it is already
+        # committed when Contextualize runs), so duplicates are removed.
+        all_events = _dedupe_events([event, *session_events, *actor_events])
 
         # 1. Intent Detection (Deterministic with explicit weights)
         pricing_count = sum(1 for e in all_events if "pricing" in str(e.get("type", "")).lower())

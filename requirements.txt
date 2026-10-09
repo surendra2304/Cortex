@@ -2,7 +2,13 @@ fastapi>=0.110.0
 uvicorn[standard]>=0.28.0
 pydantic>=2.6.0
 pydantic-settings>=2.2.0
-redis>=5.0.0
+# redis-py 8 changed the default wire protocol to RESP3 (HELLO 3). CORTEX's wire
+# contract — and the bundled development double scripts/dev_redis.py — is RESP2:
+# a RESP2 XREADGROUP reply cannot be parsed by a RESP3 client, which stopped the
+# worker from processing any event. The worker also pins protocol=2 explicitly
+# (apps/worker/src/cortex_worker/main.py); this bound keeps the whole stack on the
+# same redis-py generation that contract was verified against.
+redis>=5.0.0,<8.0.0
 asyncpg>=0.29.0
 sqlalchemy[asyncio]>=2.0.0
 aiosqlite>=0.20.0

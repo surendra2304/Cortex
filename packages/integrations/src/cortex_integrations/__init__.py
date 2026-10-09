@@ -1061,61 +1061,13 @@ def create_calendar_tool() -> Tool:
 # ==============================================================================
 # Connector Health & Circuit Breaker Registry
 # ==============================================================================
-CONNECTOR_HEALTH: dict[str, dict[str, Any]] = {
-    "sendgrid": {
-        "name": "SendGrid Email",
-        "scope": "integrations:email",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "twilio": {
-        "name": "Twilio SMS & Voice",
-        "scope": "integrations:communications",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "hubspot": {
-        "name": "HubSpot CRM",
-        "scope": "integrations:crm",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "stripe": {
-        "name": "Stripe Payments",
-        "scope": "integrations:payments",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "zendesk": {
-        "name": "Zendesk Ticketing",
-        "scope": "integrations:ticketing",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "calendly": {
-        "name": "Calendly Calendar",
-        "scope": "integrations:calendar",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-    "outbound_webhook": {
-        "name": "Outbound Webhooks",
-        "scope": "integrations:webhook",
-        "status": "HEALTHY",
-        "failure_count": 0,
-        "last_sync": _utcnow().isoformat(),
-    },
-}
 
 
-def get_connector_registry() -> list[dict[str, Any]]:
-    return [{"id": k, **v} for k, v in CONNECTOR_HEALTH.items()]
+async def get_connector_registry() -> list[dict[str, Any]]:
+    """Live connector registry — real health checks, never a static table."""
+    from .connector_manager import get_live_connector_registry
+
+    return await get_live_connector_registry()
 
 
 # Sentinel Security Findings Integration

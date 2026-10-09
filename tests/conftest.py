@@ -31,9 +31,16 @@ class FakeRedis:
 
     def __init__(self) -> None:
         self.counters: dict[str, int] = {}
+        self.strings: dict[str, str] = {}
         self.streams: list[tuple[str, dict]] = []
         self.fail_incr = False
         self.fail_xadd = False
+
+    async def set(self, key: str, value: str, nx: bool = False, ex: int | None = None) -> bool:
+        if nx and key in self.strings:
+            return False
+        self.strings[key] = value
+        return True
 
     async def incr(self, key: str) -> int:
         if self.fail_incr:

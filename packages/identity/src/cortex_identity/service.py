@@ -132,19 +132,58 @@ class IdentityResolver:
 
         visitor.profile_id = target_profile.id
 
-        # 5. Record identity link in resolution graph
+        # 5. Record identity link in resolution graph. Deduplicated: re-identifying
+        # the same visitor must not pile up duplicate link rows.
         if visitor_id:
-            link = IdentityLinkModel(
-                id=f"link_{uuid.uuid4().hex[:10]}",
-                tenant_id=tenant_id,
-                source_type="anonymous_id",
-                source_value=visitor_id,
-                target_type="profile_id",
-                target_id=target_profile.id,
-                confidence=1.0,
-                link_metadata={"device_fingerprint": device_fingerprint, "trigger": event_trigger},
+            existing_link = await db.execute(
+                select(IdentityLinkModel).where(
+                    IdentityLinkModel.tenant_id == tenant_id,
+                    IdentityLinkModel.source_type == "anonymous_id",
+                    IdentityLinkModel.source_value == visitor_id,
+                    IdentityLinkModel.target_type == "profile_id",
+                )
             )
-            db.add(link)
+            if existing_link.scalar_one_or_none() is None:
+                link = IdentityLinkModel(
+                    id=f"link_{uuid.uuid4().hex[:10]}",
+                    tenant_id=tenant_id,
+                    source_type="anonymous_id",
+                    source_value=visitor_id,
+                    target_type="profile_id",
+                    target_id=target_profile.id,
+                    confidence=1.0,
+                    link_metadata={"device_fingerprint": device_fingerprint, "trigger": event_trigger},
+                )
+                db.add(link)
+
+        # 5b. Persist authenticated identity links (user_id / email -> profile).
+        # The cognitive loop resolves an event's actor through these rows; without
+        # them an identified visitor (whose events carry the user_id, not the
+        # anonymous visitor id) is invisible to every agent.
+        for source_type, source_value in (("user_id", user_id), ("email", email)):
+            if not source_value:
+                continue
+            existing_auth_link = await db.execute(
+                select(IdentityLinkModel).where(
+                    IdentityLinkModel.tenant_id == tenant_id,
+                    IdentityLinkModel.source_type == source_type,
+                    IdentityLinkModel.source_value == source_value,
+                    IdentityLinkModel.target_type == "profile_id",
+                )
+            )
+            if existing_auth_link.scalar_one_or_none() is None:
+                db.add(
+                    IdentityLinkModel(
+                        id=f"link_{uuid.uuid4().hex[:10]}",
+                        tenant_id=tenant_id,
+                        source_type=source_type,
+                        source_value=source_value,
+                        target_type="profile_id",
+                        target_id=target_profile.id,
+                        confidence=1.0,
+                        link_metadata={"trigger": event_trigger},
+                    )
+                )
 
         # 6. Lifecycle promotions
         lifecycle_stage = "lead" if (email or user_id) else "visitor"
@@ -214,6 +253,79 @@ class IdentityResolver:
             "identities": target_profile.identities,
             "traits": target_profile.traits,
         }
+
+    async def resolve_actor_profile(
+        self,
+        db: AsyncSession,
+        actor_id: str,
+        tenant_id: str = "default",
+    ) -> dict[str, Any]:
+        """Lookup-only resolution of an event actor to its profile (and visitor).
+
+        Used by the cognitive loop's Contextualize phase: events from identified
+        users carry the user_id (or email) as actor id, which never equals the
+        anonymous visitor id — the profile is reachable only through the identity
+        graph. Tenant-scoped; returns empty dicts when nothing resolves.
+        """
+        result: dict[str, Any] = {
+            "profile_id": None,
+            "profile_traits": {},
+            "primary_email": None,
+            "visitor_attributes": {},
+            "lead": None,
+        }
+        if not actor_id:
+            return result
+
+        link_stmt = (
+            select(IdentityLinkModel)
+            .where(
+                IdentityLinkModel.tenant_id == tenant_id,
+                IdentityLinkModel.source_value == actor_id,
+                IdentityLinkModel.target_type == "profile_id",
+            )
+            .order_by(IdentityLinkModel.created_at.desc())
+            .limit(1)
+        )
+        link_res = await db.execute(link_stmt)
+        link = link_res.scalar_one_or_none()
+        if not link:
+            return result
+
+        profile_id = link.target_id
+        result["profile_id"] = profile_id
+
+        prof_res = await db.execute(
+            select(ProfileModel).where(ProfileModel.id == profile_id, ProfileModel.tenant_id == tenant_id)
+        )
+        profile = prof_res.scalar_one_or_none()
+        if profile:
+            result["profile_traits"] = dict(profile.traits or {})
+            result["primary_email"] = profile.primary_email
+
+        # The anonymous visitor attached to the same profile, if any.
+        vis_res = await db.execute(
+            select(VisitorModel)
+            .where(VisitorModel.tenant_id == tenant_id, VisitorModel.profile_id == profile_id)
+            .order_by(VisitorModel.last_seen_at.desc())
+            .limit(1)
+        )
+        visitor = vis_res.scalar_one_or_none()
+        if visitor:
+            result["visitor_attributes"] = dict(visitor.attributes or {})
+
+        lead_res = await db.execute(
+            select(LeadModel).where(LeadModel.tenant_id == tenant_id, LeadModel.profile_id == profile_id)
+        )
+        lead = lead_res.scalar_one_or_none()
+        if lead:
+            result["lead"] = {
+                "lead_id": lead.id,
+                "score": lead.score,
+                "status": lead.status,
+                "lifecycle_stage": "customer" if lead.status == "customer" else "lead",
+            }
+        return result
 
 
 # Maintain backward-compatible IdentityService alias

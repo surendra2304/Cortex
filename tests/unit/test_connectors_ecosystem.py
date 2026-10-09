@@ -61,11 +61,25 @@ def test_connector_registry_endpoint():
     res = client.get("/connectors", headers=auth_headers())
     assert res.status_code == 200
     data = res.json()
-    assert len(data) >= 6
+    # The registry is LIVE: real health checks, honest statuses. With no probes
+    # configured every connector is UNVERIFIED — never a fabricated HEALTHY.
+    assert len(data) == 7
+    by_id = {c["id"]: c for c in data}
+    assert set(by_id) == {"email", "crm", "sms", "payments", "futuris", "intelx", "sentinel"}
+    assert all(c["status"] == "UNVERIFIED" for c in data)
+    assert all(c["failure_count"] == 1 for c in data)  # not healthy -> at least one failure
     names = [c["name"] for c in data]
     assert any("SendGrid" in n for n in names)
     assert any("Twilio" in n for n in names)
     assert any("HubSpot" in n for n in names)
-    assert any("Calendly" in n for n in names)
     assert any("Stripe" in n for n in names)
-    assert any("Zendesk" in n for n in names)
+    # A simulated outage must surface in the registry (no static table).
+    from cortex_integrations import global_connector_manager
+
+    global_connector_manager.set_mock_outage("payments", True)
+    try:
+        res = client.get("/connectors", headers=auth_headers())
+        payments = next(c for c in res.json() if c["id"] == "payments")
+        assert payments["status"] == "UNHEALTHY"
+    finally:
+        global_connector_manager.set_mock_outage("payments", False)

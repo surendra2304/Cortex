@@ -78,9 +78,26 @@ def _resolve_public_key(client: httpx.Client) -> str:
     failed 401). Probing for validity is not enough either: ingestion is rate limited, so a
     429 would be mistaken for "key accepted". Development mode simply issues a fresh key.
     """
+    # S5: key provisioning is tenant-bound, so mint the tenant's own credential
+    # (HS256 with the API's JWT secret — empty in development) and provision as
+    # that tenant instead of relying on the dev bypass admin.
+    from jose import jwt as _jwt
+
+    token = _jwt.encode(
+        {
+            "sub": "integrity-run",
+            "role": "cortex_admin",
+            "tenant_id": "tenant_load",
+            "exp": __import__("datetime").datetime.now(__import__("datetime").timezone.utc)
+            + __import__("datetime").timedelta(hours=1),
+        },
+        os.getenv("JWT_SECRET", ""),
+        algorithm="HS256",
+    )
     issued = client.post(
         f"{BASE}/v1/api-keys",
         json={"tenant_id": "tenant_load", "site_id": "site_load", "name": "integrity-run"},
+        headers={"Authorization": f"Bearer {token}"},
     )
     if issued.status_code in (200, 201) and issued.json().get("api_key"):
         print("   [INFO] provisioned a fresh ingestion key for this run (development mode).")

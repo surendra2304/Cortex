@@ -218,8 +218,23 @@ async def create_api_key(
     auth: dict = Depends(require_role(Role.CORTEX_ADMIN)),
     db: AsyncSession = Depends(get_db_session),
 ):
-    """Provision a public ingestion key. The plaintext value is returned exactly once."""
-    tenant_id = body.get("tenant_id") or auth.get("tenant_id")
+    """Provision a public ingestion key. The plaintext value is returned exactly once.
+
+    Tenant-bound (audit S5, fixed 2026-10-07): a tenant admin may only mint keys
+    for their own tenant — the tenant comes from the verified credential, and a
+    body-supplied tenant_id that disagrees is refused instead of honoured.
+    """
+    caller_tenant = auth.get("tenant_id")
+    requested_tenant = body.get("tenant_id") or caller_tenant
+    if requested_tenant != caller_tenant:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Cannot provision a key for tenant '{requested_tenant}': the authenticated "
+                f"principal belongs to tenant '{caller_tenant}'."
+            ),
+        )
+    tenant_id = caller_tenant
     site_id = body.get("site_id")
     name = body.get("name", "operator-issued")
     if not tenant_id or not site_id:
