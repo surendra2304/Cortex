@@ -1,3 +1,4 @@
+import cortex_api.main as main_module
 import pytest
 from cortex_api.landing_page import FALLBACK_WEBSITE_HTML
 from cortex_api.main import app
@@ -59,11 +60,29 @@ def test_spa_subpages_serve_html(client):
 def test_live_dashboard_has_no_demo_metrics_or_contacts(client):
     response = client.get("/")
     assert response.status_code == 200
-    assert "Saved leads" in response.text
-    assert "Recent activity" in response.text
     assert "48,900" not in response.text
     assert "director@enterprise" not in response.text
     assert "SaaSCo" not in response.text
+    if main_module._dashboard_index():
+        assert "Saved leads" in response.text
+        assert "Recent activity" in response.text
+    else:
+        # Source checkouts used by unit tests do not contain the ignored Next.js
+        # export. The fallback must say it is unconnected rather than imply
+        # live data is present.
+        assert "Runtime status is not connected on this page" in response.text
+
+
+def test_root_serves_exported_dashboard_when_configured(tmp_path, monkeypatch):
+    index = tmp_path / "index.html"
+    index.write_text("<html><body>Saved leads · Recent activity</body></html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "DASHBOARD_DIR", str(tmp_path))
+
+    response = TestClient(app).get("/")
+
+    assert response.status_code == 200
+    assert "Saved leads" in response.text
+    assert "Recent activity" in response.text
 
 
 def test_fallback_landing_page_renders():

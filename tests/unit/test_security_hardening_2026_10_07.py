@@ -62,28 +62,30 @@ def test_api_key_provisioning_is_tenant_bound(api_client):
 def _bypass_value(env: dict) -> str:
     """Evaluate the bypass decision in a clean subprocess (import-time logic)."""
     code = "from cortex_api.auth import DEV_AUTH_BYPASS; print(DEV_AUTH_BYPASS)"
-    full_env = {
-        "PATH": os.environ.get("PATH", ""),
-        "PYTHONPATH": os.pathsep.join(
-            [
-                os.path.abspath("apps/api/src"),
-                os.path.abspath("packages/core/src"),
-                os.path.abspath("packages/event_schema/src"),
-                os.path.abspath("packages/agents/src"),
-                os.path.abspath("packages/ai_universe_adapter/src"),
-                os.path.abspath("packages/tool_runtime/src"),
-                os.path.abspath("packages/integrations/src"),
-                os.path.abspath("packages/policy_engine/src"),
-                os.path.abspath("packages/identity/src"),
-                os.path.abspath("packages/analytics/src"),
-                os.path.abspath("packages/intelligence/src"),
-                os.path.abspath("packages/memory/src"),
-                os.path.abspath("packages/workflow_engine/src"),
-                os.path.abspath("cortex_upgrade"),
-            ]
-        ),
-        "APP_ENV": "development",
-    }
+    full_env = os.environ.copy()
+    # Preserve Windows' required system variables (SystemRoot, TEMP, etc.) so
+    # the child Python can initialize its standard-library networking modules.
+    # Remove this feature flag to make the default-off assertion deterministic.
+    full_env.pop("CORTEX_DEV_AUTH_BYPASS", None)
+    full_env["PYTHONPATH"] = os.pathsep.join(
+        [
+            os.path.abspath("apps/api/src"),
+            os.path.abspath("packages/core/src"),
+            os.path.abspath("packages/event_schema/src"),
+            os.path.abspath("packages/agents/src"),
+            os.path.abspath("packages/ai_universe_adapter/src"),
+            os.path.abspath("packages/tool_runtime/src"),
+            os.path.abspath("packages/integrations/src"),
+            os.path.abspath("packages/policy_engine/src"),
+            os.path.abspath("packages/identity/src"),
+            os.path.abspath("packages/analytics/src"),
+            os.path.abspath("packages/intelligence/src"),
+            os.path.abspath("packages/memory/src"),
+            os.path.abspath("packages/workflow_engine/src"),
+            os.path.abspath("cortex_upgrade"),
+        ]
+    )
+    full_env["APP_ENV"] = "development"
     full_env.update(env)
     out = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True, env=full_env, cwd=os.getcwd(), timeout=60

@@ -33,7 +33,7 @@ def _python_files():
 def test_no_naive_utc_calls_remain():
     offenders = []
     for path in _python_files():
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         for pattern in NAIVE_PATTERNS:
             for match in pattern.finditer(text):
                 line = text[: match.start()].count("\n") + 1
@@ -90,7 +90,7 @@ def test_attribution_normalises_naive_and_string_inputs():
 def test_source_has_no_naive_datetime_constructors_in_signatures():
     """A syntax-level check that imported modules really are clean."""
     for path in _python_files():
-        tree = ast.parse(path.read_text(), filename=str(path))
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                 if node.func.attr in {"utcnow", "utcfromtimestamp"}:

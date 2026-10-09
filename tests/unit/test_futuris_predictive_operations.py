@@ -2,7 +2,6 @@ import os
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
 for p in [
     "packages/core/src",
@@ -21,7 +20,6 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_api.main import app
 from cortex_integrations import FuturisClient
 from cortex_intelligence import PredictionInformedPersonalization
 from cortex_workflow_engine import CapacityPlanningWorkflow
@@ -83,8 +81,9 @@ async def test_capacity_planning_workflow_auto_scaling():
         assert plan.friday_notification_dispatched is True
 
 
-def test_futuris_predictive_api_endpoints():
-    client = TestClient(app)
+def test_futuris_predictive_api_endpoints(api_client):
+    # Exercise the routes against the isolated, schema-initialized test DB.
+    client = api_client
     headers = auth_headers()
 
     # Audit C4: forecasts expose tenant load and capacity plans — never anonymous.

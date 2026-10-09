@@ -13,7 +13,7 @@ These tests prove the new contract:
 from __future__ import annotations
 
 import asyncio
-import os
+from pathlib import Path
 
 from cortex_api import schema as schema_module
 
@@ -172,13 +172,15 @@ def test_schema_expected_tables_match_the_orm():
 
 
 def test_default_database_path_is_repo_relative(monkeypatch):
-    """A relative DATABASE_URL must resolve against the repository, not the CWD."""
+    """A relative SQLite DSN must resolve to an absolute path on every OS."""
     monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.delenv("POSTGRES_DSN", raising=False)
     monkeypatch.delenv("SQLITE_DSN", raising=False)
     resolved = schema_module.__file__ and __import__(
         "cortex_api.config", fromlist=["resolve_sqlite_dsn"]
     ).resolve_sqlite_dsn("sqlite+aiosqlite:///data/cortex.db")
-    assert resolved.startswith("sqlite+aiosqlite:////"), resolved
-    assert resolved.endswith("data/cortex.db")
-    assert os.getcwd() not in resolved.replace("//", "/").removesuffix(resolved.split("data/")[0]) or True
+    prefix = "sqlite+aiosqlite:///"
+    assert resolved.startswith(prefix), resolved
+    database_path = Path(resolved.removeprefix(prefix))
+    assert database_path.is_absolute(), resolved
+    assert database_path.parts[-2:] == ("data", "cortex.db"), resolved
