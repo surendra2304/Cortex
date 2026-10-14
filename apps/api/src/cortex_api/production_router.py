@@ -173,7 +173,7 @@ async def liveness_probe():
     """
     observed_at = datetime.now(UTC).isoformat()
     return {
-        "status": "UP",
+        "status": "ok",
         "service": "cortex",
         "evidence_class": "process_liveness",
         "observed_at": observed_at,

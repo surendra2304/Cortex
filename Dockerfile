@@ -52,10 +52,10 @@ ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PORT=8000
-ENV PYTHONPATH="/app:/app/apps/api/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src"
+ENV PYTHONPATH="/app:/app/apps/api/src:/app/apps/worker/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src:/app/packages/analytics/src:/app/packages/intelligence/src:/app/packages/memory/src"
 
 # Persistent data directory
-RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
+RUN mkdir -p /app/data && chown -R appuser:appuser /app
 
 # Copy application source
 COPY --chown=appuser:appuser packages/ ./packages/

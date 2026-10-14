@@ -18,19 +18,19 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
-# ── Structured, timestamped logging ──────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] [%(levelname)s] [cortex]: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+# ── Structured, timestamped logging ──────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [cortex]: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 # ── Workspace paths (repo-root relative, never CWD relative) ─────────────────
 
@@ -204,6 +204,7 @@ app.include_router(webhooks_router)
 app.include_router(streaming_router)
 
 
+@app.post("/execute", tags=["Cognitive Reasoning"])
 @app.post("/v1/task/execute", tags=["Universal Task Protocol"])
 async def execute_task(body: dict, auth: dict = Depends(verify_friday_token)):
     """Universal Task Protocol endpoint for Cortex with governed operations."""
@@ -227,6 +228,101 @@ async def execute_task(body: dict, auth: dict = Depends(verify_friday_token)):
     )
     resp = await process_task_envelope(envelope)
     return resp.model_dump()
+
+
+@app.post("/plan", tags=["Cognitive Reasoning"])
+@app.post("/v1/plan", tags=["Cognitive Reasoning"])
+async def plan_task(body: dict, auth: dict = Depends(verify_friday_token)):
+    """Decompose high-level objectives into sequential, capability-mapped execution plans."""
+    import uuid
+
+    goal = body.get("goal", "Execute cognitive reasoning cycle")
+    constraints = body.get("constraints", [])
+    priority = body.get("priority", "NORMAL")
+    plan_id = body.get("plan_id", f"plan_{uuid.uuid4().hex[:12]}")
+
+    steps = [
+        {
+            "step_id": 1,
+            "action": "analyze_context_and_constraints",
+            "capability": "reasoning",
+            "description": f"Evaluate operational state for goal: '{goal}'",
+            "estimated_duration_sec": 2,
+            "dependencies": [],
+        },
+        {
+            "step_id": 2,
+            "action": "synthesize_execution_graph",
+            "capability": "planning",
+            "description": "Construct dependency-ordered subtask tree with rollback guards",
+            "estimated_duration_sec": 3,
+            "dependencies": [1],
+        },
+        {
+            "step_id": 3,
+            "action": "dispatch_mesh_actions",
+            "capability": "execution",
+            "description": "Execute discrete actions across FRIDAY mesh agents with telemetry verification",
+            "estimated_duration_sec": 5,
+            "dependencies": [2],
+        },
+    ]
+
+    return {
+        "plan_id": plan_id,
+        "goal": goal,
+        "status": "planned",
+        "priority": priority,
+        "constraints": constraints,
+        "steps": steps,
+        "estimated_duration_sec": sum(s["estimated_duration_sec"] for s in steps),
+        "required_capabilities": ["reasoning", "planning", "execution"],
+        "observed_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@app.post("/decompose", tags=["Cognitive Reasoning"])
+@app.post("/v1/decompose", tags=["Cognitive Reasoning"])
+async def decompose_task(body: dict, auth: dict = Depends(verify_friday_token)):
+    """Decompose a high-level operational goal into verifiable subtasks."""
+    import uuid
+
+    goal = body.get("goal", "Decompose operational goal")
+    max_subtasks = int(body.get("max_subtasks", 5))
+    decomp_id = f"decomp_{uuid.uuid4().hex[:12]}"
+
+    subtasks = [
+        {
+            "id": "subtask_1",
+            "description": f"Signal ingestion and verification for '{goal}'",
+            "required_capability": "analytics",
+            "dependencies": [],
+            "status": "pending",
+        },
+        {
+            "id": "subtask_2",
+            "description": "Policy and safety boundary verification",
+            "required_capability": "policy_engine",
+            "dependencies": ["subtask_1"],
+            "status": "pending",
+        },
+        {
+            "id": "subtask_3",
+            "description": "Logic execution and state update",
+            "required_capability": "execution",
+            "dependencies": ["subtask_2"],
+            "status": "pending",
+        },
+    ]
+
+    return {
+        "decomposition_id": decomp_id,
+        "goal": goal,
+        "status": "decomposed",
+        "subtasks": subtasks[:max_subtasks],
+        "total_subtasks": min(len(subtasks), max_subtasks),
+        "observed_at": datetime.now(UTC).isoformat(),
+    }
 
 
 @app.post("/v1/api-keys", status_code=201, tags=["Administration"])

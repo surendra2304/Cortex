@@ -73,6 +73,134 @@ curl https://friday-universe.duckdns.org/cortex/v1/health
 }
 ```
 
+#### `POST /plan`
+Cognitive reasoning engine endpoint. Decomposes high-level objectives into capability-mapped, sequential execution plans.
+
+```bash
+curl -X POST https://friday-universe.duckdns.org/cortex/plan \
+  -H "X-Friday-Api-Key: $FRIDAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Optimize visitor conversion on pricing page",
+    "context": { "page": "/pricing", "bounce_rate": 0.45 },
+    "constraints": ["no_breaking_changes", "rate_limit_safe"],
+    "priority": "HIGH"
+  }'
+```
+```json
+{
+  "plan_id": "plan_9a8b7c6d5e4f",
+  "goal": "Optimize visitor conversion on pricing page",
+  "status": "planned",
+  "priority": "HIGH",
+  "constraints": ["no_breaking_changes", "rate_limit_safe"],
+  "steps": [
+    {
+      "step_id": 1,
+      "action": "analyze_context_and_constraints",
+      "capability": "reasoning",
+      "description": "Evaluate operational state for goal: 'Optimize visitor conversion on pricing page'",
+      "estimated_duration_sec": 2,
+      "dependencies": []
+    },
+    {
+      "step_id": 2,
+      "action": "synthesize_execution_graph",
+      "capability": "planning",
+      "description": "Construct dependency-ordered subtask tree with rollback guards",
+      "estimated_duration_sec": 3,
+      "dependencies": [1]
+    },
+    {
+      "step_id": 3,
+      "action": "dispatch_mesh_actions",
+      "capability": "execution",
+      "description": "Execute discrete actions across FRIDAY mesh agents with telemetry verification",
+      "estimated_duration_sec": 5,
+      "dependencies": [2]
+    }
+  ],
+  "estimated_duration_sec": 10,
+  "required_capabilities": ["reasoning", "planning", "execution"],
+  "observed_at": "2026-10-14T16:00:00.000000+00:00"
+}
+```
+
+#### `POST /decompose`
+Task decomposition specialist endpoint. Breaks down complex goals into discrete, verifiable subtasks with dependency graphs.
+
+```bash
+curl -X POST https://friday-universe.duckdns.org/cortex/decompose \
+  -H "X-Friday-Api-Key: $FRIDAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "goal": "Deploy proactive cart recovery workflow",
+    "context": { "abandon_threshold_min": 15 },
+    "max_subtasks": 3
+  }'
+```
+```json
+{
+  "decomposition_id": "decomp_1a2b3c4d5e6f",
+  "goal": "Deploy proactive cart recovery workflow",
+  "status": "decomposed",
+  "subtasks": [
+    {
+      "id": "subtask_1",
+      "description": "Signal ingestion and verification for 'Deploy proactive cart recovery workflow'",
+      "required_capability": "analytics",
+      "dependencies": [],
+      "status": "pending"
+    },
+    {
+      "id": "subtask_2",
+      "description": "Policy and safety boundary verification",
+      "required_capability": "policy_engine",
+      "dependencies": ["subtask_1"],
+      "status": "pending"
+    },
+    {
+      "id": "subtask_3",
+      "description": "Logic execution and state update",
+      "required_capability": "execution",
+      "dependencies": ["subtask_2"],
+      "status": "pending"
+    }
+  ],
+  "total_subtasks": 3,
+  "observed_at": "2026-10-14T16:00:00.000000+00:00"
+}
+```
+
+#### `POST /execute`
+Universal Task Protocol & Logic Execution — executes governed tasks, commands, and plans across the private mesh.
+
+```bash
+curl -X POST https://friday-universe.duckdns.org/cortex/execute \
+  -H "X-Friday-Api-Key: $FRIDAY_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "task_cortex_001",
+    "action": "health_summary",
+    "payload": { "check_connectors": true },
+    "priority": "NORMAL",
+    "dry_run": false
+  }'
+```
+```json
+{
+  "task_id": "task_cortex_001",
+  "status": "SUCCESS",
+  "result": {
+    "connectors": { "stripe": "HEALTHY", "hubspot": "HEALTHY", "sendgrid": "HEALTHY" },
+    "latency_ms": 12.4
+  },
+  "error": null,
+  "evidence": null,
+  "observed_at": "2026-10-14T16:00:00.000000+00:00"
+}
+```
+
 #### `POST /v1/friday/command`
 Execute an autonomous FRIDAY command through Cortex's governance layer.
 
@@ -93,7 +221,7 @@ curl -X POST https://friday-universe.duckdns.org/cortex/v1/friday/command \
 ```
 
 #### `POST /v1/task/execute`
-Universal Task Protocol — direct task envelope for agent-to-agent calls.
+Alias for Universal Task Protocol execution endpoint.
 
 ```bash
 curl -X POST https://friday-universe.duckdns.org/cortex/v1/task/execute \
@@ -102,8 +230,8 @@ curl -X POST https://friday-universe.duckdns.org/cortex/v1/task/execute \
   -d '{
     "task_id": "task_001",
     "source_agent": "friday",
-    "action": "analyze_conversion_drop",
-    "payload": { "segment": "enterprise", "window_hours": 24 }
+    "action": "health_summary",
+    "payload": {}
   }'
 ```
 

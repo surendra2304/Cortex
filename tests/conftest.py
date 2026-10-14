@@ -7,15 +7,14 @@ schema, constraints, idempotency and tenant scoping are exercised end to end.
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
+
+os.environ["APP_ENV"] = "development"
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
-
-import os
-
-os.environ["APP_ENV"] = "development"
 
 # ── Workspace path bootstrap (CWD independent) ───────────────────────────────
 _root_dir = Path(__file__).resolve().parent.parent

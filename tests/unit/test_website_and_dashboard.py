@@ -33,7 +33,7 @@ def test_health_endpoints_always_return_json(client):
     res1 = client.get("/health")
     assert res1.status_code == 200
     assert res1.headers.get("content-type", "").startswith("application/json")
-    assert res1.json().get("status") in ("healthy", "UP")
+    assert res1.json().get("status") in ("ok", "healthy", "UP")
 
     res2 = client.get("/v1/health")
     assert res2.status_code == 200

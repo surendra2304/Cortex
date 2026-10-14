@@ -48,7 +48,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Build Docker Image
-        run: docker build -t cortex:ci .
+        run: docker build -t cortex .
 
   typescript-build:
     name: TypeScript SDK & Dashboard Build
