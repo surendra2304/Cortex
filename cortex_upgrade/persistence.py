@@ -46,6 +46,8 @@ class DurableStore:
     @contextmanager
     def _connect(self):
         conn = sqlite3.connect(self.path, timeout=15, check_same_thread=False)
+        conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA busy_timeout=5000;")
         try:
             with conn:
                 yield conn

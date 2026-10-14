@@ -17,11 +17,14 @@ import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -160,6 +163,12 @@ async def lifespan(app: FastAPI):
 
                     set_healing_loop(None)
                 await close_resources()
+                try:
+                    from cortex_integrations.peer_transport import close_shared_client
+
+                    await close_shared_client()
+                except Exception:
+                    pass
 
             await asyncio.wait_for(_cleanup(), timeout=5.0)
             logger.info("Graceful shutdown completed within 5s")
@@ -190,6 +199,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+# ── Standardized Error Handlers ──────────────────────────────────────────────
+@app.exception_handler(HTTPException)
+async def custom_http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "error": f"HTTP_{exc.status_code}",
+            "message": str(exc.detail),
+            "detail": exc.detail,
+            "success": False,
+        },
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def custom_validation_exception_handler(request: Request, exc: RequestValidationError):
+    errors = exc.errors()
+    msg = errors[0].get("msg") if errors else "Validation Error"
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": "VALIDATION_ERROR",
+            "message": f"Invalid request parameters: {msg}",
+            "detail": errors,
+            "success": False,
+        },
+    )
+
+
 # ── Router registration order matters ────────────────────────────────────────
 # Specific paths must be registered before catch-all/parameterised paths so that
 # e.g. POST /v1/webhooks/stripe reaches the signature-verifying handler instead
@@ -202,6 +242,38 @@ app.include_router(understand_router)
 app.include_router(production_router)
 app.include_router(webhooks_router)
 app.include_router(streaming_router)
+
+
+# ── Pydantic Schemas for Cognitive Reasoning ─────────────────────────────────
+class CognitivePlanStep(BaseModel):
+    step_id: int
+    action: str
+    capability: str
+    description: str
+    estimated_duration_sec: int
+    dependencies: list[int] = Field(default_factory=list)
+
+
+class CognitivePlanRequest(BaseModel):
+    goal: str = Field(..., description="High-level operational goal to plan")
+    context: dict[str, Any] = Field(default_factory=dict)
+    constraints: list[str] = Field(default_factory=list)
+    priority: str = "NORMAL"
+    plan_id: str | None = None
+
+
+class SubtaskItem(BaseModel):
+    id: str
+    description: str
+    required_capability: str
+    dependencies: list[str] = Field(default_factory=list)
+    status: str = "pending"
+
+
+class TaskDecompositionRequest(BaseModel):
+    goal: str = Field(..., description="High-level goal to decompose")
+    context: dict[str, Any] = Field(default_factory=dict)
+    max_subtasks: int = Field(default=5, ge=1, le=20)
 
 
 @app.post("/execute", tags=["Cognitive Reasoning"])
@@ -232,14 +304,15 @@ async def execute_task(body: dict, auth: dict = Depends(verify_friday_token)):
 
 @app.post("/plan", tags=["Cognitive Reasoning"])
 @app.post("/v1/plan", tags=["Cognitive Reasoning"])
-async def plan_task(body: dict, auth: dict = Depends(verify_friday_token)):
+async def plan_task(body: CognitivePlanRequest, auth: dict = Depends(verify_friday_token)):
     """Decompose high-level objectives into sequential, capability-mapped execution plans."""
     import uuid
 
-    goal = body.get("goal", "Execute cognitive reasoning cycle")
-    constraints = body.get("constraints", [])
-    priority = body.get("priority", "NORMAL")
-    plan_id = body.get("plan_id", f"plan_{uuid.uuid4().hex[:12]}")
+    payload = body.model_dump()
+    goal = payload.get("goal") or "Execute cognitive reasoning cycle"
+    constraints = payload.get("constraints", [])
+    priority = payload.get("priority", "NORMAL")
+    plan_id = payload.get("plan_id") or f"plan_{uuid.uuid4().hex[:12]}"
 
     steps = [
         {
@@ -283,12 +356,13 @@ async def plan_task(body: dict, auth: dict = Depends(verify_friday_token)):
 
 @app.post("/decompose", tags=["Cognitive Reasoning"])
 @app.post("/v1/decompose", tags=["Cognitive Reasoning"])
-async def decompose_task(body: dict, auth: dict = Depends(verify_friday_token)):
+async def decompose_task(body: TaskDecompositionRequest, auth: dict = Depends(verify_friday_token)):
     """Decompose a high-level operational goal into verifiable subtasks."""
     import uuid
 
-    goal = body.get("goal", "Decompose operational goal")
-    max_subtasks = int(body.get("max_subtasks", 5))
+    payload = body.model_dump()
+    goal = payload.get("goal") or "Decompose operational goal"
+    max_subtasks = int(payload.get("max_subtasks", 5))
     decomp_id = f"decomp_{uuid.uuid4().hex[:12]}"
 
     subtasks = [
@@ -476,7 +550,24 @@ async def dashboard_redirect():
 @app.get("/{file_name:path}", include_in_schema=False)
 async def serve_static_or_spa(request: Request, file_name: str):
     """Serve static files, exported Next.js subpages, or SPA fallbacks."""
-    if file_name.startswith(("v1", "api", "docs", "redoc", "openapi.json", "health", "metrics", "ws", "_next")):
+    if file_name.startswith(
+        (
+            "v1",
+            "api",
+            "docs",
+            "redoc",
+            "openapi.json",
+            "health",
+            "ready",
+            "status",
+            "plan",
+            "decompose",
+            "execute",
+            "metrics",
+            "ws",
+            "_next",
+        )
+    ):
         raise HTTPException(status_code=404, detail="Not Found")
 
     resolved = _safe_dashboard_path(file_name)

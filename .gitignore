@@ -42,3 +42,4 @@ workspaces/
 peer_mesh_cortex_results.json
 ask_inference_from_cortex.py
 .env.production
+.agents/

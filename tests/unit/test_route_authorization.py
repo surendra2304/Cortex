@@ -30,6 +30,11 @@ CREDENTIAL_IN_HANDLER = {
     ("GET", "/health"),
     ("HEAD", "/health"),
     ("GET", "/health/ready"),
+    ("HEAD", "/health/ready"),
+    ("GET", "/ready"),
+    ("HEAD", "/ready"),
+    ("GET", "/status"),
+    ("HEAD", "/status"),
     ("GET", "/metrics"),  # optional METRICS_TOKEN enforced in-handler
     ("POST", "/v1/events"),  # X-Cortex-Public-Key
     ("POST", "/v1/events/batch"),  # X-Cortex-Public-Key

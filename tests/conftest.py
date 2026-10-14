@@ -84,6 +84,15 @@ def sqlite_engine(tmp_path):
         poolclass=NullPool,
     )
 
+    from sqlalchemy import event as _sa_event
+
+    @_sa_event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_test_wal(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
     async def _create() -> None:
         async with engine.begin() as connection:
             await connection.run_sync(Base.metadata.create_all)

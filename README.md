@@ -8,21 +8,25 @@
 
 ---
 
-## Topology
+## Topology & Architecture
 
-```
-Internet
-  │
-  ▼
-Caddy Reverse Proxy (HTTPS, friday-universe.duckdns.org)
-  │
-  ├──/cortex/*──► Cortex  (http://cortex:8000,  host 8001)
-  ├──/friday/*──► FRIDAY  (http://friday:10000, host 10000)
-  ├──/memora/*──► Memora  (http://memora:8000,  host 8002)
-  └──/* ...other agents in friday_mesh ...
+```mermaid
+flowchart TD
+    Client[External Client / Web Browser] -->|HTTPS| Caddy[Caddy Reverse Proxy<br/>friday-universe.duckdns.org]
+    Caddy -->|/cortex/*| Cortex[Cortex Agent :8000<br/>Host: 8001]
+    Caddy -->|/friday/*| Friday[FRIDAY Core :10000]
+    Caddy -->|/memora/*| Memora[Memora Memory :8000]
+
+    subgraph friday_mesh [Docker Network: friday_mesh]
+        Cortex <-->|Universal Task Protocol<br/>Async Connection Pool| Friday
+        Cortex <-->|Episodic Memory & Events<br/>Circuit Breaker| Memora
+        Cortex <-->|Peer Transport & Forecasts<br/>Exponential Backoff| Peers[IntelX / Futuris / Sentinel]
+        Cortex --> Cache[Thread-Safe TTL / LRU Cache]
+        Cortex --> SQLite[(SQLite Engine<br/>WAL Mode & 5000ms timeout)]
+    end
 ```
 
-All inter-agent calls use Docker internal DNS — `http://friday:10000`, `http://memora:8000`, etc. No public URLs are used inside the mesh.
+All inter-agent calls use Docker internal DNS (`http://friday:10000`, `http://memora:8000`, etc.) within the private `friday_mesh` network. Public URLs are strictly prohibited inside the mesh.
 
 ---
 
@@ -30,31 +34,69 @@ All inter-agent calls use Docker internal DNS — `http://friday:10000`, `http:/
 
 ### Authentication
 
-All operator endpoints require a JWT Bearer token or the `X-Cortex-Api-Key` header.  
-Public ingestion endpoints accept a provisioned site API key.
+All operator endpoints require a JWT Bearer token or the `X-Cortex-Api-Key` / `X-Friday-Api-Key` header.  
+Public ingestion endpoints accept a provisioned site API key (`X-Api-Key`).
 
-### Core Endpoints
+### Standardized Error Envelope
+
+All API errors return a consistent, structured envelope:
+
+```json
+{
+  "error": "HTTP_400_BAD_REQUEST",
+  "message": "Field 'goal' is required",
+  "detail": "Field 'goal' is required",
+  "success": false
+}
+```
+
+### Core Probes & Diagnostics
 
 #### `GET /health`
-Liveness probe. Used by Docker HEALTHCHECK and the Caddy gateway.
+Liveness probe. Used by Docker `HEALTHCHECK` and edge reverse proxies.
 
 ```bash
 curl https://friday-universe.duckdns.org/cortex/health
 ```
 ```json
 {
-  "status": "ok",
+  "status": "healthy",
   "service": "cortex",
+  "version": "2.1.0",
   "evidence_class": "process_liveness",
   "observed_at": "2026-10-14T16:00:00.000000+00:00"
 }
 ```
 
-#### `GET /health/ready`
-Readiness probe. Checks Redis and database connectivity.
+#### `GET /ready` (or `GET /health/ready`)
+Readiness probe. Verifies database connectivity and essential dependency health.
 
 ```bash
-curl https://friday-universe.duckdns.org/cortex/health/ready
+curl https://friday-universe.duckdns.org/cortex/ready
+```
+```json
+{
+  "status": "ready",
+  "service": "cortex",
+  "database": "connected",
+  "observed_at": "2026-10-14T16:00:00.000000+00:00"
+}
+```
+
+#### `GET /status`
+Operational state and telemetry diagnostic probe.
+
+```bash
+curl https://friday-universe.duckdns.org/cortex/status
+```
+```json
+{
+  "status": "operational",
+  "service": "cortex",
+  "version": "2.1.0",
+  "uptime_seconds": 3600.5,
+  "observed_at": "2026-10-14T16:00:00.000000+00:00"
+}
 ```
 
 #### `GET /v1/health`
@@ -362,6 +404,8 @@ Cortex/
 
 - **No Render.com**: Fully migrated to Oracle Cloud Always Free. All `*.onrender.com` URLs are permanently removed.
 - **Internal mesh only**: Agent-to-agent calls use Docker DNS (`http://service:port`), never public internet routes.
-- **SQLite default**: Ideal for Oracle's free tier. Switch to `POSTGRES_DSN=postgresql+asyncpg://...` for high-write workloads.
-- **Non-root container**: Runs as `appuser` (UID 1000) for security hardening.
+- **SQLite WAL Mode**: Enforces `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=5000;` on all database connections for concurrent non-blocking reads/writes. Switch to `POSTGRES_DSN=postgresql+asyncpg://...` for high-write multi-node clusters.
+- **Async Connection Pooling & Circuit Breakers**: All outbound inter-agent calls (`FRIDAY Core`, `Memora`, `IntelX`, `Futuris`, `Sentinel`) utilize pooled `httpx.AsyncClient` instances with bounded timeouts, circuit breakers, and exponential backoff with jitter.
+- **In-Memory TTL & LRU Caching**: Thread-safe bounded cache stores repeated expensive operations and state checks to minimize compute overhead on 2 OCPU instances.
+- **Non-root container**: Runs as `appuser` (UID 1000) on `python:3.11-slim` with `PORT=8000` default.
 - **Tini init**: Proper signal propagation ensures clean `SIGTERM` shutdown within 5 seconds.

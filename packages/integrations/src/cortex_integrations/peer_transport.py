@@ -27,6 +27,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Any
 
+import httpx
+
 logger = logging.getLogger("cortex-integrations.peer-transport")
 
 DEFAULT_TIMEOUT_SECONDS = 15.0
@@ -68,8 +70,38 @@ def peer_api_key(name: str, fallback: str = "") -> str:
     )
 
 
+_SHARED_CLIENT: httpx.AsyncClient | None = None
+_CIRCUITS: dict[str, Any] = {}
+
+
+def get_shared_client(timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> httpx.AsyncClient:
+    """Return a shared connection-pooled AsyncClient for all peer outbound requests."""
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is None or _SHARED_CLIENT.is_closed:
+        limits = httpx.Limits(max_keepalive_connections=20, max_connections=50, keepalive_expiry=30.0)
+        _SHARED_CLIENT = httpx.AsyncClient(timeout=timeout_seconds, limits=limits)
+    return _SHARED_CLIENT
+
+
+async def close_shared_client() -> None:
+    """Close the shared AsyncClient connection pool gracefully on shutdown."""
+    global _SHARED_CLIENT
+    if _SHARED_CLIENT is not None and not _SHARED_CLIENT.is_closed:
+        await _SHARED_CLIENT.aclose()
+        _SHARED_CLIENT = None
+
+
+def get_circuit_for_peer(name: str):
+    """Retrieve or initialize the circuit breaker for a given peer service."""
+    if name not in _CIRCUITS:
+        from cortex_core.resilience import SubsystemCircuit
+
+        _CIRCUITS[name] = SubsystemCircuit(name=f"peer_{name}", failure_threshold=3, recovery_timeout_seconds=15.0)
+    return _CIRCUITS[name]
+
+
 class PeerTransport:
-    """Small async JSON client with retry and explicit failure reporting."""
+    """Small async JSON client with connection pooling, circuit breaker, retry and explicit failure reporting."""
 
     def __init__(
         self, name: str, base_url: str | None = None, api_key: str | None = None, timeout_seconds: float | None = None
@@ -104,7 +136,13 @@ class PeerTransport:
         if not self.configured:
             return PeerResponse(ok=False, error=f"{self.name} base URL is not configured", url=path)
 
-        import httpx
+        circuit = get_circuit_for_peer(self.name)
+        if not await circuit.before():
+            return PeerResponse(
+                ok=False,
+                error=f"Circuit breaker OPEN for {self.name}; failing fast to protect latency",
+                url=path,
+            )
 
         url = f"{self.base_url}{path}"
         attempts = 0
@@ -112,13 +150,14 @@ class PeerTransport:
         last_status: int | None = None
         last_body: dict[str, Any] = {}
 
+        client = get_shared_client(self.timeout_seconds)
+
         while attempts <= retries:
             attempts += 1
             try:
-                async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
-                    response = await client.request(
-                        method.upper(), url, json=payload, params=params, headers=self.headers(headers)
-                    )
+                response = await client.request(
+                    method.upper(), url, json=payload, params=params, headers=self.headers(headers)
+                )
                 body: dict[str, Any] = {}
                 try:
                     parsed = response.json()
@@ -130,6 +169,7 @@ class PeerTransport:
                     body = {"_text": response.text[:500]}
 
                 if response.status_code < 400:
+                    await circuit.record_success()
                     return PeerResponse(
                         ok=True, status_code=response.status_code, body=body, attempts=attempts, url=url
                     )
@@ -146,11 +186,17 @@ class PeerTransport:
                         attempts=attempts,
                         url=url,
                     )
+                await circuit.record_failure()
                 last_error = f"peer returned {response.status_code}"
             except Exception as exc:  # noqa: BLE001 - transport errors are expected states here
+                await circuit.record_failure()
                 last_error = f"{type(exc).__name__}: {exc}"
+
             if attempts <= retries:
-                await asyncio.sleep(0.25 * attempts)
+                import random
+
+                delay = (0.2 * (2 ** (attempts - 1))) + random.uniform(0.01, 0.05)
+                await asyncio.sleep(delay)
 
         return PeerResponse(
             ok=False,

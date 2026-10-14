@@ -2,6 +2,7 @@ import hashlib
 import hmac
 import json
 import logging
+import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
@@ -164,6 +165,9 @@ async def prometheus_metrics(
 # ── 2. HEALTH & READINESS PROBES ─────────────────────────────────────────────
 
 
+_START_TIME = time.time()
+
+
 @router.api_route("/health", methods=["GET", "HEAD"])
 async def liveness_probe():
     """Liveness probe: verifies the process is alive and answering requests.
@@ -173,14 +177,30 @@ async def liveness_probe():
     """
     observed_at = datetime.now(UTC).isoformat()
     return {
-        "status": "ok",
+        "status": "healthy",
         "service": "cortex",
+        "version": "2.1.0",
         "evidence_class": "process_liveness",
         "observed_at": observed_at,
         "timestamp": observed_at,
     }
 
 
+@router.api_route("/status", methods=["GET", "HEAD"])
+async def status_probe():
+    """Diagnostic status reporting uptime, service health, and request performance."""
+    uptime = time.time() - _START_TIME
+    return {
+        "status": "operational",
+        "service": "cortex",
+        "version": "2.1.0",
+        "uptime_seconds": round(uptime, 2),
+        "environment": settings.app_env,
+        "observed_at": datetime.now(UTC).isoformat(),
+    }
+
+
+@router.api_route("/ready", methods=["GET", "HEAD"])
 @router.api_route("/health/ready", methods=["GET", "HEAD"])
 async def readiness_probe(
     db: AsyncSession = Depends(get_db_session), redis_client: aioredis.Redis = Depends(get_redis_client)
@@ -242,6 +262,7 @@ async def readiness_probe(
         content=json.dumps(
             {
                 "status": "READY" if required_ok else "NOT_READY",
+                "service": "cortex",
                 "evidence_class": "dependency_readiness",
                 "observed_at": datetime.now(UTC).isoformat(),
                 "required_dependencies": list(required),

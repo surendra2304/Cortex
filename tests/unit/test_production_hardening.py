@@ -29,7 +29,7 @@ def test_liveness_probe():
     client = TestClient(app)
     res = client.get("/health")
     assert res.status_code == 200
-    assert res.json()["status"] in ("ok", "UP")
+    assert res.json()["status"] in ("ok", "UP", "healthy")
     # Evidence contract: a liveness answer must say what it proves and when.
     assert res.json()["evidence_class"] == "process_liveness"
     assert res.json()["observed_at"]

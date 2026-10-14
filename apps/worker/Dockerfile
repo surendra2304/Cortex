@@ -15,18 +15,22 @@ RUN pip install --no-cache-dir --user .
 # Runtime image
 FROM python:3.11-slim AS runner
 
+RUN useradd -m -u 1000 appuser
+
 WORKDIR /app
 
 ENV PYTHONUNBUFFERED=1 \
-    PATH="/root/.local/bin:$PATH" \
+    PATH="/home/appuser/.local/bin:$PATH" \
     PYTHONPATH="/app:/app/apps/api/src:/app/apps/worker/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src:/app/packages/analytics/src:/app/packages/intelligence/src:/app/packages/memory/src"
 
-COPY --from=builder /root/.local /root/.local
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
-COPY pyproject.toml .
-COPY packages/ ./packages/
-COPY apps/ ./apps/
-COPY infra/ ./infra/
-COPY cortex_upgrade/ ./cortex_upgrade/
+COPY --chown=appuser:appuser pyproject.toml .
+COPY --chown=appuser:appuser packages/ ./packages/
+COPY --chown=appuser:appuser apps/ ./apps/
+COPY --chown=appuser:appuser infra/ ./infra/
+COPY --chown=appuser:appuser cortex_upgrade/ ./cortex_upgrade/
+
+USER appuser
 
 CMD ["python", "-m", "cortex_worker.main"]

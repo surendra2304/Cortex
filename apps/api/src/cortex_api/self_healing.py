@@ -39,6 +39,26 @@ EXPECTED_AGENT_IDS = (
 )
 
 
+async def probe_ai_universe() -> bool:
+    """Non-blocking DNS and reachability check for the AI Universe backend."""
+    import asyncio
+    import urllib.parse
+
+    url = os.getenv("AI_UNIVERSE_BASE_URL", "") or ""
+    if not url:
+        return False
+
+    host = urllib.parse.urlparse(url).hostname
+    if not host:
+        return False
+    try:
+        loop = asyncio.get_running_loop()
+        await loop.getaddrinfo(host, None)
+        return True
+    except OSError:
+        return False
+
+
 def build_supervisor(registry: Any, max_collaboration_rounds: int = 3) -> SelfHealingSupervisor:
     """Register probes + repairs for every subsystem CORTEX can heal itself."""
     health = global_health_registry
@@ -96,28 +116,6 @@ def build_supervisor(registry: Any, max_collaboration_rounds: int = 3) -> SelfHe
         return True
 
     # ── ai universe (external, degrade gracefully) ──────────────────────────
-    async def probe_ai_universe() -> bool:
-        import os
-
-        url = os.getenv("AI_UNIVERSE_BASE_URL", "") or ""
-        if not url:
-            # No provider configured is "not healthy" but never fatal: the deterministic
-            # fallback is the supported mode.
-            return False
-        import urllib.parse
-        import urllib.request
-
-        host = urllib.parse.urlparse(url).hostname
-        if not host:
-            return False
-        try:
-            import socket
-
-            socket.getaddrinfo(host, None)
-            return True
-        except OSError:
-            return False
-
     async def repair_ai_universe() -> bool:
         """Degrade gracefully: the deterministic fallback keeps deliberations working.
 
