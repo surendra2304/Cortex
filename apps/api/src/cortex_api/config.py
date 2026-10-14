@@ -54,9 +54,12 @@ def resolve_sqlite_dsn(dsn: str) -> str:
     if not dsn.startswith("sqlite"):
         return dsn
     head, sep, tail = dsn.partition("///")
-    if not sep or not tail or tail.startswith("/") or tail.startswith(":memory:"):
+    if not sep or not tail or tail.startswith(":memory:"):
         return dsn
-    resolved = (_workspace_root() / tail).resolve()
+    if tail.startswith("/") or (len(tail) > 2 and tail[1] == ":"):
+        resolved = Path(tail).resolve()
+    else:
+        resolved = (_workspace_root() / tail).resolve()
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
     except OSError as exc:  # pragma: no cover - permission problems surface later with context

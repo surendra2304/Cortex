@@ -19,8 +19,17 @@ from pathlib import Path
 
 
 def workspace_root() -> Path:
-    """Repository root (the parent directory of the ``cortex_upgrade`` package)."""
-    return Path(__file__).resolve().parent.parent
+    """Repository root (ensuring fallback to actual repo directory even when installed)."""
+    cwd = Path.cwd().resolve()
+    if (cwd / "Dockerfile").is_file() or (cwd / "pyproject.toml").is_file():
+        return cwd
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "Dockerfile").is_file() and (parent / "cortex_upgrade").is_dir():
+            return parent
+    pkg_parent = Path(__file__).resolve().parent.parent
+    if (pkg_parent / "Dockerfile").is_file():
+        return pkg_parent
+    return cwd
 
 
 def _source_roots(root: Path) -> list[Path]:
