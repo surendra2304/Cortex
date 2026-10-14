@@ -10,12 +10,20 @@ Responsibilities
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
+
+# ── Structured, timestamped logging ──────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(asctime)s] [%(levelname)s] [cortex]: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -82,8 +90,8 @@ BOOTSTRAP_KEY_SITE = os.getenv("CORTEX_BOOTSTRAP_SITE", "site_demo")
 async def _bootstrap_development_key() -> None:
     """Create a first public key in non-production so the SDK works out of the box.
 
-    Never runs in production (``app_env == "production"`` or ``RENDER`` set) and
-    only when the key table is empty.  The plaintext key is logged exactly once.
+    Never runs in production (``app_env == "production"``) and only when the
+    key table is empty.  The plaintext key is logged exactly once.
     """
     if settings.app_env == "production" or not settings.bootstrap_dev_api_key:
         return
@@ -144,12 +152,21 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
-        if healing_loop is not None:
-            await healing_loop.stop()
-            from cortex_api.friday_router import set_healing_loop
+        try:
+            async def _cleanup():
+                if healing_loop is not None:
+                    await healing_loop.stop()
+                    from cortex_api.friday_router import set_healing_loop
 
-            set_healing_loop(None)
-        await close_resources()
+                    set_healing_loop(None)
+                await close_resources()
+
+            await asyncio.wait_for(_cleanup(), timeout=5.0)
+            logger.info("Graceful shutdown completed within 5s")
+        except TimeoutError:
+            logger.warning("Shutdown cleanup exceeded 5-second deadline; forcing termination")
+        except Exception as exc:
+            logger.error("Error during shutdown cleanup: %s", exc)
 
 
 app = FastAPI(
@@ -281,11 +298,10 @@ async def health_check():
     observed_at = datetime.now(UTC).isoformat()
     return {
         "status": "healthy",
+        "service": "cortex",
         "evidence_class": "process_liveness",
         "observed_at": observed_at,
-        "service": settings.app_name,
         "environment": settings.app_env,
-        "timestamp": observed_at,
     }
 
 
@@ -387,4 +403,10 @@ async def serve_static_or_spa(request: Request, file_name: str):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("cortex_api.main:app", host=settings.host, port=settings.port, reload=settings.debug)
+    uvicorn.run(
+        "cortex_api.main:app",
+        host=settings.host,
+        port=settings.port,
+        reload=settings.debug,
+        timeout_graceful_shutdown=5,
+    )

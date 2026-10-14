@@ -13,6 +13,10 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+import os
+
+os.environ["APP_ENV"] = "development"
+
 # ── Workspace path bootstrap (CWD independent) ───────────────────────────────
 _root_dir = Path(__file__).resolve().parent.parent
 from cortex_upgrade.paths import ensure_workspace_paths  # noqa: E402
@@ -20,7 +24,9 @@ from cortex_upgrade.paths import ensure_workspace_paths  # noqa: E402
 ensure_workspace_paths(_root_dir)
 
 from cortex_api.api_keys import generate_api_key, hash_api_key  # noqa: E402
-from cortex_api.config import Base, get_db_session, get_redis_client  # noqa: E402
+from cortex_api.config import Base, get_db_session, get_redis_client, settings  # noqa: E402
+
+settings.app_env = "development"
 from cortex_api.db_models import ApiKeyModel  # noqa: E402
 from cortex_api.main import app  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402

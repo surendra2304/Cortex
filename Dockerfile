@@ -1,53 +1,78 @@
-# Build the browser workspace inside the image. The checked-in export is ignored
-# by .dockerignore so Render and CI must produce it from the dashboard source.
+# ─────────────────────────────────────────────────────────────────────────────
+# CORTEX — Production Dockerfile
+# Oracle Cloud Always Free (ARM64 / amd64 compatible)
+# Internal port: 8000 | Host port: 8001 | Mesh: friday_mesh
+# Gateway: https://friday-universe.duckdns.org/cortex/*
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Stage 1: dashboard builder ────────────────────────────────────────────────
 FROM node:20-alpine AS dashboard-builder
 
 WORKDIR /dashboard
-# Copy the root workspace manifests (npm workspaces — lock lives at the root)
+# Root workspace manifests (npm workspaces — lock lives at the root)
 COPY package.json package-lock.json ./
-# Copy the dashboard source and any other workspace packages referenced
 COPY apps/dashboard/ ./apps/dashboard/
-# Install only dashboard deps (workspace install from root)
 RUN npm ci --workspace=apps/dashboard
 WORKDIR /dashboard/apps/dashboard
 RUN npm run build
 
-# Multi-stage Dockerfile for CORTEX Operations Platform
+# ── Stage 2: Python dependency builder ────────────────────────────────────────
 FROM python:3.11-slim AS builder
 
 WORKDIR /build
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential curl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential curl \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
 
-# Production Runner
+# ── Stage 3: Production runner ────────────────────────────────────────────────
 FROM python:3.11-slim AS runner
+
+# Security: non-root user
+RUN useradd -m -u 1000 appuser
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends curl sqlite3 tini && rm -rf /var/lib/apt/lists/*
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends curl sqlite3 tini \
+    && rm -rf /var/lib/apt/lists/*
 
+# Copy virtualenv from builder
 COPY --from=builder /opt/venv /opt/venv
+
+# Runtime environment
 ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH="/app:/app/apps/api/src:/app/apps/worker/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src:/app/packages/analytics/src:/app/packages/intelligence/src:/app/packages/memory/src"
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PORT=8000
+ENV PYTHONPATH="/app:/app/apps/api/src:/app/packages/core/src:/app/packages/event_schema/src:/app/packages/agents/src:/app/packages/ai_universe_adapter/src:/app/packages/tool_runtime/src:/app/packages/integrations/src:/app/packages/policy_engine/src:/app/packages/workflow_engine/src:/app/packages/identity/src"
 
-RUN mkdir -p /app/data
+# Persistent data directory
+RUN mkdir -p /app/data && chown -R appuser:appuser /app/data
 
-COPY packages/ ./packages/
-COPY apps/ ./apps/
-COPY --from=dashboard-builder /dashboard/apps/dashboard/out ./apps/dashboard/out
-COPY infra/ ./infra/
-COPY cortex_upgrade/ ./cortex_upgrade/
+# Copy application source
+COPY --chown=appuser:appuser packages/ ./packages/
+COPY --chown=appuser:appuser apps/ ./apps/
+COPY --chown=appuser:appuser cortex_upgrade/ ./cortex_upgrade/
+COPY --chown=appuser:appuser infra/ ./infra/
+
+# Copy compiled dashboard static export from builder
+COPY --from=dashboard-builder --chown=appuser:appuser /dashboard/apps/dashboard/out ./apps/dashboard/out
+
+# Switch to non-root user
+USER appuser
 
 EXPOSE 8000
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=10s --retries=3 CMD curl -f http://localhost:${PORT:-8000}/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["sh", "-c", "uvicorn cortex_api.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn cortex_api.main:app --host 0.0.0.0 --port ${PORT:-8000} --timeout-graceful-shutdown 5"]

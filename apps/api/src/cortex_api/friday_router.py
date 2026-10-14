@@ -582,7 +582,7 @@ class FridayClient:
     """Outbound client used by CORTEX when requesting desktop/device actions from FRIDAY."""
 
     def __init__(self, endpoint: str | None = None, api_key: str | None = None):
-        self.endpoint = endpoint or os.getenv("FRIDAY_API_URL", "https://friday-zw59.onrender.com")
+        self.endpoint = endpoint or os.getenv("FRIDAY_API_URL", "http://friday:10000")
         self.api_key = api_key or os.getenv("FRIDAY_API_KEY", "friday_dev_key")
 
     async def request_capability(self, req: FridayCapabilityRequest) -> FridayCapabilityResponse:

@@ -1,9 +1,7 @@
-name: Cortex Production Image Build
+name: Cortex Production Image Build & Push
 
 on:
   push:
-    branches: [main]
-  pull_request:
     branches: [main]
 
 jobs:
@@ -31,13 +29,14 @@ jobs:
         run: pytest -v
 
   build-and-push:
-    name: Build and Push Docker Images
+    name: Build and Push Docker Image to GHCR
     needs: test
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -49,26 +48,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set Lowercase Image Names
-        id: repo-names
-        run: |
-          echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+      - name: Set Lowercase Image Name
+        run: echo "REPO_LOWER=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
 
-      - name: Build and Push API Image
+      - name: Build and Push Cortex Image
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: apps/api/Dockerfile
+          file: Dockerfile
           push: true
-          tags: ghcr.io/${{ env.REPO_LOWER }}-api:latest
+          tags: |
+            ghcr.io/${{ env.REPO_LOWER }}:latest
+            ghcr.io/${{ env.REPO_LOWER }}:${{ github.sha }}
 
-      - name: Build and Push Worker Image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: apps/worker/Dockerfile
-          push: true
-          tags: ghcr.io/${{ env.REPO_LOWER }}-worker:latest
-
-  # Render deploys the service from this repository via render.yaml.
-  # This workflow publishes GHCR images; it is not a production rollout.
+  # Deployment to Oracle Cloud Always Free (https://friday-universe.duckdns.org)
+  # is handled by the server pulling the latest GHCR image and restarting
+  # the container in the friday_mesh Docker network via SSH or Watchtower.

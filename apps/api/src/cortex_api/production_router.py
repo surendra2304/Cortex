@@ -168,15 +168,15 @@ async def prometheus_metrics(
 async def liveness_probe():
     """Liveness probe: verifies the process is alive and answering requests.
 
-    This is the canonical health endpoint (render.yaml healthCheckPath=/health).
-    It is registered before main.py's /v1/health, so it answers first for /health.
+    Used by the Docker HEALTHCHECK directive and the Caddy reverse proxy
+    at https://friday-universe.duckdns.org/cortex/health.
     """
     observed_at = datetime.now(UTC).isoformat()
     return {
         "status": "UP",
+        "service": "cortex",
         "evidence_class": "process_liveness",
         "observed_at": observed_at,
-        "service": settings.app_name,
         "timestamp": observed_at,
     }
 

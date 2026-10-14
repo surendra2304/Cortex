@@ -21,7 +21,16 @@ logger = logging.getLogger("cortex-config")
 
 Base = declarative_base()
 
-DEFAULT_ALLOWED_ORIGINS = ["http://localhost:3000", "http://127.0.0.1:3000"]
+DEFAULT_ALLOWED_ORIGINS = [
+    # Oracle Cloud production gateway
+    "https://friday-universe.duckdns.org",
+    # Local dev
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:8001",
+]
 
 
 def _workspace_root() -> Path:
@@ -111,7 +120,7 @@ class Settings(BaseSettings):
 settings = Settings()
 settings.postgres_dsn = resolve_sqlite_dsn(settings.postgres_dsn)
 
-IS_PRODUCTION = settings.app_env == "production" or os.getenv("RENDER", "").lower() in {"1", "true", "yes"}
+IS_PRODUCTION = settings.app_env == "production"
 
 
 def _warn_about_production_secrets() -> None:
