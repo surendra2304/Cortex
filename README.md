@@ -402,7 +402,7 @@ Cortex/
 
 ## Architecture Decisions
 
-- **No Render.com**: Fully migrated to Oracle Cloud Always Free. All `*.onrender.com` URLs are permanently removed.
+- **No Render.com**: Fully migrated to Oracle Cloud Always Free. All legacy Render URLs are permanently removed.
 - **Internal mesh only**: Agent-to-agent calls use Docker DNS (`http://service:port`), never public internet routes.
 - **SQLite WAL Mode**: Enforces `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=5000;` on all database connections for concurrent non-blocking reads/writes. Switch to `POSTGRES_DSN=postgresql+asyncpg://...` for high-write multi-node clusters.
 - **Async Connection Pooling & Circuit Breakers**: All outbound inter-agent calls (`FRIDAY Core`, `Memora`, `IntelX`, `Futuris`, `Sentinel`) utilize pooled `httpx.AsyncClient` instances with bounded timeouts, circuit breakers, and exponential backoff with jitter.
