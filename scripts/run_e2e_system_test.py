@@ -59,7 +59,7 @@ from cortex_integrations import (
 )
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import WorkflowStateMachine
-from jose import jwt
+import jwt
 
 
 class SystemTestTracker:
