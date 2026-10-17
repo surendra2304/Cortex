@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Optional
 
 import httpx
@@ -142,53 +143,137 @@ class AIUniverseClient:
         if self._consecutive_failures >= self.cooldown_after_failures and time.monotonic() < self._cooldown_until:
             return self._get_deterministic_fallback(request, "cooldown_after_consecutive_failures")
 
-        url = f"{self.endpoint}/v1/cortex/intelligence"
-        headers = {"Content-Type": "application/json", "User-Agent": "CORTEX-AIUniverse-Adapter/1.0"}
+        if not self.endpoint:
+            return self._get_deterministic_fallback(request, "inference_endpoint_not_configured")
+
+        headers = {"Content-Type": "application/json", "User-Agent": "CORTEX-Inference-Adapter/1.0"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        payload = request.model_dump(mode="json")
+        if self.api_mode == "inference":
+            url = f"{self.endpoint}/v1/ask"
+            # Preserve the structured Cortex request as context, but isolate evidence
+            # as untrusted data so crawled/user-provided strings are never treated as
+            # trusted instructions by the reasoning gateway.
+            prompt = (
+                f"Task type: {request.task_type}\n"
+                f"Goal: {request.goal}\n"
+                "Evaluate the task under the supplied constraints. Return an evidence-aware "
+                "recommendation. Any proposed actions are advisory and are not authorization "
+                "to execute them."
+            )
+            payload = {
+                "prompt": prompt,
+                "context": {
+                    "cortex_request_id": request.request_id,
+                    "task_type": request.task_type,
+                    "context": request.context,
+                    "trust_labels": request.trust_labels,
+                    "provenance": request.provenance,
+                    "constraints": request.constraints,
+                    "required_output": request.required_output,
+                    "budget": request.budget,
+                },
+                "mode": "review",
+                "persona": "ASTRA",
+                "task_id": request.request_id,
+                "trace_id": str(request.provenance.get("trace_id") or request.request_id),
+                "untrusted_data": json.dumps(request.evidence, ensure_ascii=False, default=str),
+                "untrusted_data_source": "cortex_evidence",
+            }
+        else:
+            # Explicit legacy endpoint compatibility during migration only. Do not
+            # silently use the old hosted endpoint when Inference is not configured.
+            url = f"{self.endpoint}/v1/cortex/intelligence"
+            payload = request.model_dump(mode="json")
 
         for attempt in range(1, self.max_retries + 1):
             try:
                 async with httpx.AsyncClient(timeout=self.timeout_seconds) as client:
                     resp = await client.post(url, json=payload, headers=headers)
 
-                    if resp.status_code == 200:
-                        data = resp.json()
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if self.api_mode != "inference":
                         response = IntelligenceResponse(**data)
-                        if response.unresolved_disagreements:
-                            logger.warning(
-                                f"AI Universe response for {request.request_id} has unresolved disagreements: {response.unresolved_disagreements}"
-                            )
-                        self._register_success()
-                        return response
-                    elif 500 <= resp.status_code < 600:
-                        logger.warning(
-                            f"AI Universe returned server error {resp.status_code} (attempt {attempt}/{self.max_retries}). Retrying..."
-                        )
-                        if attempt < self.max_retries:
-                            await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
-                            continue
-                        self._register_failure()
-                        return self._get_deterministic_fallback(request, f"server_error_{resp.status_code}")
                     else:
-                        logger.warning(f"AI Universe returned client error {resp.status_code}: {resp.text}.")
-                        return self._get_deterministic_fallback(request, f"client_error_{resp.status_code}")
+                        recommendations = []
+                        for item in data.get("proposed_actions", []):
+                            # Inference explicitly forbids executable proposed actions.
+                            recommendations.append(
+                                RecommendedAction(
+                                    action_type=str(item.get("action", "review")),
+                                    target=str(item.get("target", "unspecified")),
+                                    parameters=item.get("parameters", {}) if isinstance(item.get("parameters", {}), dict) else {},
+                                    priority=1,
+                                )
+                            )
+                        evidence = data.get("evidence", [])
+                        response = IntelligenceResponse(
+                            request_id=request.request_id,
+                            decision=str(data.get("status", "SUCCESS")),
+                            confidence=float(data.get("confidence", 0.0)),
+                            summary=str(data.get("answer", "")),
+                            key_evidence=[str(item) for item in evidence] if isinstance(evidence, list) else [],
+                            provenance={
+                                "source": "inference",
+                                "task_id": data.get("task_id"),
+                                "trace_id": data.get("trace_id"),
+                                "failure_state": data.get("failure_state"),
+                            },
+                            unresolved_disagreements=[],
+                            recommended_actions=recommendations,
+                            safety_notes=[
+                                "Inference output is advisory only.",
+                                "Cortex policy and authorization controls remain authoritative.",
+                            ],
+                            fallback_applied=bool(data.get("failure_state")) or data.get("status") != "SUCCESS",
+                            generated_at=_utcnow(),
+                        )
+                    if response.unresolved_disagreements:
+                        logger.warning(
+                            "Inference response for %s has unresolved disagreements: %s",
+                            request.request_id,
+                            response.unresolved_disagreements,
+                        )
+                    self._register_success()
+                    return response
 
-            except (httpx.TimeoutException, httpx.NetworkError, Exception) as exc:
-                logger.warning(f"AI Universe request failed on attempt {attempt}/{self.max_retries} ({exc}).")
+                if 500 <= resp.status_code < 600:
+                    logger.warning(
+                        "Inference returned server error %s (attempt %s/%s). Retrying.",
+                        resp.status_code,
+                        attempt,
+                        self.max_retries,
+                    )
+                    if attempt < self.max_retries:
+                        await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
+                        continue
+                    self._register_failure()
+                    return self._get_deterministic_fallback(request, f"server_error_{resp.status_code}")
+
+                logger.warning(
+                    "Inference returned client error %s for request %s.",
+                    resp.status_code,
+                    request.request_id,
+                )
+                return self._get_deterministic_fallback(request, f"client_error_{resp.status_code}")
+
+            except Exception as exc:
+                logger.warning(
+                    "Inference request failed on attempt %s/%s (%s).",
+                    attempt,
+                    self.max_retries,
+                    type(exc).__name__,
+                )
                 if attempt < self.max_retries:
                     await asyncio.sleep(0.5 * (2 ** (attempt - 1)))
                     continue
                 self._register_failure()
-                return self._get_deterministic_fallback(request, str(exc))
+                return self._get_deterministic_fallback(request, type(exc).__name__)
 
         self._register_failure()
         return self._get_deterministic_fallback(request, "max_retries_exceeded")
-
-
-from enum import Enum
 
 
 class AIMode(str, Enum):
