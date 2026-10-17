@@ -8,7 +8,9 @@ from typing import Any
 import httpx
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
+
+JWTError = jwt.PyJWTError
 
 from cortex_upgrade.auth import INSECURE_DEFAULTS, CredentialManager, validate_production_secrets
 
