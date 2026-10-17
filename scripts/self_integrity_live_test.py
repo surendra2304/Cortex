@@ -81,7 +81,7 @@ def _resolve_public_key(client: httpx.Client) -> str:
     # S5: key provisioning is tenant-bound, so mint the tenant's own credential
     # (HS256 with the API's JWT secret — empty in development) and provision as
     # that tenant instead of relying on the dev bypass admin.
-    from jose import jwt as _jwt
+    import jwt as _jwt
 
     token = _jwt.encode(
         {

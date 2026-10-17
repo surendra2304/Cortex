@@ -8,7 +8,7 @@ import pytest
 from cortex_api import auth as auth_module
 from cortex_api.main import app
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 from starlette.websockets import WebSocketDisconnect
 
 SECRET = "unit-test-secret-for-websocket-auth"
