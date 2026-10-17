@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from jose import jwt
+import jwt
 
 for p in [
     "packages/core/src",
