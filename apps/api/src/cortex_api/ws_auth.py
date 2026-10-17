@@ -24,8 +24,7 @@ import logging
 
 from fastapi import WebSocket
 import jwt
-
-JWTError = jwt.PyJWTError
+from jwt.exceptions import PyJWTError as JWTError
 
 from cortex_api import auth as auth_module
 
