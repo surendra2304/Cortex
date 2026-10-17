@@ -143,7 +143,7 @@ class Harness:
         # target tenant (HS256 with the same secret the API verifies with).
         from datetime import datetime, timedelta
 
-        from jose import jwt as _jwt
+        import jwt as _jwt
 
         token = _jwt.encode(
             {
@@ -664,7 +664,7 @@ def _rss_kb(pid: int | None) -> int | None:
 
 
 def _mint_jwt(secret: str, tenant_id: str, role: str = "cortex_admin", subject: str = "usr_pressure") -> str:
-    from jose import jwt
+    import jwt
 
     return jwt.encode(
         {
