@@ -81,7 +81,7 @@ async def test_inference_adapter_uses_v1_ask_and_keeps_actions_advisory(monkeypa
     sent = _FakeAsyncClient.requests[0]["payload"]
     assert sent["task_id"] == "cortex-request-42"
     assert sent["trace_id"] == "trace-cortex-42"
-    assert sent["context"]["tenant_id"] == "tenant-test" if "tenant_id" in sent["context"] else True
+    assert sent["context"]["context"]["tenant_id"] == "tenant-test"
     assert sent["untrusted_data_source"] == "cortex_evidence"
     assert "visitor provided text" in sent["untrusted_data"]
     assert _FakeAsyncClient.requests[0]["headers"]["Authorization"] == "Bearer test-internal-key"
