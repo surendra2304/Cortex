@@ -2,7 +2,7 @@ import os
 import sys
 
 import pytest
-from jose import jwt
+import jwt
 
 sys.path.insert(0, os.path.abspath("apps/api/src"))
 
