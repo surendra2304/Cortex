@@ -67,7 +67,7 @@ def friday_headers() -> dict[str, str]:
 def jwt_for(tenant_id: str, role: str = "cortex_admin") -> str:
     from datetime import timedelta
 
-    from jose import jwt
+    import jwt
 
     return jwt.encode(
         {"sub": "op_load", "tenant_id": tenant_id, "role": role, "exp": datetime.now(UTC) + timedelta(hours=1)},
