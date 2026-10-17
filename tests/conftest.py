@@ -13,7 +13,8 @@ from pathlib import Path
 os.environ["APP_ENV"] = "development"
 # PyJWT correctly rejects empty HMAC keys. Tests must sign with a test-only key
 # rather than relying on python-jose's former acceptance of an empty secret.
-os.environ["JWT_SECRET"] = "cortex-pytest-only-signing-key-not-for-deployment-2026"
+TEST_JWT_SECRET = "cortex-pytest-only-signing-key-not-for-deployment-2026"
+os.environ["JWT_SECRET"] = TEST_JWT_SECRET
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
