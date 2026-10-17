@@ -65,9 +65,8 @@ jobs:
 
       - name: Install & Build Browser SDK
         run: |
-          cd packages/sdk
-          npm install
-          npm run build
+          npm ci --workspace=packages/sdk
+          npm run build --workspace=packages/sdk
 
       - name: Install & Build Next.js Dashboard
         run: |
@@ -90,9 +89,9 @@ jobs:
 
       - name: Scan Python Dependencies
         run: |
-          pip install pip-audit
-          pip-audit -r requirements.txt || true
+          python -m pip install --upgrade pip-audit
+          pip-audit -r requirements.txt
 
       - name: Scan Node.js Dependencies
         run: |
-          npm audit --audit-level=high || true
+          npm audit --audit-level=high
