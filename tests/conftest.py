@@ -11,6 +11,9 @@ import os
 from pathlib import Path
 
 os.environ["APP_ENV"] = "development"
+# PyJWT correctly rejects empty HMAC keys. Tests must sign with a test-only key
+# rather than relying on python-jose's former acceptance of an empty secret.
+os.environ.setdefault("JWT_SECRET", "cortex-pytest-only-signing-key-not-for-deployment-2026")
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -158,16 +161,19 @@ def provisioned_key(session_factory):
 def auth_headers(role: str = "cortex_admin", tenant_id: str = "tenant_test", subject: str = "usr_test") -> dict:
     """Mint a signed JWT for API tests.
 
-    Uses the ``JWT_SECRET`` environment value when present (so tests exercise the
-    real HS256 path); falls back to the empty-secret HS256 signing the
-    application uses when ``JWT_SECRET`` is unset.
+    Uses the non-empty test-only key loaded by the test configuration. Empty
+    HMAC keys are rejected by PyJWT and must never be used as a test shortcut.
     """
     import os
 
     from cortex_api import auth as auth_module
     import jwt
 
-    secret = auth_module.JWT_SECRET or os.getenv("JWT_SECRET", "")
+    secret = auth_module.JWT_SECRET or os.getenv(
+        "JWT_SECRET", "cortex-pytest-only-signing-key-not-for-deployment-2026"
+    )
+    if not secret:
+        raise RuntimeError("Cortex tests require a non-empty test JWT_SECRET")
     token = jwt.encode(
         {
             "sub": subject,
