@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import time
@@ -81,14 +82,15 @@ class AIUniverseClient:
         cooldown_after_failures: int = 3,
         cooldown_seconds: float = 30.0,
     ):
-        # Inference is the canonical FRIDAY Universe reasoning gateway. Keep the
-        # old environment names as a migration-only fallback for existing deployments.
-        self.endpoint = (
-            endpoint
-            or os.getenv("INFERENCE_BASE_URL")
-            or os.getenv("AI_UNIVERSE_BASE_URL")
-            or "http://inference:8000"
-        ).rstrip("/")
+        # Prefer the canonical Inference API. Keep the legacy endpoint only when it
+        # is explicitly configured during migration; never invent an external host.
+        configured_inference = os.getenv("INFERENCE_BASE_URL", "").strip()
+        configured_legacy = os.getenv("AI_UNIVERSE_BASE_URL", "").strip()
+        self.api_mode = (
+            "legacy" if endpoint or (not configured_inference and configured_legacy) else "inference"
+        )
+        selected_endpoint = endpoint or configured_inference or configured_legacy
+        self.endpoint = selected_endpoint.rstrip("/")
         self.api_key = (
             api_key
             or os.getenv("INFERENCE_API_KEY")
