@@ -80,8 +80,19 @@ class AIUniverseClient:
         cooldown_after_failures: int = 3,
         cooldown_seconds: float = 30.0,
     ):
-        self.endpoint = (endpoint or os.getenv("AI_UNIVERSE_BASE_URL", "https://api.ai-universe.dev")).rstrip("/")
-        self.api_key = api_key or os.getenv("AI_UNIVERSE_API_KEY", "")
+        # Inference is the canonical FRIDAY Universe reasoning gateway. Keep the
+        # old environment names as a migration-only fallback for existing deployments.
+        self.endpoint = (
+            endpoint
+            or os.getenv("INFERENCE_BASE_URL")
+            or os.getenv("AI_UNIVERSE_BASE_URL")
+            or "http://inference:8000"
+        ).rstrip("/")
+        self.api_key = (
+            api_key
+            or os.getenv("INFERENCE_API_KEY")
+            or os.getenv("AI_UNIVERSE_API_KEY", "")
+        )
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         # Pressure hardening (2026-10-07): a dead or hanging AI Universe peer must
