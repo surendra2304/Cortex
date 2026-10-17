@@ -71,7 +71,7 @@ def friday_headers() -> dict[str, str]:
 
 def jwt_for(tenant_id: str, role: str = "cortex_admin") -> str:
     """Mint an HS256 operator JWT the way the API verifies it (dev: empty secret)."""
-    from jose import jwt
+    import jwt
 
     return jwt.encode(
         {
