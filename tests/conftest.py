@@ -165,7 +165,7 @@ def auth_headers(role: str = "cortex_admin", tenant_id: str = "tenant_test", sub
     import os
 
     from cortex_api import auth as auth_module
-    from jose import jwt
+    import jwt
 
     secret = auth_module.JWT_SECRET or os.getenv("JWT_SECRET", "")
     token = jwt.encode(
