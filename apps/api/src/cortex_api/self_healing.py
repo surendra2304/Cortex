@@ -44,7 +44,10 @@ async def probe_ai_universe() -> bool:
     import asyncio
     import urllib.parse
 
-    url = os.getenv("AI_UNIVERSE_BASE_URL", "") or ""
+    url = (
+        os.getenv("INFERENCE_BASE_URL", "")
+        or os.getenv("AI_UNIVERSE_BASE_URL", "")  # legacy migration fallback
+    ).rstrip("/")
     if not url:
         return False
 
