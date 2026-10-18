@@ -12,12 +12,16 @@ from pathlib import Path
 
 os.environ["APP_ENV"] = "development"
 
+import sys
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 # ── Workspace path bootstrap (CWD independent) ───────────────────────────────
 _root_dir = Path(__file__).resolve().parent.parent
+if str(_root_dir) not in sys.path:
+    sys.path.insert(0, str(_root_dir))
 from cortex_upgrade.paths import ensure_workspace_paths  # noqa: E402
 
 ensure_workspace_paths(_root_dir)

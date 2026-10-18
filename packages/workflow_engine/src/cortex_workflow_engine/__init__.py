@@ -64,8 +64,8 @@ class WorkflowStateMachine:
       2. LEAD_QUALIFICATION_ROUTING
       3. ABANDONED_FORM_RECOVERY
       4. CONVERSION_DROP_DIAGNOSIS
-      5. CHURN_RISK_INTERVENTION
-    - Complete state lifecycle: TRIGGERED -> PLANNING -> AWAITING_APPROVAL -> EXECUTING -> VERIFYING -> COMPLETED/COMPENSATED
+    - Complete state lifecycle:
+      TRIGGERED -> PLANNING -> AWAITING_APPROVAL -> EXECUTING -> VERIFYING -> COMPLETED/COMPENSATED
     - Persists execution state to workflow_runs table
     """
 

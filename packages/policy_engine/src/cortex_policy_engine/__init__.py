@@ -100,7 +100,10 @@ class PolicyEngine:
             return PolicyDecision(
                 approved=True,
                 requires_human_approval=False,
-                reason=f"Operation approved via explicit supervisor token ({execution.approval.get('approver_id', 'operator')}).",
+                reason=(
+                    f"Operation approved via explicit supervisor token "
+                    f"({execution.approval.get('approver_id', 'operator')})."
+                ),
                 risk_score=0.2,
                 evaluated_at=_utcnow(),
             )

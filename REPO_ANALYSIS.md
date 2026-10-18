@@ -117,7 +117,7 @@ flowchart TB
         W["…-worker:latest<br/>(apps/worker/Dockerfile)"]
     end
     subgraph Compose["docker-compose.yml (stale nexus_* names)"]
-        PG["postgres:15 (nexus)"] & RD2["redis:7 (nexus)"] & API2["api"] & WK["worker<br/>(builds from apps/api/Dockerfile)"] & DB2["dashboard ⚠ broken CMD"]
+        PG["postgres:18 (nexus)"] & RD2["redis:7 (nexus)"] & API2["api"] & WK["worker<br/>(builds from apps/api/Dockerfile)"] & DB2["dashboard ⚠ broken CMD"]
     end
     subgraph K8S["infra/k8s + infra/terraform (stale nexus_* names)"]
         K["deployment.yaml / main.tf"]

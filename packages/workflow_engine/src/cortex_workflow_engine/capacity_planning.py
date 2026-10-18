@@ -29,7 +29,8 @@ class CapacityPlanningWorkflow:
     """
     Capacity Planning & Auto-Scaling Workflow:
     - Ingests traffic forecasts from Futuris
-    - If predicted traffic exceeds provisioned threshold -> Triggers cache warming, CDN pre-loading, and auto-scaling via FRIDAY
+    - If predicted traffic exceeds provisioned threshold ->
+      Triggers cache warming, CDN pre-loading, and auto-scaling via FRIDAY
     """
 
     def __init__(self, futuris_client: Any | None = None):

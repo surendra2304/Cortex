@@ -50,7 +50,7 @@ This document defines the deployment architecture, cloud infrastructure, Kuberne
 
 The Terraform module provisions a secure, multi-AZ deployment on AWS:
 - **VPC & Subnets**: 3 Public Subnets (NAT Gateway, ALB) + 3 Private Subnets (ECS, RDS, Redis).
-- **RDS PostgreSQL 15**: Multi-AZ standby replica, automated 7-day backup retention, gp3 storage auto-scaling up to 1TB, row-level security enabled.
+- **RDS PostgreSQL 18**: Multi-AZ standby replica, automated 7-day backup retention, gp3 storage auto-scaling up to 1TB, row-level security enabled.
 - **ElastiCache Redis 7**: Managed cluster in private subnets with auto-failover for stream dispatch.
 - **ECS Fargate Cluster**: Elastic CPU/Memory resource allocation for API and Worker services.
 - **S3 Bucket**: Encrypted, versioned storage with cross-region replication for backups and exports.
