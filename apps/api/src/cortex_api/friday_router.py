@@ -99,6 +99,46 @@ logger = logging.getLogger("cortex-friday-gateway")
 
 _friday_idempotency_store = IdempotencyStore()
 
+
+def _production_mode() -> bool:
+    return (
+        os.getenv("APP_ENV", "development").strip().lower() == "production"
+        or os.getenv("RENDER", "").strip().lower() in {"1", "true", "yes"}
+    )
+
+
+def _allowed_friday_tenants() -> set[str]:
+    """Explicit tenant scope for the shared FRIDAY service credential."""
+    return {
+        item.strip()
+        for item in os.getenv("FRIDAY_ALLOWED_TENANTS", "").split(",")
+        if item.strip()
+    }
+
+
+def _authorize_command_tenant(
+    tenant_id: str, friday_auth: dict[str, Any]
+) -> None:
+    """Fail closed when a FRIDAY command requests an unapproved tenant."""
+    allowed = _allowed_friday_tenants()
+    if allowed and tenant_id not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="FRIDAY service credential is not authorized for the requested tenant.",
+        )
+    if _production_mode() and not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="FRIDAY tenant authorization is unavailable until FRIDAY_ALLOWED_TENANTS is configured.",
+        )
+    authenticated_tenant = str(friday_auth.get("tenant_id") or "")
+    if authenticated_tenant not in {"", "system"} and authenticated_tenant != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="FRIDAY authenticated tenant does not match the requested tenant.",
+        )
+
+
 router = APIRouter(prefix="/v1/friday", tags=["FRIDAY Integration"])
 
 # Module-level orchestrator instance (shared across requests)
@@ -295,6 +335,10 @@ async def execute_friday_command(
     friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
 ):
+    # The shared FRIDAY key proves the caller is FRIDAY, not that the caller may
+    # act on every tenant. Enforce a configured tenant allowlist before building
+    # events or entering the cognitive loop.
+    _authorize_command_tenant(command.tenant_id, friday_auth)
     command_id = command.idempotency_key or f"fri_{uuid.uuid4().hex[:10]}"
     trace_id = f"fri_trace_{uuid.uuid4().hex[:12]}"
 

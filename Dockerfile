@@ -8,12 +8,10 @@
 # ── Stage 1: dashboard builder ────────────────────────────────────────────────
 FROM node:20-alpine AS dashboard-builder
 
-WORKDIR /dashboard
-# Root workspace manifests (npm workspaces — lock lives at the root)
-COPY package.json package-lock.json ./
-COPY apps/dashboard/ ./apps/dashboard/
-RUN npm ci --workspace=apps/dashboard
 WORKDIR /dashboard/apps/dashboard
+COPY apps/dashboard/package.json ./
+RUN npm install
+COPY apps/dashboard/ ./
 RUN npm run build
 
 # ── Stage 2: Python dependency builder ────────────────────────────────────────

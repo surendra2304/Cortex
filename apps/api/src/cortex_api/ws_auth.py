@@ -23,7 +23,8 @@ from __future__ import annotations
 import logging
 
 from fastapi import WebSocket
-from jose import JWTError, jwt
+import jwt
+from jwt.exceptions import PyJWTError as JWTError
 
 from cortex_api import auth as auth_module
 

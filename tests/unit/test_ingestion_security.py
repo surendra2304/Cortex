@@ -13,7 +13,7 @@ import asyncio
 from cortex_api.db_models import EventModel
 from sqlalchemy import select
 
-from tests.conftest import event_payload
+from tests.conftest import TEST_JWT_SECRET, event_payload
 
 
 def test_ingestion_requires_a_public_key(api_client):
@@ -199,7 +199,7 @@ def test_query_events_rejects_unauthenticated_in_production(api_client, provisio
 def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_key, monkeypatch):
     """H1: an authenticated viewer sees only their own tenant's events."""
     from cortex_api import auth
-    from jose import jwt
+    import jwt
 
     monkeypatch.setattr(auth, "DEV_AUTH_BYPASS", False)
     plaintext, tenant_id, site_id = provisioned_key
@@ -227,7 +227,7 @@ def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_
 
     asyncio.run(_insert_foreign())
 
-    token = jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, "", algorithm="HS256")
+    token = jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256")
     response = api_client.get("/v1/events", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     ids = {row["event_id"] for row in response.json()}
@@ -235,9 +235,9 @@ def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_
 
 
 def _viewer_token(tenant_id: str) -> str:
-    from jose import jwt
+    import jwt
 
-    return jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, "", algorithm="HS256")
+    return jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256")
 
 
 def test_query_events_paginates_beyond_the_page_cap(api_client, session_factory, provisioned_key):
