@@ -13,19 +13,23 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.abspath("apps/api/src"))
-sys.path.insert(0, os.path.abspath("packages/core/src"))
-sys.path.insert(0, os.path.abspath("packages/event_schema/src"))
-sys.path.insert(0, os.path.abspath("packages/agents/src"))
-sys.path.insert(0, os.path.abspath("packages/ai_universe_adapter/src"))
-sys.path.insert(0, os.path.abspath("packages/tool_runtime/src"))
-sys.path.insert(0, os.path.abspath("packages/integrations/src"))
-sys.path.insert(0, os.path.abspath("packages/policy_engine/src"))
-sys.path.insert(0, os.path.abspath("packages/identity/src"))
-sys.path.insert(0, os.path.abspath("packages/analytics/src"))
-sys.path.insert(0, os.path.abspath("packages/intelligence/src"))
-sys.path.insert(0, os.path.abspath("packages/memory/src"))
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+
+sys.path.insert(0, str(_REPO_ROOT / "apps/api/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/core/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/event_schema/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/agents/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/ai_universe_adapter/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/tool_runtime/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/integrations/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/policy_engine/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/identity/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/analytics/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/intelligence/src"))
+sys.path.insert(0, str(_REPO_ROOT / "packages/memory/src"))
+sys.path.insert(0, str(_REPO_ROOT))
 
 from tests.conftest import auth_headers
 
@@ -69,26 +73,26 @@ def _bypass_value(env: dict) -> str:
     full_env.pop("CORTEX_DEV_AUTH_BYPASS", None)
     full_env["PYTHONPATH"] = os.pathsep.join(
         [
-            os.path.abspath("apps/api/src"),
-            os.path.abspath("packages/core/src"),
-            os.path.abspath("packages/event_schema/src"),
-            os.path.abspath("packages/agents/src"),
-            os.path.abspath("packages/ai_universe_adapter/src"),
-            os.path.abspath("packages/tool_runtime/src"),
-            os.path.abspath("packages/integrations/src"),
-            os.path.abspath("packages/policy_engine/src"),
-            os.path.abspath("packages/identity/src"),
-            os.path.abspath("packages/analytics/src"),
-            os.path.abspath("packages/intelligence/src"),
-            os.path.abspath("packages/memory/src"),
-            os.path.abspath("packages/workflow_engine/src"),
-            os.path.abspath("cortex_upgrade"),
+            str(_REPO_ROOT / "apps/api/src"),
+            str(_REPO_ROOT / "packages/core/src"),
+            str(_REPO_ROOT / "packages/event_schema/src"),
+            str(_REPO_ROOT / "packages/agents/src"),
+            str(_REPO_ROOT / "packages/ai_universe_adapter/src"),
+            str(_REPO_ROOT / "packages/tool_runtime/src"),
+            str(_REPO_ROOT / "packages/integrations/src"),
+            str(_REPO_ROOT / "packages/policy_engine/src"),
+            str(_REPO_ROOT / "packages/identity/src"),
+            str(_REPO_ROOT / "packages/analytics/src"),
+            str(_REPO_ROOT / "packages/intelligence/src"),
+            str(_REPO_ROOT / "packages/memory/src"),
+            str(_REPO_ROOT / "packages/workflow_engine/src"),
+            str(_REPO_ROOT / "cortex_upgrade"),
         ]
     )
     full_env["APP_ENV"] = "development"
     full_env.update(env)
     out = subprocess.run(
-        [sys.executable, "-c", code], capture_output=True, text=True, env=full_env, cwd=os.getcwd(), timeout=60
+        [sys.executable, "-c", code], capture_output=True, text=True, env=full_env, cwd=str(_REPO_ROOT), timeout=60
     )
     assert out.returncode == 0, out.stderr[-500:]
     return out.stdout.strip()
