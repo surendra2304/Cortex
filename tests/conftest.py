@@ -16,12 +16,16 @@ os.environ["APP_ENV"] = "development"
 TEST_JWT_SECRET = "cortex-pytest-only-signing-key-not-for-deployment-2026"
 os.environ["JWT_SECRET"] = TEST_JWT_SECRET
 
+import sys
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 # ── Workspace path bootstrap (CWD independent) ───────────────────────────────
 _root_dir = Path(__file__).resolve().parent.parent
+if str(_root_dir) not in sys.path:
+    sys.path.insert(0, str(_root_dir))
 from cortex_upgrade.paths import ensure_workspace_paths  # noqa: E402
 
 ensure_workspace_paths(_root_dir)
