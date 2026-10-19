@@ -336,8 +336,14 @@ class IntelXClient:
                 industry=industry,
                 trend_title="Surge in Autonomous Agentic Operations Adoption",
                 impact_level="strategic",
-                summary="Enterprises are rapidly moving away from passive APM dashboards toward autonomous agentic intervention systems that close loops in <100ms.",
-                recommended_positioning="Lead with 'Deterministic First + AI Universe Multi-Agent Deliberation' in all top-of-funnel CTAs and pricing pages.",
+                summary=(
+                    "Enterprises are rapidly moving away from passive APM dashboards toward autonomous "
+                    "agentic intervention systems that close loops in <100ms."
+                ),
+                recommended_positioning=(
+                    "Lead with 'Deterministic First + AI Universe Multi-Agent Deliberation' in all "
+                    "top-of-funnel CTAs and pricing pages."
+                ),
                 trending_topics=[
                     "Agentic Workflows",
                     "Closed-Loop Telemetry",
@@ -351,8 +357,14 @@ class IntelXClient:
                 industry=industry,
                 trend_title="Heightened Data Sovereignty & GDPR Subject Erasure Audits",
                 impact_level="high",
-                summary="European and US enterprises require verifiable one-way PII masking and automated Art. 17 hard erasure before installing third-party browser SDKs.",
-                recommended_positioning="Highlight Cortex's zero-plaintext PII policy, automated GDPR exports, and 7-year tamper-evident audit logs.",
+                summary=(
+                    "European and US enterprises require verifiable one-way PII masking and automated "
+                    "Art. 17 hard erasure before installing third-party browser SDKs."
+                ),
+                recommended_positioning=(
+                    "Highlight Cortex's zero-plaintext PII policy, automated GDPR exports, and 7-year "
+                    "tamper-evident audit logs."
+                ),
                 trending_topics=[
                     "GDPR Article 17 Automation",
                     "Client-Side PII Redaction",

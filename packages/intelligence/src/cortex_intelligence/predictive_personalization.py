@@ -41,7 +41,10 @@ class PredictionInformedPersonalization:
                     "incentive": "Extended 30-day Enterprise Trial",
                     "bottleneck_step": trend.bottleneck_step,
                 },
-                rationale=f"Futuris forecasted {trend.drop_probability * 100:.0f}% conversion drop probability at {trend.bottleneck_step}. Preemptively engaging with guided VIP onboarding.",
+                rationale=(
+                    f"Futuris forecasted {trend.drop_probability * 100:.0f}% conversion drop probability at "
+                    f"{trend.bottleneck_step}. Preemptively engaging with guided VIP onboarding."
+                ),
                 confidence=trend.confidence,
             )
         elif trend.trajectory == "upward":
