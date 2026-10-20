@@ -465,6 +465,7 @@ privacy_service = PrivacyComplianceService()
 
 
 @router.post("/privacy/export/{visitor_id}", response_model=DataSubjectExport)
+@router.post("/v1/privacy/export/{visitor_id}", response_model=DataSubjectExport)
 async def export_visitor_data(
     visitor_id: str,
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
@@ -522,6 +523,7 @@ async def export_visitor_data(
 
 
 @router.post("/privacy/delete/{visitor_id}")
+@router.post("/v1/privacy/delete/{visitor_id}")
 async def erase_visitor_data(
     visitor_id: str,
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_ADMIN)),
@@ -529,6 +531,14 @@ async def erase_visitor_data(
 ):
     """GDPR Art. 17 / CCPA Right to be Forgotten: Cascading hard erasure across all stores."""
     tenant_id = auth.get("tenant_id", "tenant_default")
+    # Strict tenant boundary: cross-tenant delete attempt returns 403, non-existent returns 404
+    from cortex_api.db_models import VisitorModel
+
+    vis_check = (await db.execute(select(VisitorModel).where(VisitorModel.id == visitor_id))).scalar_one_or_none()
+    if vis_check and vis_check.tenant_id != tenant_id:
+        raise HTTPException(status_code=403, detail="Cross-tenant visitor deletion forbidden.")
+    if not vis_check:
+        raise HTTPException(status_code=404, detail="Visitor not found.")
     try:
         result = await privacy_service.execute_hard_erasure(db=db, visitor_id=visitor_id, tenant_id=tenant_id)
     except Exception as exc:

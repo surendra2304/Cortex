@@ -3,7 +3,15 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from cortex_api.db_models import AuditRecordModel, IdentityLinkModel, LeadModel, ProfileModel, VisitorModel
+from cortex_api.db_models import (
+    AuditRecordModel,
+    EventModel,
+    IdentityLinkModel,
+    LeadModel,
+    ProfileModel,
+    SessionModel,
+    VisitorModel,
+)
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -43,12 +51,25 @@ class IdentityResolver:
         if email and "email" not in traits:
             traits["email"] = email
 
-        # 1. Fetch or create Visitor
-        vis_stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
-        vis_res = await db.execute(vis_stmt)
-        visitor = vis_res.scalar_one_or_none()
+        # 1. Fetch or create Visitor (strictly enforce tenant isolation)
+        vis_any_stmt = select(VisitorModel).where(VisitorModel.id == visitor_id)
+        vis_any_res = await db.execute(vis_any_stmt)
+        existing_any = vis_any_res.scalar_one_or_none()
 
-        if not visitor:
+        if existing_any:
+            if existing_any.tenant_id not in ("default", "tenant_default", tenant_id):
+                raise PermissionError(
+                    f"Cross-tenant visitor access forbidden: visitor belongs to '{existing_any.tenant_id}', not '{tenant_id}'."
+                )
+            visitor = existing_any
+            if visitor.tenant_id in ("default", "tenant_default") and tenant_id not in ("default", "tenant_default"):
+                visitor.tenant_id = tenant_id
+            visitor.last_seen_at = _utcnow()
+            if traits:
+                updated = dict(visitor.attributes or {})
+                updated.update(traits)
+                visitor.attributes = updated
+        else:
             visitor = VisitorModel(
                 id=visitor_id,
                 tenant_id=tenant_id,
@@ -58,12 +79,6 @@ class IdentityResolver:
                 attributes=traits,
             )
             db.add(visitor)
-        else:
-            visitor.last_seen_at = _utcnow()
-            if traits:
-                updated = dict(visitor.attributes or {})
-                updated.update(traits)
-                visitor.attributes = updated
 
         # 2. Check if this is an anonymous visitor (no email, no user_id) or consent revoked
         is_identified = bool(user_id or email)
@@ -77,6 +92,7 @@ class IdentityResolver:
                 "linked_identities": [],
                 "traits": visitor.attributes,
                 "attributes": visitor.attributes,
+                "journey": {"session_count": 0, "session_ids": [], "total_events": 0},
                 "message": "Pseudonymous tracking; no authenticated credentials or consent.",
             }
 
@@ -222,7 +238,54 @@ class IdentityResolver:
                 lead.status = "customer"
             lifecycle_stage = "customer"
 
-        # 7. Audit operation
+        # 7. Cross-session research journeys
+        journey: dict[str, Any] = {
+            "session_count": 0,
+            "session_ids": [],
+            "total_events": 0,
+            "first_touch_at": None,
+            "last_touch_at": None,
+        }
+        try:
+            sess_stmt = (
+                select(SessionModel)
+                .where(SessionModel.tenant_id == tenant_id, SessionModel.visitor_id == visitor.id)
+                .order_by(SessionModel.started_at.asc())
+            )
+            sess_res = await db.execute(sess_stmt)
+            sessions = sess_res.scalars().all() if hasattr(sess_res, "scalars") and callable(getattr(sess_res, "scalars")) else []
+            ev_stmt = (
+                select(EventModel)
+                .where(EventModel.tenant_id == tenant_id, EventModel.actor_id == visitor.id)
+                .order_by(EventModel.occurred_at.asc())
+            )
+            ev_res = await db.execute(ev_stmt)
+            events = ev_res.scalars().all() if hasattr(ev_res, "scalars") and callable(getattr(ev_res, "scalars")) else []
+            first_touch = (
+                events[0].occurred_at.isoformat()
+                if events and getattr(events[0], "occurred_at", None)
+                else (sessions[0].started_at.isoformat() if sessions and getattr(sessions[0], "started_at", None) else None)
+            )
+            last_touch = (
+                events[-1].occurred_at.isoformat()
+                if events and getattr(events[-1], "occurred_at", None)
+                else (sessions[-1].started_at.isoformat() if sessions and getattr(sessions[-1], "started_at", None) else None)
+            )
+            journey = {
+                "session_count": len(sessions),
+                "session_ids": [s.id for s in sessions if hasattr(s, "id")],
+                "total_events": len(events),
+                "first_touch_at": first_touch,
+                "last_touch_at": last_touch,
+            }
+            if target_profile:
+                traits_dict = dict(target_profile.traits or {})
+                traits_dict["journey"] = journey
+                target_profile.traits = traits_dict
+        except Exception as exc:
+            logger.debug("Failed to calculate cross-session journey (safely ignored): %s", exc)
+
+        # 8. Audit operation
         audit = AuditRecordModel(
             id=f"aud_id_{uuid.uuid4().hex[:8]}",
             tenant_id=tenant_id,
@@ -235,6 +298,7 @@ class IdentityResolver:
                 "lifecycle_stage": lifecycle_stage,
                 "email": email,
                 "consent_granted": consent_granted,
+                "journey": journey,
             },
             verification_status="verified",
             trace_id=f"trc_id_{uuid.uuid4().hex[:8]}",
@@ -252,6 +316,7 @@ class IdentityResolver:
             "primary_email": target_profile.primary_email,
             "identities": target_profile.identities,
             "traits": target_profile.traits,
+            "journey": journey,
         }
 
     async def resolve_actor_profile(

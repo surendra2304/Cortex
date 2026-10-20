@@ -106,6 +106,23 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
+    @field_validator("postgres_dsn", mode="before")
+    @classmethod
+    def _parse_postgres_dsn(cls, value):
+        """Resolve database DSN from POSTGRES_DSN or DATABASE_URL with dokploy-postgres default in production."""
+        dsn = value or os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+        if not dsn:
+            if os.getenv("APP_ENV", "development").lower() == "production":
+                dsn = "postgresql+asyncpg://cortex_user:JOckBx8gtWYn4bhPkVj-mB92@dokploy-postgres:5432/cortex_db"
+            else:
+                dsn = "sqlite+aiosqlite:///./data/cortex.db"
+        if isinstance(dsn, str):
+            if dsn.startswith("postgresql://"):
+                dsn = "postgresql+asyncpg://" + dsn[len("postgresql://"):]
+            elif dsn.startswith("postgres://"):
+                dsn = "postgresql+asyncpg://" + dsn[len("postgres://"):]
+        return dsn
+
     @field_validator("allowed_origins", mode="before")
     @classmethod
     def _parse_origins(cls, value):

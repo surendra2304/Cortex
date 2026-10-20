@@ -33,7 +33,7 @@ from cortex_api.api_keys import (  # noqa: F401  (hash re-exported for compatibi
 )
 from cortex_api.auth import Role, require_role
 from cortex_api.config import get_db_session, get_redis_client, settings
-from cortex_api.db_models import ApiKeyModel, EventModel
+from cortex_api.db_models import ApiKeyModel, EventModel, SessionModel
 from cortex_upgrade.event_ingestion import EventDedupeStore, EventNormalizer
 from cortex_upgrade.rate_limit import AtomicSlidingWindow
 
@@ -118,6 +118,115 @@ def _enriched_data(event: EventSchema, request: Request, now_utc: datetime, *, b
         "batch": batch,
     }
     return enriched
+
+
+def _normalize_dt(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
+
+
+async def _ensure_session(
+    db: AsyncSession,
+    session_id: str | None,
+    tenant_id: str,
+    site_id: str,
+    visitor_id: str,
+    request: Request,
+    occurred_at: datetime,
+) -> None:
+    """Ensure SessionModel exists in database before EventModel is inserted.
+
+    Prevents PostgreSQL Foreign Key constraint violations (events.session_id -> sessions.id).
+    Strictly verifies tenant isolation: cross-tenant session hijacking returns 403.
+    """
+    if not session_id:
+        return
+
+    res = await db.execute(select(SessionModel).where(SessionModel.id == session_id))
+    existing = res.scalar_one_or_none()
+
+    if existing:
+        if existing.tenant_id != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Cross-tenant session access forbidden: session belongs to '{existing.tenant_id}', not '{tenant_id}'.",
+            )
+        norm_occ = _normalize_dt(occurred_at)
+        norm_end = _normalize_dt(existing.ended_at)
+        if norm_occ and (norm_end is None or norm_occ > norm_end):
+            existing.ended_at = norm_occ
+    else:
+        now = datetime.now(UTC)
+        new_session = SessionModel(
+            id=session_id,
+            tenant_id=tenant_id,
+            site_id=site_id,
+            visitor_id=visitor_id,
+            user_agent=request.headers.get("user-agent"),
+            ip_address=client_ip_for(request),
+            started_at=occurred_at or now,
+            ended_at=occurred_at or now,
+            session_metadata={},
+            created_at=now,
+        )
+        db.add(new_session)
+
+
+async def _ensure_batch_sessions(
+    db: AsyncSession,
+    events: list[EventSchema],
+    tenant_id: str,
+    request: Request,
+    now_utc: datetime,
+) -> None:
+    """Ensure all sessions in a batch exist and belong to the authenticated tenant."""
+    session_ids = {event.session_id for event in events if event.session_id}
+    if not session_ids:
+        return
+
+    res = await db.execute(select(SessionModel).where(SessionModel.id.in_(session_ids)))
+    existing_sessions = {s.id: s for s in res.scalars().all()}
+
+    # Strict tenant verification: any cross-tenant session raises 403
+    for s_id, s in existing_sessions.items():
+        if s.tenant_id != tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Cross-tenant session access forbidden: session '{s_id}' belongs to another tenant.",
+            )
+
+    client_ip = client_ip_for(request)
+    user_agent = request.headers.get("user-agent")
+
+    for event in events:
+        s_id = event.session_id
+        if not s_id:
+            continue
+        occurred_at = event.occurred_at or now_utc
+        if s_id in existing_sessions:
+            s = existing_sessions[s_id]
+            norm_occ = _normalize_dt(occurred_at)
+            norm_end = _normalize_dt(s.ended_at)
+            if norm_occ and (norm_end is None or norm_occ > norm_end):
+                s.ended_at = norm_occ
+        else:
+            new_session = SessionModel(
+                id=s_id,
+                tenant_id=tenant_id,
+                site_id=event.site_id,
+                visitor_id=event.actor.id,
+                user_agent=user_agent,
+                ip_address=client_ip,
+                started_at=occurred_at,
+                ended_at=occurred_at,
+                session_metadata={},
+                created_at=now_utc,
+            )
+            existing_sessions[s_id] = new_session
+            db.add(new_session)
 
 
 def _to_model(
@@ -209,6 +318,16 @@ async def ingest_event(
         logger.info("Duplicate event %s for tenant %s acknowledged idempotently.", event.event_id, auth_tenant)
         return IngestEventResponse(status="duplicate", event_id=event.event_id, processed_at=now_utc)
 
+    await _ensure_session(
+        db,
+        session_id=event.session_id,
+        tenant_id=auth_tenant,
+        site_id=event.site_id,
+        visitor_id=event.actor.id,
+        request=request,
+        occurred_at=event.occurred_at or now_utc,
+    )
+
     enriched_data = _enriched_data(event, request, now_utc)
     persisted = True
     try:
@@ -287,6 +406,14 @@ async def ingest_event_batch(
 
         enriched_data = _enriched_data(event, request, now_utc, batch=True)
         pending.append((event, enriched_data))
+
+    await _ensure_batch_sessions(
+        db,
+        [e for e, _ in pending],
+        auth_tenant,
+        request,
+        now_utc,
+    )
 
     for event, enriched_data in pending:
         try:

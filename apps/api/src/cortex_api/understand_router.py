@@ -35,6 +35,7 @@ from cortex_api.db_models import (
     IdentityLinkModel,
     LeadModel,
     ProfileModel,
+    SessionModel,
     VisitorModel,
     WorkflowRunModel,
 )
@@ -90,18 +91,21 @@ async def resolve_identity_endpoint(
     tenant_id = resolve_tenant(auth, payload.get("tenant_id"))
     consent_granted = bool(payload.get("consent_granted", False))
 
-    result = await identity_resolver.resolve_identity(
-        db=db,
-        visitor_id=visitor_id,
-        user_id=payload.get("user_id"),
-        email=payload.get("email"),
-        device_fingerprint=payload.get("device_fingerprint"),
-        tenant_id=tenant_id,
-        site_id=payload.get("site_id", "default"),
-        consent_granted=consent_granted,
-        traits=payload.get("traits", {}),
-        event_trigger=payload.get("event_trigger"),
-    )
+    try:
+        result = await identity_resolver.resolve_identity(
+            db=db,
+            visitor_id=visitor_id,
+            user_id=payload.get("user_id"),
+            email=payload.get("email"),
+            device_fingerprint=payload.get("device_fingerprint"),
+            tenant_id=tenant_id,
+            site_id=payload.get("site_id", "default"),
+            consent_granted=consent_granted,
+            traits=payload.get("traits", {}),
+            event_trigger=payload.get("event_trigger"),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     return result
 
 
@@ -153,6 +157,23 @@ async def get_visitor_resolved_profile(
             for link in l_res.scalars().all()
         ]
 
+    # Fetch sessions for this visitor within tenant
+    s_res = await db.execute(
+        select(SessionModel)
+        .where(SessionModel.visitor_id == visitor_id, SessionModel.tenant_id == tenant_id)
+        .order_by(SessionModel.started_at.desc())
+    )
+    sessions = s_res.scalars().all()
+    session_list = [
+        {
+            "id": s.id,
+            "site_id": s.site_id,
+            "started_at": s.started_at.isoformat() if s.started_at else None,
+            "ended_at": s.ended_at.isoformat() if s.ended_at else None,
+        }
+        for s in sessions
+    ]
+
     return {
         "visitor_id": visitor.id,
         "first_seen_at": visitor.first_seen_at.isoformat() if visitor.first_seen_at else None,
@@ -160,6 +181,128 @@ async def get_visitor_resolved_profile(
         "attributes": visitor.attributes,
         "profile": profile_data,
         "linked_identities": links_data,
+        "sessions_count": len(sessions),
+        "sessions": session_list,
+    }
+
+
+# ── SESSIONS & REPLAY TELEMETRY ──────────────────────────────────────────────
+
+
+@router.get("/sessions")
+async def list_sessions(
+    site_id: str | None = None,
+    visitor_id: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """List sessions for the authenticated tenant with pagination."""
+    limit = max(1, min(limit, 200))
+    offset = max(0, offset)
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(SessionModel).where(SessionModel.tenant_id == tenant_id)
+    if site_id:
+        stmt = stmt.where(SessionModel.site_id == site_id)
+    if visitor_id:
+        stmt = stmt.where(SessionModel.visitor_id == visitor_id)
+    stmt = stmt.order_by(desc(SessionModel.started_at), desc(SessionModel.id)).limit(limit).offset(offset)
+    res = await db.execute(stmt)
+    records = res.scalars().all()
+    return [
+        {
+            "id": r.id,
+            "tenant_id": r.tenant_id,
+            "site_id": r.site_id,
+            "visitor_id": r.visitor_id,
+            "user_agent": r.user_agent,
+            "ip_address": r.ip_address,
+            "started_at": r.started_at.isoformat() if r.started_at else None,
+            "ended_at": r.ended_at.isoformat() if r.ended_at else None,
+            "metadata": r.session_metadata,
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+        }
+        for r in records
+    ]
+
+
+@router.get("/sessions/{session_id}")
+async def get_session(
+    session_id: str,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get session details. Strictly enforces tenant isolation (404 on cross-tenant read)."""
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(SessionModel).where(SessionModel.id == session_id, SessionModel.tenant_id == tenant_id)
+    res = await db.execute(stmt)
+    session = res.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    from sqlalchemy import func
+
+    count_stmt = select(func.count(EventModel.id)).where(
+        EventModel.session_id == session_id, EventModel.tenant_id == tenant_id
+    )
+    count_res = await db.execute(count_stmt)
+    event_count = count_res.scalar() or 0
+
+    return {
+        "id": session.id,
+        "tenant_id": session.tenant_id,
+        "site_id": session.site_id,
+        "visitor_id": session.visitor_id,
+        "user_agent": session.user_agent,
+        "ip_address": session.ip_address,
+        "started_at": session.started_at.isoformat() if session.started_at else None,
+        "ended_at": session.ended_at.isoformat() if session.ended_at else None,
+        "metadata": session.session_metadata,
+        "created_at": session.created_at.isoformat() if session.created_at else None,
+        "event_count": event_count,
+    }
+
+
+@router.get("/sessions/{session_id}/replay")
+async def get_session_replay(
+    session_id: str,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Get ordered events for session replay. Strictly enforces tenant isolation (404 on cross-tenant read)."""
+    tenant_id = auth.get("tenant_id", "tenant_default")
+    stmt = select(SessionModel).where(SessionModel.id == session_id, SessionModel.tenant_id == tenant_id)
+    res = await db.execute(stmt)
+    session = res.scalar_one_or_none()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    ev_stmt = (
+        select(EventModel)
+        .where(EventModel.session_id == session_id, EventModel.tenant_id == tenant_id)
+        .order_by(EventModel.occurred_at.asc(), EventModel.id.asc())
+    )
+    ev_res = await db.execute(ev_stmt)
+    events = ev_res.scalars().all()
+    return {
+        "session_id": session.id,
+        "tenant_id": session.tenant_id,
+        "site_id": session.site_id,
+        "visitor_id": session.visitor_id,
+        "started_at": session.started_at.isoformat() if session.started_at else None,
+        "ended_at": session.ended_at.isoformat() if session.ended_at else None,
+        "total_events": len(events),
+        "events": [
+            {
+                "event_id": e.id,
+                "type": e.type,
+                "occurred_at": e.occurred_at.isoformat() if e.occurred_at else None,
+                "data": e.data,
+                "source": e.source,
+            }
+            for e in events
+        ],
     }
 
 
@@ -442,6 +585,11 @@ async def _decide_action(
     res = await db.execute(stmt)
     item = res.scalar_one_or_none()
     if not item:
+        # Strict tenant boundary: cross-tenant mutations return 403, non-existent return 404
+        cross_res = await db.execute(select(ApprovalQueueModel).where(ApprovalQueueModel.id == action_id))
+        cross_item = cross_res.scalar_one_or_none()
+        if cross_item and cross_item.tenant_id != tenant_id:
+            raise HTTPException(status_code=403, detail="Cross-tenant action update forbidden.")
         raise HTTPException(status_code=404, detail="Approval item not found")
     if item.status != "pending":
         raise HTTPException(status_code=409, detail=f"Approval item is already '{item.status}'.")

@@ -61,7 +61,7 @@ MAX_DELIVERY_ATTEMPTS = int(os.getenv("WORKER_MAX_DELIVERY_ATTEMPTS", "5"))
 # per-message acknowledgement policy is unchanged.
 WORKER_MAX_CONCURRENCY = int(os.getenv("WORKER_MAX_CONCURRENCY", "4"))
 PEL_RECOVERY_INTERVAL_SECONDS = float(os.getenv("WORKER_PEL_RECOVERY_INTERVAL_SECONDS", "30"))
-PEL_MIN_IDLE_MS = int(os.getenv("WORKER_PEL_MIN_IDLE_MS", "60000"))
+PEL_MIN_IDLE_MS = int(os.getenv("WORKER_PEL_MIN_IDLE_MS", "30000"))
 PEL_RECOVERY_BATCH = int(os.getenv("WORKER_PEL_RECOVERY_BATCH", "100"))
 
 
@@ -193,9 +193,13 @@ async def run_pel_recovery(
             logger.info(f"PEL recovery: {len(pending)} pending message(s) found")
             for entry in pending:
                 message_id = entry["message_id"]
-                if delivery_attempts.get(message_id, 0) >= MAX_DELIVERY_ATTEMPTS:
+                times_delivered = entry.get("times_delivered", 0) or entry.get("delivery_count", 0)
+                if (
+                    delivery_attempts.get(message_id, 0) >= MAX_DELIVERY_ATTEMPTS
+                    or times_delivered >= MAX_DELIVERY_ATTEMPTS
+                ):
                     logger.error(
-                        f"Event {message_id} exhausted {MAX_DELIVERY_ATTEMPTS} attempts; acknowledging to stop redelivery."
+                        f"Event {message_id} exhausted {MAX_DELIVERY_ATTEMPTS} attempts (delivery_count={times_delivered}); acknowledging to stop redelivery."
                     )
                     await redis_client.xack(STREAM_NAME, CONSUMER_GROUP, message_id)
                     delivery_attempts.pop(message_id, None)
