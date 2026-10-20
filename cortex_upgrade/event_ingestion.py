@@ -71,3 +71,12 @@ class EventDedupeStore:
                 return False
             self._seen.add(key)
             return True
+
+    async def release(self, tenant_id: str, event_id: str) -> bool:
+        """Allow a retry when an event was claimed but did not reach durable storage."""
+        key = (tenant_id, event_id)
+        async with self._lock:
+            if key not in self._seen:
+                return False
+            self._seen.remove(key)
+            return True

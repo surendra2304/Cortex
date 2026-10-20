@@ -9,6 +9,7 @@ Covers audit defects:
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime
 
 from cortex_api.db_models import EventModel
 from sqlalchemy import select
@@ -121,23 +122,41 @@ def test_duplicate_event_is_idempotent(api_client, session_factory, fake_redis, 
     assert len(fake_redis.streams) == 1
 
 
-def test_persistence_failure_is_not_reported_as_accepted(api_client, provisioned_key, monkeypatch):
-    """C5: a failed write must never surface as 'accepted'."""
+def test_persistence_failure_is_retryable_and_not_reported_as_accepted(
+    api_client, provisioned_key, session_factory, fake_redis, monkeypatch
+):
+    """C5: a failed write is surfaced and its dedupe claim does not block a retry."""
     plaintext, _, _ = provisioned_key
     from cortex_api import events_router
 
     def _boom(*args, **kwargs):
         raise RuntimeError("simulated storage failure")
 
-    monkeypatch.setattr(events_router, "_to_model", _boom)
-    response = api_client.post(
+    with monkeypatch.context() as failing_write:
+        failing_write.setattr(events_router, "_to_model", _boom)
+        response = api_client.post(
+            "/v1/events",
+            json=event_payload(event_id="evt_fail_1"),
+            headers={"X-Cortex-Public-Key": plaintext},
+        )
+    assert response.status_code == 200
+    assert response.json()["status"] == "not_persisted"
+    assert response.json()["dispatched"] is False
+
+    retry = api_client.post(
         "/v1/events",
         json=event_payload(event_id="evt_fail_1"),
         headers={"X-Cortex-Public-Key": plaintext},
     )
-    assert response.status_code == 200
-    assert response.json()["status"] == "not_persisted"
-    assert response.json()["dispatched"] is False
+    assert retry.status_code == 200
+    assert retry.json()["status"] == "accepted"
+
+    async def _stored_ids():
+        async with session_factory() as session:
+            return (await session.execute(select(EventModel.id))).scalars().all()
+
+    assert asyncio.run(_stored_ids()) == ["evt_fail_1"]
+    assert len(fake_redis.streams) == 1
 
 
 def test_batch_requires_uniform_site_and_key(api_client, provisioned_key):
@@ -181,6 +200,60 @@ def test_batch_replays_are_idempotent(api_client, session_factory, provisioned_k
     assert asyncio.run(_count()) == 2
 
 
+def test_batch_integrity_retry_persists_nonduplicate_events(
+    api_client, session_factory, fake_redis, provisioned_key, monkeypatch
+):
+    """A stale in-memory dedupe cache must not lose fresh events in a mixed batch."""
+    from cortex_api import events_router
+
+    from cortex_upgrade.event_ingestion import EventDedupeStore
+
+    plaintext, tenant_id, site_id = provisioned_key
+
+    async def _insert_existing_event():
+        async with session_factory() as session:
+            session.add(
+                EventModel(
+                    id="evt_existing_after_restart",
+                    tenant_id=tenant_id,
+                    site_id=site_id,
+                    type="page_view",
+                    occurred_at=datetime.now(UTC),
+                    actor_type="visitor",
+                    actor_id="vis_existing",
+                    source="web-sdk",
+                    data={},
+                    server_received_at=datetime.now(UTC),
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_insert_existing_event())
+    monkeypatch.setattr(events_router, "dedupe_store", EventDedupeStore())
+
+    response = api_client.post(
+        "/v1/events/batch",
+        json=[
+            event_payload(event_id="evt_existing_after_restart"),
+            event_payload(event_id="evt_new_after_conflict"),
+        ],
+        headers={"X-Cortex-Public-Key": plaintext},
+    )
+
+    assert response.status_code == 200
+    assert [item["status"] for item in response.json()] == ["duplicate", "accepted"]
+    assert response.json()[0]["dispatched"] is False
+    assert response.json()[1]["dispatched"] is True
+
+    async def _stored_event_ids():
+        async with session_factory() as session:
+            rows = (await session.execute(select(EventModel.id))).scalars().all()
+            return set(rows)
+
+    assert asyncio.run(_stored_event_ids()) == {"evt_existing_after_restart", "evt_new_after_conflict"}
+    assert len(fake_redis.streams) == 1
+
+
 def test_batch_enforces_max_size(api_client, provisioned_key):
     plaintext, _, _ = provisioned_key
     headers = {"X-Cortex-Public-Key": plaintext}
@@ -198,8 +271,8 @@ def test_query_events_rejects_unauthenticated_in_production(api_client, provisio
 
 def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_key, monkeypatch):
     """H1: an authenticated viewer sees only their own tenant's events."""
-    from cortex_api import auth
     import jwt
+    from cortex_api import auth
 
     monkeypatch.setattr(auth, "DEV_AUTH_BYPASS", False)
     plaintext, tenant_id, site_id = provisioned_key
@@ -227,7 +300,9 @@ def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_
 
     asyncio.run(_insert_foreign())
 
-    token = jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256")
+    token = jwt.encode(
+        {"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256"
+    )
     response = api_client.get("/v1/events", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200
     ids = {row["event_id"] for row in response.json()}
@@ -237,7 +312,9 @@ def test_query_events_is_tenant_scoped(api_client, session_factory, provisioned_
 def _viewer_token(tenant_id: str) -> str:
     import jwt
 
-    return jwt.encode({"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256")
+    return jwt.encode(
+        {"sub": "usr_viewer", "role": "cortex_viewer", "tenant_id": tenant_id}, TEST_JWT_SECRET, algorithm="HS256"
+    )
 
 
 def test_query_events_paginates_beyond_the_page_cap(api_client, session_factory, provisioned_key):
