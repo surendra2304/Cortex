@@ -172,11 +172,24 @@ async def create_lead(
     db: AsyncSession = Depends(get_db_session),
     auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
 ):
+    tenant_id = str(auth.get("tenant_id") or "default")
+    profile_id = payload.get("profile_id")
+    if profile_id:
+        profile_result = await db.execute(
+            select(ProfileModel.id).where(
+                ProfileModel.id == profile_id,
+                ProfileModel.tenant_id == tenant_id,
+            )
+        )
+        if profile_result.scalar_one_or_none() is None:
+            # Do not distinguish a nonexistent profile from another tenant's profile.
+            raise HTTPException(status_code=404, detail="Profile not found.")
+
     lead_id = f"lead_{uuid.uuid4().hex[:8]}"
     db_lead = LeadModel(
         id=lead_id,
-        tenant_id=auth.get("tenant_id", "default"),
-        profile_id=payload.get("profile_id"),
+        tenant_id=tenant_id,
+        profile_id=profile_id,
         score=payload.get("score", 50.0),
         status=payload.get("status", "new"),
         source=payload.get("source", "web"),
