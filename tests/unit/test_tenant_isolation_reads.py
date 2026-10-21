@@ -136,3 +136,51 @@ def _seed_with(session_factory) -> None:
             await session.commit()
 
     asyncio.run(_insert())
+
+
+def test_lead_creation_rejects_profile_owned_by_another_tenant(api_client, session_factory):
+    async def _seed_foreign_profile():
+        async with session_factory() as session:
+            session.add(
+                ProfileModel(
+                    id="profile_owned_by_tenant_a",
+                    tenant_id="tenant_a",
+                    primary_email="private-a@example.com",
+                    identities=[],
+                    traits={},
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed_foreign_profile())
+    response = api_client.post(
+        "/v1/leads",
+        headers=auth_headers(role="cortex_operator", tenant_id="tenant_b"),
+        json={"profile_id": "profile_owned_by_tenant_a", "status": "new", "metadata": {}},
+    )
+    assert response.status_code == 404, response.text
+    assert "private-a@example.com" not in response.text
+
+
+def test_lead_creation_accepts_profile_owned_by_same_tenant(api_client, session_factory):
+    async def _seed_profile():
+        async with session_factory() as session:
+            session.add(
+                ProfileModel(
+                    id="profile_owned_by_tenant_c",
+                    tenant_id="tenant_c",
+                    primary_email="private-c@example.com",
+                    identities=[],
+                    traits={},
+                )
+            )
+            await session.commit()
+
+    asyncio.run(_seed_profile())
+    response = api_client.post(
+        "/v1/leads",
+        headers=auth_headers(role="cortex_operator", tenant_id="tenant_c"),
+        json={"profile_id": "profile_owned_by_tenant_c", "status": "new", "metadata": {}},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["lead"]["tenant_id"] == "tenant_c"
