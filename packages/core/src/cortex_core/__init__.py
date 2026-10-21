@@ -36,6 +36,12 @@ from cortex_core.models import (
 )
 from cortex_core.orchestrator import Orchestrator, ToolBus
 from cortex_core.task_manager import CortexTask, TaskManager, TaskState, global_task_manager
+from cortex_core.feature_flags import (
+    FeatureFlag,
+    FeatureFlagEngine,
+    TargetRule,
+    global_feature_flag_engine,
+)
 from cortex_core.web_property import (
     EnvironmentMismatchError,
     OperationNotAllowedError,
@@ -90,4 +96,8 @@ __all__ = [
     "global_task_manager",
     "CortexTask",
     "TaskState",
+    "FeatureFlag",
+    "FeatureFlagEngine",
+    "TargetRule",
+    "global_feature_flag_engine",
 ]

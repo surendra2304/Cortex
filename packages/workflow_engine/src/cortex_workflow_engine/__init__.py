@@ -218,3 +218,29 @@ class WorkflowStateMachine:
 
 from .capacity_planning import CapacityPlanningWorkflow, CapacityPlanResult
 from .security_incident import SecurityIncidentWorkflow
+from .auto_remediation import (
+    AutoRemediationEngine,
+    IncidentSeverity,
+    IncidentType,
+    RemediationActionType,
+    RemediationExecutionReceipt,
+    RemediationStep,
+    global_remediation_engine,
+)
+
+__all__ = [
+    "WorkflowState",
+    "WorkflowContext",
+    "WorkflowDefinition",
+    "WorkflowExecutionEngine",
+    "CapacityPlanningWorkflow",
+    "CapacityPlanResult",
+    "SecurityIncidentWorkflow",
+    "AutoRemediationEngine",
+    "IncidentSeverity",
+    "IncidentType",
+    "RemediationActionType",
+    "RemediationExecutionReceipt",
+    "RemediationStep",
+    "global_remediation_engine",
+]
