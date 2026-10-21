@@ -1094,3 +1094,17 @@ from .webhook_dispatcher import (
     WebhookDeliveryReceipt,
     WebhookDeliveryStatus,
 )
+
+# External Sync Engine
+from .sync_engine import (
+    ConflictResolutionPolicy,
+    ExternalSyncEngine,
+    SyncCursor,
+    SyncDirection,
+    SyncEntityType,
+    SyncExecutionReceipt,
+    SyncJob,
+    SyncJobStatus,
+    SyncProvider,
+    global_sync_engine,
+)

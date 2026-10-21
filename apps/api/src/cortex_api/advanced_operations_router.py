@@ -33,6 +33,25 @@ from cortex_core.canary_controller import global_canary_registry
 from cortex_core.feature_flags import FeatureFlag, TargetRule, global_feature_flag_engine
 from cortex_intelligence.audience_segments import AudienceSegment, SegmentRule, global_audience_engine
 from cortex_workflow_engine.auto_remediation import global_remediation_engine
+from cortex_intelligence.bandit_allocator import (
+    BanditAlgorithm,
+    global_bandit_engine,
+)
+from cortex_integrations.sync_engine import (
+    ConflictResolutionPolicy,
+    SyncDirection,
+    SyncEntityType,
+    SyncJobStatus,
+    SyncProvider,
+    global_sync_engine,
+)
+from cortex_analytics.anomaly_detector import (
+    AnomalySeverity,
+    global_anomaly_detector,
+)
+from cortex_core.compliance_ledger import (
+    global_compliance_ledger,
+)
 
 from cortex_upgrade.dlq import global_dlq
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -784,3 +803,340 @@ async def execute_incident_remediation(
         auto_approve=payload.auto_approve,
     )
     return receipt.model_dump()
+
+
+# ── 13. Multi-Armed Bandit (MAB) & Thompson Sampling ──────────────────────────
+
+
+class BanditCreateRequest(BaseModel):
+    experiment_id: str
+    name: str
+    arm_configs: list[dict[str, Any]]
+    algorithm: str = "thompson_sampling"
+    decay_factor: float = 0.999
+    exploration_constant: float = 1.0
+    epsilon: float = 0.1
+    min_samples_for_decision: int = 50
+    confidence_threshold: float = 0.95
+
+
+class BanditSelectRequest(BaseModel):
+    experiment_id: str
+    context: dict[str, Any] = Field(default_factory=dict)
+    sticky_actor_id: str | None = None
+
+
+class BanditRewardRequest(BaseModel):
+    experiment_id: str
+    arm_id: str
+    converted: bool
+    value: float = 1.0
+
+
+@router.post("/v1/experiments/bandit/create")
+async def create_bandit_experiment(
+    payload: BanditCreateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Create or reset a Multi-Armed Bandit experiment."""
+    tenant_id = user["tenant_id"]
+    try:
+        algo = BanditAlgorithm(payload.algorithm.lower())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unsupported algorithm '{payload.algorithm}'. Supported: {[a.value for a in BanditAlgorithm]}",
+        )
+
+    try:
+        exp = global_bandit_engine.create_experiment(
+            tenant_id=tenant_id,
+            experiment_id=payload.experiment_id,
+            name=payload.name,
+            arm_configs=payload.arm_configs,
+            algorithm=algo,
+            decay_factor=payload.decay_factor,
+            exploration_constant=payload.exploration_constant,
+            epsilon=payload.epsilon,
+            min_samples_for_decision=payload.min_samples_for_decision,
+            confidence_threshold=payload.confidence_threshold,
+        )
+        return exp.model_dump()
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/v1/experiments/bandit/select-arm")
+async def select_bandit_arm(
+    payload: BanditSelectRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Select the optimal bandit arm for the provided context."""
+    tenant_id = user["tenant_id"]
+    try:
+        decision = global_bandit_engine.select_arm(
+            tenant_id=tenant_id,
+            experiment_id=payload.experiment_id,
+            context=payload.context,
+            sticky_actor_id=payload.sticky_actor_id,
+        )
+        return decision.model_dump()
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bandit experiment '{payload.experiment_id}' not found for tenant '{tenant_id}'.",
+        )
+
+
+@router.post("/v1/experiments/bandit/record-reward")
+async def record_bandit_reward(
+    payload: BanditRewardRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Record conversion outcome reward and update posterior probabilities."""
+    tenant_id = user["tenant_id"]
+    try:
+        exp = global_bandit_engine.record_reward(
+            tenant_id=tenant_id,
+            experiment_id=payload.experiment_id,
+            arm_id=payload.arm_id,
+            converted=payload.converted,
+            value=payload.value,
+        )
+        return exp.model_dump()
+    except KeyError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+
+
+@router.get("/v1/experiments/bandit/{experiment_id}")
+async def get_bandit_experiment(
+    experiment_id: str,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Retrieve bandit experiment status, arm distributions, and Bayesian win rates."""
+    tenant_id = user["tenant_id"]
+    exp = global_bandit_engine.get_experiment(tenant_id, experiment_id)
+    if not exp:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Bandit experiment '{experiment_id}' not found for tenant '{tenant_id}'.",
+        )
+    return exp.model_dump()
+
+
+# ── 14. External CRM & Commerce Sync Queue ─────────────────────────────────────
+
+
+class SyncEnqueueRequest(BaseModel):
+    provider: str
+    entity_type: str
+    external_id: str
+    payload: dict[str, Any]
+    direction: str = "outbound"
+    max_retries: int = 3
+
+
+class SyncProcessRequest(BaseModel):
+    max_jobs: int = 20
+
+
+@router.post("/v1/integrations/sync/enqueue")
+async def enqueue_sync_job(
+    payload: SyncEnqueueRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Enqueue an external sync job with idempotent deduplication."""
+    tenant_id = user["tenant_id"]
+    try:
+        prov = SyncProvider(payload.provider.lower())
+        ent = SyncEntityType(payload.entity_type.lower())
+        dirn = SyncDirection(payload.direction.lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    job = global_sync_engine.enqueue_job(
+        tenant_id=tenant_id,
+        provider=prov,
+        entity_type=ent,
+        external_id=payload.external_id,
+        payload=payload.payload,
+        direction=dirn,
+        max_retries=payload.max_retries,
+    )
+    return job.model_dump()
+
+
+@router.get("/v1/integrations/sync/jobs")
+async def list_sync_jobs(
+    status_filter: str | None = Query(None, alias="status"),
+    provider: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> list[dict[str, Any]]:
+    """List external sync jobs for the authenticated tenant."""
+    tenant_id = user["tenant_id"]
+    parsed_status = None
+    if status_filter:
+        try:
+            parsed_status = SyncJobStatus(status_filter.upper())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid status '{status_filter}'")
+
+    parsed_provider = None
+    if provider:
+        try:
+            parsed_provider = SyncProvider(provider.lower())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid provider '{provider}'")
+
+    jobs = global_sync_engine.list_jobs(
+        tenant_id=tenant_id,
+        status=parsed_status,
+        provider=parsed_provider,
+        limit=limit,
+    )
+    return [j.model_dump() for j in jobs]
+
+
+@router.get("/v1/integrations/sync/cursor")
+async def get_sync_cursor(
+    provider: str = Query(...),
+    entity_type: str = Query(...),
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Retrieve current synchronization cursor for a provider and entity type."""
+    tenant_id = user["tenant_id"]
+    try:
+        prov = SyncProvider(provider.lower())
+        ent = SyncEntityType(entity_type.lower())
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    cursor = global_sync_engine.get_cursor(tenant_id, prov, ent)
+    return cursor.model_dump()
+
+
+@router.post("/v1/integrations/sync/process")
+async def process_sync_batch(
+    payload: SyncProcessRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Process pending sync jobs through token-bucket rate limiters."""
+    tenant_id = user["tenant_id"]
+    receipts = await global_sync_engine.process_pending_jobs(tenant_id=tenant_id, max_jobs=payload.max_jobs)
+    return {
+        "tenant_id": tenant_id,
+        "processed_count": len(receipts),
+        "receipts": [r.model_dump() for r in receipts],
+    }
+
+
+# ── 15. Streaming Telemetry Anomaly Detector ───────────────────────────────────
+
+
+class AnomalyEvaluateRequest(BaseModel):
+    metric_name: str
+    value: float
+    cooldown_seconds: float = 60.0
+
+
+@router.post("/v1/analytics/anomalies/evaluate")
+async def evaluate_telemetry_point(
+    payload: AnomalyEvaluateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Evaluate an operational metric observation against online EWMA/MAD baselines."""
+    tenant_id = user["tenant_id"]
+    incident = global_anomaly_detector.evaluate_point(
+        tenant_id=tenant_id,
+        metric_name=payload.metric_name,
+        value=payload.value,
+        cooldown_seconds=payload.cooldown_seconds,
+    )
+    return {
+        "tenant_id": tenant_id,
+        "is_anomalous": incident is not None,
+        "incident": incident.model_dump() if incident else None,
+    }
+
+
+@router.get("/v1/analytics/anomalies/incidents")
+async def list_anomaly_incidents(
+    severity: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> list[dict[str, Any]]:
+    """List historical anomaly incidents for tenant."""
+    tenant_id = user["tenant_id"]
+    parsed_sev = None
+    if severity:
+        try:
+            parsed_sev = AnomalySeverity(severity.upper())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid severity '{severity}'")
+
+    incidents = global_anomaly_detector.list_incidents(tenant_id=tenant_id, severity=parsed_sev, limit=limit)
+    return [inc.model_dump() for inc in incidents]
+
+
+# ── 16. Cryptographic Tamper-Evident Compliance Ledger ─────────────────────────
+
+
+class ComplianceRecordRequest(BaseModel):
+    action_type: str
+    actor_id: str
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/v1/compliance/ledger/record")
+async def record_compliance_block(
+    payload: ComplianceRecordRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Append a cryptographic block into tenant's immutable compliance ledger."""
+    tenant_id = user["tenant_id"]
+    block = global_compliance_ledger.record_action(
+        tenant_id=tenant_id,
+        action_type=payload.action_type,
+        actor_id=payload.actor_id,
+        payload=payload.payload,
+    )
+    return block.model_dump()
+
+
+@router.get("/v1/compliance/ledger/blocks")
+async def get_compliance_blocks(
+    action_type: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> list[dict[str, Any]]:
+    """List audit blocks for tenant."""
+    tenant_id = user["tenant_id"]
+    blocks = global_compliance_ledger.get_blocks(tenant_id=tenant_id, action_type=action_type, limit=limit)
+    return [b.model_dump() for b in blocks]
+
+
+@router.get("/v1/compliance/ledger/verify")
+async def verify_compliance_ledger(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Verify integrity of tenant's cryptographic ledger and compute Merkle root."""
+    tenant_id = user["tenant_id"]
+    result = global_compliance_ledger.verify_chain(tenant_id=tenant_id)
+    return result.model_dump()
+
+
+@router.get("/v1/compliance/ledger/proof/{block_index}")
+async def get_merkle_proof(
+    block_index: int,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Generate Merkle inclusion proof for a block in tenant's audit chain."""
+    tenant_id = user["tenant_id"]
+    proof = global_compliance_ledger.generate_merkle_proof(tenant_id=tenant_id, block_index=block_index)
+    if not proof:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Block index {block_index} not found in tenant '{tenant_id}' compliance ledger.",
+        )
+    return proof.model_dump()

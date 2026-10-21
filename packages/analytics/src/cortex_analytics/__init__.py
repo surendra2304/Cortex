@@ -361,3 +361,13 @@ __all__ = [
 ]
 
 from .security_baseline import PostureSnapshot, SecurityBaselineTracker
+
+# Streaming Telemetry Anomaly Detector
+from .anomaly_detector import (
+    AnomalyIncident,
+    AnomalySeverity,
+    MetricType,
+    StreamingMetricBaseline,
+    TelemetryAnomalyDetector,
+    global_anomaly_detector,
+)
