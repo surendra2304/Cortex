@@ -142,3 +142,63 @@ def test_sentinel_findings_api_endpoint(monkeypatch, api_client, provisioned_key
     )
     assert exp_res.status_code == 200
     assert "assets" in exp_res.json()
+
+
+def test_sentinel_scan_rejects_unregistered_asset(monkeypatch, api_client):
+    payload = {
+        "sentinel_task_id": "task_unknown_asset",
+        "asset_id": "site_not_registered_to_any_tenant",
+        "posture_score": 99.0,
+        "findings": [],
+    }
+    response = api_client.post(
+        "/v1/sentinel/findings",
+        headers=friday_headers(monkeypatch),
+        json=payload,
+    )
+    assert response.status_code == 404, response.text
+
+
+def test_sentinel_scan_replay_replaces_findings_and_preserves_clean_posture(
+    monkeypatch, api_client, provisioned_key
+):
+    _, tenant_id, site_id = provisioned_key
+    headers = friday_headers(monkeypatch)
+    first = {
+        "sentinel_task_id": "task_replayable_scan",
+        "asset_id": site_id,
+        "posture_score": 61.0,
+        "findings": [
+            {
+                "finding_id": "finding_before_rescan",
+                "severity": "medium",
+                "title": "Finding discovered before remediation",
+                "description": "This finding should disappear after a clean replay.",
+            }
+        ],
+    }
+    first_response = api_client.post("/v1/sentinel/findings", headers=headers, json=first)
+    assert first_response.status_code == 202, first_response.text
+    assert first_response.json()["tenant_id"] == tenant_id
+
+    # The same tenant/site/task now represents a clean re-scan; old findings must be replaced.
+    replay = {
+        **first,
+        "posture_score": 100.0,
+        "findings": [],
+    }
+    replay_response = api_client.post("/v1/sentinel/findings", headers=headers, json=replay)
+    assert replay_response.status_code == 202, replay_response.text
+    assert replay_response.json()["findings_count"] == 0
+
+    visible = api_client.get(
+        "/v1/sentinel/findings",
+        params={"asset_id": site_id},
+        headers=auth_headers(role="cortex_viewer", tenant_id=tenant_id),
+    )
+    assert visible.status_code == 200, visible.text
+    data = visible.json()
+    assert data["findings"] == []
+    assert data["total"] == 0
+    assert data["posture_score"] == 100.0
+    assert data["posture_source"] == "sentinel_push"
