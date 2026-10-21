@@ -1,11 +1,35 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import os
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID, uuid4
 
 from .models import Approval, ToolCall
+
+
+class ApprovalSigner:
+    """HMAC-SHA256 signature generator and verifier for closed-loop tool approvals."""
+
+    DEFAULT_SECRET = os.getenv("CORTEX_APPROVAL_SECRET", "cortex-closed-loop-approval-secret-key-32b")
+
+    @classmethod
+    def generate_signature(cls, approval: Approval, secret: str | None = None) -> str:
+        sec = secret or cls.DEFAULT_SECRET
+        payload = f"{approval.approval_id}:{approval.tenant_id}:{approval.call_id}:{approval.approved}:{approval.decided_by}"
+        return hmac.new(sec.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    @classmethod
+    def verify_signature(cls, approval: Approval, signature: str | None = None, secret: str | None = None) -> bool:
+        sig = signature or approval.signature
+        if not sig:
+            return False
+        expected = cls.generate_signature(approval, secret)
+        return hmac.compare_digest(expected, sig)
+
 
 
 @dataclass
@@ -54,6 +78,17 @@ class ApprovalQueue:
                         f"approval already {item.approval.decided_by and ('approved' if item.approval.approved else 'rejected')}"
                     )
                 return item.approval
+            temp_record = Approval(
+                approval_id=item.approval.approval_id,
+                tenant_id=item.approval.tenant_id,
+                principal_id=item.approval.principal_id,
+                tool_name=item.approval.tool_name,
+                call_id=item.approval.call_id,
+                approved=approved,
+                decided_by=approver,
+                reason=reason,
+            )
+            sig = ApprovalSigner.generate_signature(temp_record)
             approved_record = Approval(
                 approval_id=item.approval.approval_id,
                 tenant_id=item.approval.tenant_id,
@@ -63,6 +98,7 @@ class ApprovalQueue:
                 approved=approved,
                 decided_by=approver,
                 reason=reason,
+                signature=sig,
             )
             self._items[approval_id] = PendingApproval(approved_record, item.expires_at)
             return approved_record

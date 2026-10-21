@@ -739,6 +739,30 @@ class AgentRegistry:
             self.register(CompetitiveIntelligenceAgent())
         except Exception:
             pass
+        try:
+            from .compliance_agent import ComplianceGovernanceAgent
+
+            self.register(ComplianceGovernanceAgent())
+        except Exception:
+            pass
+        try:
+            from .cro_agent import CROExperimentAgent
+
+            self.register(CROExperimentAgent())
+        except Exception:
+            pass
+        try:
+            from .revops_agent import RevenueOperationsAgent
+
+            self.register(RevenueOperationsAgent())
+        except Exception:
+            pass
+        try:
+            from .mitigation_agent import ProactiveMitigationAgent
+
+            self.register(ProactiveMitigationAgent())
+        except Exception:
+            pass
 
     def register(self, agent: SpecialistAgent) -> None:
         self._agents[agent.agent_id] = agent
@@ -750,6 +774,14 @@ class AgentRegistry:
 
     def route_for_event(self, event_type: str) -> SpecialistAgent:
         e = event_type.lower()
+        if "compliance" in e or "privacy" in e or "gdpr" in e or "consent" in e or "pii" in e:
+            return self._agents.get("agent_compliance", self._agents["reliability"])
+        if "experiment" in e or "cro" in e or "ab_test" in e or "variant" in e or "split_test" in e:
+            return self._agents.get("agent_cro", self._agents["growth"])
+        if "deal" in e or "contract" in e or "invoice" in e or "acv" in e or "revops" in e:
+            return self._agents.get("agent_revops", self._agents["sales"])
+        if "mitigat" in e or "ddos" in e or "throttle" in e or "brute_force" in e or "threat" in e or "anomaly" in e:
+            return self._agents.get("agent_mitigation", self._agents["reliability"])
         if "competitor" in e or "intelx" in e or "battlecard" in e or "vs_" in e:
             return self._agents.get("agent_competitive", self._agents["growth"])
         if "qualify" in e or "score" in e:
@@ -767,6 +799,10 @@ class AgentRegistry:
 
 from .collaboration import CollaborationResult, CollaborationSession  # noqa: E402  (defined after agents)
 from .competitive_agent import CompetitiveIntelligenceAgent
+from .compliance_agent import ComplianceGovernanceAgent
+from .cro_agent import CROExperimentAgent
+from .mitigation_agent import ProactiveMitigationAgent
+from .revops_agent import RevenueOperationsAgent
 
 __all__ = [
     "AgentInput",
@@ -776,11 +812,16 @@ __all__ = [
     "ChurnRiskAgent",
     "CollaborationResult",
     "CollaborationSession",
+    "CompetitiveIntelligenceAgent",
+    "ComplianceGovernanceAgent",
+    "CROExperimentAgent",
     "GrowthAgent",
     "HandoffRequest",
+    "ProactiveMitigationAgent",
     "ProposedAction",
     "QualificationAgent",
     "ReliabilityAgent",
+    "RevenueOperationsAgent",
     "SalesAgent",
     "SpecialistAgent",
     "SupportAgent",

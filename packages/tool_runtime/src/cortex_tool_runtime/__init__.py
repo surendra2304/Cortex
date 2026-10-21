@@ -45,6 +45,11 @@ class ToolCapability(str, Enum):
     PAYMENT_INITIATE = "payment_initiate"
     TICKETING_CREATE = "ticketing_create"
     CALENDAR_BOOK = "calendar_book"
+    EXPERIMENT_PROMOTE_VARIANT = "experiment_promote_variant"
+    CANARY_TRAFFIC_SHIFT = "canary_traffic_shift"
+    DLQ_REPLAY = "dlq_replay"
+    ATTRIBUTION_ANALYZE = "attribution_analyze"
+    TENANT_AUDIT_EXPORT = "tenant_audit_export"
 
 
 class Tool(BaseModel):

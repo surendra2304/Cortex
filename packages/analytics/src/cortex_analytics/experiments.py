@@ -55,6 +55,9 @@ class ExperimentationEngine:
     - Dynamic rule-based personalization and recommendation scoring
     """
 
+    def __init__(self) -> None:
+        self.experiments: dict[str, ExperimentDefinition] = {}
+
     def assign_variant(self, visitor_id: str, experiment: ExperimentDefinition) -> ExperimentVariant:
         """Deterministically assign variant based on visitor_id hash."""
         if not experiment.variants:
@@ -135,3 +138,6 @@ class ExperimentationEngine:
             return rule.get("experience_payload")
 
         return None
+
+
+global_experiment_engine = ExperimentationEngine()
