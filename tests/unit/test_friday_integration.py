@@ -532,7 +532,8 @@ def test_friday_health_summary_requires_friday_auth():
 # ===========================================================================
 
 
-def test_friday_priority_leads_empty_db_returns_empty_list():
+def test_friday_priority_leads_empty_db_returns_empty_list(monkeypatch):
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant_test")
     """When no leads exist, priority_leads returns a real empty list (no fabricated demo data)."""
     mock_db = _mock_db_empty()
     try:
@@ -546,7 +547,8 @@ def test_friday_priority_leads_empty_db_returns_empty_list():
         app.dependency_overrides.clear()
 
 
-def test_friday_priority_leads_with_real_leads():
+def test_friday_priority_leads_with_real_leads(monkeypatch):
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant_test")
     """Priority leads returns DB leads ordered by score desc with recommendations."""
     mock_db = AsyncMock()
 
@@ -602,7 +604,8 @@ def test_friday_priority_leads_with_real_leads():
 # ===========================================================================
 
 
-def test_friday_incidents_empty_returns_empty_list():
+def test_friday_incidents_empty_returns_empty_list(monkeypatch):
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant_test")
     """No incidents in DB → endpoint returns [] (all clear signal to FRIDAY)."""
     mock_db = _mock_db_empty()
     try:
@@ -615,7 +618,8 @@ def test_friday_incidents_empty_returns_empty_list():
         app.dependency_overrides.clear()
 
 
-def test_friday_incidents_returns_hypothesis():
+def test_friday_incidents_returns_hypothesis(monkeypatch):
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant_test")
     """Incidents include deterministic root-cause hypothesis from event payload."""
     mock_db = AsyncMock()
 
@@ -703,3 +707,59 @@ def test_friday_role_in_hierarchy():
     assert Role.CORTEX_OPERATOR in hierarchy
     assert Role.CORTEX_ADMIN in hierarchy
     assert Role.FRIDAY_SYSTEM in hierarchy
+
+
+
+@pytest.mark.parametrize("path", ["/v1/friday/priority_leads", "/v1/friday/incidents"])
+def test_friday_cross_tenant_reads_fail_closed_without_allowlist(path, monkeypatch):
+    """A shared system identity must not turn an omitted tenant into unrestricted reads."""
+    monkeypatch.delenv("FRIDAY_ALLOWED_TENANTS", raising=False)
+    mock_db = _mock_db_empty()
+    try:
+        client = _client_with_auth_and_db(mock_db)
+        response = client.get(path)
+        assert response.status_code == 503
+        mock_db.execute.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("path", ["/v1/friday/priority_leads", "/v1/friday/incidents"])
+def test_friday_system_reads_are_limited_to_allowlisted_tenants(path, monkeypatch):
+    """System-level read queries must contain the tenant allowlist in SQL itself."""
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant-b, tenant-a")
+    mock_db = _mock_db_empty()
+    try:
+        client = _client_with_auth_and_db(mock_db)
+        response = client.get(path)
+        assert response.status_code == 200, response.text
+        statement = mock_db.execute.await_args.args[0]
+        sql = str(statement.compile(compile_kwargs={"literal_binds": True}))
+        assert "tenant_id IN ('tenant-a', 'tenant-b')" in sql
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("path", ["/v1/friday/priority_leads", "/v1/friday/incidents"])
+def test_tenant_bound_friday_identity_cannot_read_another_tenant(path, monkeypatch):
+    """A tenant-bound Friday identity cannot broaden its own scope with a query parameter."""
+    monkeypatch.setenv("FRIDAY_ALLOWED_TENANTS", "tenant-a, tenant-victim")
+    mock_db = _mock_db_empty()
+
+    async def _tenant_a_identity():
+        return {
+            "sub": "friday_tenant_a",
+            "role": "friday_system",
+            "tenant_id": "tenant-a",
+            "system": "FRIDAY",
+        }
+
+    try:
+        app.dependency_overrides[verify_friday_token] = _tenant_a_identity
+        app.dependency_overrides[get_db_session] = _make_db_override(mock_db)
+        client = TestClient(app)
+        response = client.get(path, params={"tenant_id": "tenant-victim"})
+        assert response.status_code == 403
+        mock_db.execute.assert_not_awaited()
+    finally:
+        app.dependency_overrides.clear()
