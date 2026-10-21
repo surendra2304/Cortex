@@ -86,6 +86,11 @@ async def _observe_ingestion(ok: bool, reason: str = "") -> None:
         await circuit.record_failure(reason or "ingestion failure")
 
 
+async def _release_event_claims(tenant_id: str, events: list[EventSchema]) -> None:
+    for event in events:
+        await dedupe_store.release(tenant_id, event.event_id)
+
+
 async def check_redis_rate_limit(redis_client: aioredis.Redis, key: str) -> None:
     """Sliding-window limiter with a fail-closed local fallback."""
     try:
@@ -318,15 +323,19 @@ async def ingest_event(
         logger.info("Duplicate event %s for tenant %s acknowledged idempotently.", event.event_id, auth_tenant)
         return IngestEventResponse(status="duplicate", event_id=event.event_id, processed_at=now_utc)
 
-    await _ensure_session(
-        db,
-        session_id=event.session_id,
-        tenant_id=auth_tenant,
-        site_id=event.site_id,
-        visitor_id=event.actor.id,
-        request=request,
-        occurred_at=event.occurred_at or now_utc,
-    )
+    try:
+        await _ensure_session(
+            db,
+            session_id=event.session_id,
+            tenant_id=auth_tenant,
+            site_id=event.site_id,
+            visitor_id=event.actor.id,
+            request=request,
+            occurred_at=event.occurred_at or now_utc,
+        )
+    except Exception:
+        await dedupe_store.release(auth_tenant, event.event_id)
+        raise
 
     enriched_data = _enriched_data(event, request, now_utc)
     persisted = True
@@ -334,13 +343,39 @@ async def ingest_event(
         db.add(_to_model(event, auth_tenant, request, now_utc, enriched_data))
         await db.commit()
         await _observe_ingestion(True)
-    except IntegrityError:
+    except IntegrityError as exc:
         await db.rollback()
-        # A duplicate is a healthy outcome for the store, not an ingestion failure.
-        await _observe_ingestion(True, "duplicate")
-        return IngestEventResponse(status="duplicate", event_id=event.event_id, processed_at=now_utc)
+        # IntegrityError may mean a duplicate ID, but can also signal a different
+        # constraint violation. Only acknowledge duplicates that exist for this tenant.
+        try:
+            existing = await db.execute(
+                select(EventModel.id).where(
+                    EventModel.id == event.event_id,
+                    EventModel.tenant_id == auth_tenant,
+                )
+            )
+            is_duplicate = existing.scalar_one_or_none() is not None
+        except Exception as verify_exc:
+            logger.error("Unable to verify conflicting event %s: %s", event.event_id, verify_exc)
+            is_duplicate = False
+
+        if is_duplicate:
+            await _observe_ingestion(True, "duplicate")
+            return IngestEventResponse(status="duplicate", event_id=event.event_id, processed_at=now_utc)
+
+        await dedupe_store.release(auth_tenant, event.event_id)
+        await _observe_ingestion(False, "IntegrityError")
+        if settings.app_env == "production":
+            logger.error("Integrity error while persisting event %s: %s", event.event_id, exc)
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to durably commit event {event.event_id} to store.",
+            ) from exc
+        logger.error("Event %s was NOT persisted (integrity error): %s", event.event_id, exc)
+        persisted = False
     except Exception as exc:
         await db.rollback()
+        await dedupe_store.release(auth_tenant, event.event_id)
         persisted = False
         await _observe_ingestion(False, type(exc).__name__)
         if settings.app_env == "production":
@@ -400,6 +435,7 @@ async def ingest_event_batch(
     for event in events:
         _assert_tenant_authority(event, auth_tenant)
 
+    for event in events:
         if not await dedupe_store.claim(auth_tenant, event.event_id):
             responses.append(IngestEventResponse(status="duplicate", event_id=event.event_id, processed_at=now_utc))
             continue
@@ -407,13 +443,17 @@ async def ingest_event_batch(
         enriched_data = _enriched_data(event, request, now_utc, batch=True)
         pending.append((event, enriched_data))
 
-    await _ensure_batch_sessions(
-        db,
-        [e for e, _ in pending],
-        auth_tenant,
-        request,
-        now_utc,
-    )
+    try:
+        await _ensure_batch_sessions(
+            db,
+            [e for e, _ in pending],
+            auth_tenant,
+            request,
+            now_utc,
+        )
+    except Exception:
+        await _release_event_claims(auth_tenant, [event for event, _ in pending])
+        raise
 
     for event, enriched_data in pending:
         try:
@@ -421,8 +461,10 @@ async def ingest_event_batch(
         except Exception as exc:
             logger.error("Failed to prepare batch event %s: %s", event.event_id, exc)
             responses.append(IngestEventResponse(status="rejected", event_id=event.event_id, processed_at=now_utc))
+            await dedupe_store.release(auth_tenant, event.event_id)
             pending = [item for item in pending if item[0].event_id != event.event_id]
 
+    individual_statuses: dict[str, str] | None = None
     try:
         await db.commit()
         committed = True
@@ -430,10 +472,18 @@ async def ingest_event_batch(
     except IntegrityError as exc:
         await db.rollback()
         logger.warning("Batch contained already-persisted event ids; retrying writes individually: %s", exc)
-        committed = await _commit_individually(db, pending)
-        await _observe_ingestion(True, "duplicate-retry")
+        individual_statuses = await _commit_individually(db, pending, auth_tenant, request, now_utc)
+        await _release_event_claims(
+            auth_tenant,
+            [event for event, _ in pending if individual_statuses[event.event_id] == "not_persisted"],
+        )
+        await _observe_ingestion(
+            all(result != "not_persisted" for result in individual_statuses.values()),
+            "batch individual commit failed",
+        )
     except Exception as exc:
         await db.rollback()
+        await _release_event_claims(auth_tenant, [event for event, _ in pending])
         await _observe_ingestion(False, type(exc).__name__)
         logger.error("Failed to commit batch of %d events: %s", len(events), exc)
         if settings.app_env == "production":
@@ -444,10 +494,16 @@ async def ingest_event_batch(
         committed = False
 
     for event, enriched_data in pending:
-        dispatched = await _publish(redis_client, event, auth_tenant, enriched_data) if committed else False
+        if individual_statuses is not None:
+            event_status = individual_statuses[event.event_id]
+        else:
+            event_status = "accepted" if committed else "not_persisted"
+        dispatched = (
+            await _publish(redis_client, event, auth_tenant, enriched_data) if event_status == "accepted" else False
+        )
         responses.append(
             IngestEventResponse(
-                status="accepted" if committed else "not_persisted",
+                status=event_status,
                 event_id=event.event_id,
                 processed_at=now_utc,
                 dispatched=dispatched,
@@ -459,20 +515,49 @@ async def ingest_event_batch(
     return responses
 
 
-async def _commit_individually(db: AsyncSession, pending: list[tuple]) -> bool:
-    """Commit each prepared event separately so one duplicate cannot fail the batch."""
-    all_ok = True
-    for event, _enriched in pending:
+async def _commit_individually(
+    db: AsyncSession,
+    pending: list[tuple],
+    tenant_id: str,
+    request: Request,
+    now_utc: datetime,
+) -> dict[str, str]:
+    """Retry each event separately after a batch conflict and preserve its outcome."""
+    outcomes: dict[str, str] = {}
+    for event, enriched in pending:
         try:
+            await _ensure_session(
+                db,
+                session_id=event.session_id,
+                tenant_id=tenant_id,
+                site_id=event.site_id,
+                visitor_id=event.actor.id,
+                request=request,
+                occurred_at=event.occurred_at or now_utc,
+            )
+            db.add(_to_model(event, tenant_id, request, now_utc, enriched))
             await db.commit()
+            outcomes[event.event_id] = "accepted"
         except IntegrityError:
             await db.rollback()
-            logger.info("Batch event %s already existed; treated idempotently.", event.event_id)
+            try:
+                existing = await db.execute(
+                    select(EventModel.id).where(
+                        EventModel.id == event.event_id,
+                        EventModel.tenant_id == tenant_id,
+                    )
+                )
+                outcomes[event.event_id] = "duplicate" if existing.scalar_one_or_none() else "not_persisted"
+            except Exception as exc:
+                logger.error("Unable to verify conflicting batch event %s: %s", event.event_id, exc)
+                outcomes[event.event_id] = "not_persisted"
+            if outcomes[event.event_id] == "duplicate":
+                logger.info("Batch event %s already existed; treated idempotently.", event.event_id)
         except Exception as exc:
             await db.rollback()
             logger.error("Batch event %s failed to commit: %s", event.event_id, exc)
-            all_ok = False
-    return all_ok
+            outcomes[event.event_id] = "not_persisted"
+    return outcomes
 
 
 @router.get("", response_model=list[dict[str, Any]])
