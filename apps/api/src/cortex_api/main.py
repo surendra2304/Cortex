@@ -540,6 +540,24 @@ async def root(request: Request):
     return HTMLResponse(content=FALLBACK_WEBSITE_HTML, status_code=200)
 
 
+def _sdk_script_path() -> str | None:
+    if _REPO_ROOT:
+        candidate = _REPO_ROOT / "packages" / "sdk" / "dist" / "index.min.js"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+@app.api_route("/sdk.js", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/cortex.js", methods=["GET", "HEAD"], include_in_schema=False)
+async def serve_sdk_bundle():
+    """Serve the compiled standalone Cortex browser tracking SDK."""
+    script_file = _sdk_script_path()
+    if script_file and os.path.isfile(script_file):
+        return FileResponse(script_file, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="SDK bundle not found")
+
+
 @app.api_route("/dashboard", methods=["GET", "HEAD"], include_in_schema=False)
 @app.api_route("/dashboard/", methods=["GET", "HEAD"], include_in_schema=False)
 async def dashboard_redirect():
