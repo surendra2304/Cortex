@@ -34,7 +34,7 @@ def test_multi_tenant_security_isolation_e2e(monkeypatch, api_client):
     # 2. Onboard Tenant Beta
     res_b = client.post(
         "/v1/tenants",
-        headers=auth_headers(),
+        headers=auth_headers(role="cortex_platform_admin", tenant_id="system"),
         json={"tenant_name": "Tenant Beta Security LLC", "admin_email": "ciso@beta.com", "plan": "enterprise"},
     )
     assert res_b.status_code == 201
