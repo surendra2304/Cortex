@@ -89,6 +89,7 @@ class Approval:
     decided_by: str
     decided_at: datetime = field(default_factory=utc_now)
     reason: str = ""
+    signature: str = ""
 
 
 @dataclass(frozen=True)

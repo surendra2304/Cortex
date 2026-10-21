@@ -36,7 +36,7 @@ def configured_secret(monkeypatch):
 def test_forged_token_is_rejected(configured_secret):
     """The exact exploit from Phase 2: unsigned claims must not select a tenant."""
     client = TestClient(app)
-    forged = jwt.encode({"tenant_id": "tenant_live"}, "not-the-real-secret", algorithm="HS256")
+    forged = jwt.encode({"tenant_id": "tenant_live"}, "not-the-real-secret-32-bytes-long!!", algorithm="HS256")
     with pytest.raises(WebSocketDisconnect) as excinfo:
         with client.websocket_connect(f"/ws/v1/live?token={forged}") as websocket:
             websocket.receive_text()
@@ -59,7 +59,9 @@ async def test_alg_none_token_is_rejected_at_auth_layer(configured_secret):
         async def close(self, code=None, reason=None):
             self.closed_with = (code, reason)
 
-    signed_elsewhere = jwt.encode({"tenant_id": "tenant_live"}, "attacker-secret", algorithm="HS256")
+    signed_elsewhere = jwt.encode(
+        {"tenant_id": "tenant_live"}, "attacker-secret-key-32-bytes-long!", algorithm="HS256"
+    )
     socket = RecordingSocket()
     tenant = await authenticate_websocket(socket, signed_elsewhere)
     assert tenant is None
@@ -101,7 +103,7 @@ def test_dev_bypass_ignores_forged_tenant_claim(monkeypatch):
     monkeypatch.setattr(auth_module, "DEV_AUTH_BYPASS", True)
 
     client = TestClient(app)
-    forged = jwt.encode({"tenant_id": "tenant_live"}, "whatever", algorithm="HS256")
+    forged = jwt.encode({"tenant_id": "tenant_live"}, "whatever-secret-key-32-bytes-long!!", algorithm="HS256")
     with client.websocket_connect(f"/ws/v1/live?token={forged}") as websocket:
         websocket.send_json({"action": "ping"})
         for _ in range(6):

@@ -1,3 +1,11 @@
+from cortex_analytics.attribution import (
+    AttributionEngine,
+    AttributionModelType,
+    AttributionReport,
+    AttributionResult,
+    ConversionEvent,
+    Touchpoint,
+)
 import logging
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -304,11 +312,18 @@ from cortex_analytics.experiments import (
     ExperimentDefinition,
     ExperimentStatus,
     ExperimentVariant,
+    global_experiment_engine,
 )
 from cortex_analytics.nl_query import AdvancedAnalyticsEngine, NLQueryRequest, NLQueryResponse
 from cortex_analytics.outcomes import OutcomeRecord, OutcomeTracker, OutcomeVerdict, StrategyStatus
 
 __all__ = [
+    "AttributionEngine",
+    "AttributionModelType",
+    "AttributionReport",
+    "AttributionResult",
+    "ConversionEvent",
+    "Touchpoint",
     "ScoringEngine",
     "ScoreBreakdown",
     "FunnelEngine",
@@ -321,6 +336,7 @@ __all__ = [
     "ExperimentDefinition",
     "ExperimentVariant",
     "ExperimentStatus",
+    "global_experiment_engine",
     "AdvancedAnalyticsEngine",
     "NLQueryRequest",
     "NLQueryResponse",

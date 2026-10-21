@@ -53,7 +53,7 @@ def test_websocket_endpoint_connection_handshake():
     """The stream authenticates with a signed JWT (audit C3: `token=dev_test` removed)."""
     from cortex_api import auth as auth_module
 
-    secret = "unit-streaming-secret"
+    secret = "unit-streaming-secret-32-bytes-long!!"
     original_secret, original_bypass = auth_module.JWT_SECRET, auth_module.DEV_AUTH_BYPASS
     auth_module.JWT_SECRET = secret
     auth_module.DEV_AUTH_BYPASS = False
