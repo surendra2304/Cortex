@@ -198,6 +198,55 @@ class PropertyRegistry:
 
         self.register(
             WebProperty(
+                property_id="site_friday_universe",
+                name="FRIDAY Universe Central Portal",
+                allowed_domains=[
+                    "https://friday-universe.duckdns.org",
+                    "friday-universe.duckdns.org",
+                    "localhost:8000",
+                    "localhost:3000",
+                ],
+                allowed_operations=[
+                    "analytics_query",
+                    "session_inspect",
+                    "banner_injection",
+                    "experiment_mutate",
+                    "content_publish",
+                    "deployment_traffic_switch",
+                    "config_update",
+                    "payment_initiate",
+                    "email_dispatch",
+                    "account_update",
+                    "recommend_intervention",
+                    "funnel_track",
+                    "mab_optimize",
+                ],
+                target_environment="production",
+                approval_policy={
+                    "high_impact_requires_approval": True,
+                    "auto_approved_operations": ["analytics_query", "session_inspect", "funnel_track", "mab_optimize"],
+                    "max_risk_score_auto_approve": 0.25,
+                },
+                rollback_policy={
+                    "enabled": True,
+                    "snapshot_strategy": "state_snapshot",
+                    "auto_rollback_on_error": True,
+                },
+                state_snapshot={
+                    "active_agents": 10,
+                    "portal_version": "v2.2.0",
+                    "mesh_network": "friday_mesh",
+                },
+                metadata={
+                    "universe_domain": "https://friday-universe.duckdns.org",
+                    "gateway_url": "http://friday:10000",
+                    "cortex_ingress": "https://friday-universe.duckdns.org/cortex",
+                },
+            )
+        )
+
+        self.register(
+            WebProperty(
                 property_id="site_staging",
                 name="Staging Testing Environment",
                 allowed_domains=["https://staging.example.com", "staging.example.com"],

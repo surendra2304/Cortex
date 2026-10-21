@@ -42,6 +42,10 @@ CREDENTIAL_IN_HANDLER = {
     ("POST", "/v1/webhooks/stripe"),  # Stripe-Signature
     ("GET", "/v1/stream/sse"),  # JWT token query param / Authorization header enforced in-handler
     ("GET", "/{file_name:path}"),  # static dashboard export / SPA fallback
+    ("GET", "/sdk.js"),
+    ("HEAD", "/sdk.js"),
+    ("GET", "/cortex.js"),
+    ("HEAD", "/cortex.js"),
 }
 
 IGNORED_PATHS = {"/openapi.json", "/docs", "/docs/oauth2-redirect", "/redoc"}

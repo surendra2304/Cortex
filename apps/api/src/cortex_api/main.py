@@ -22,7 +22,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -538,6 +538,104 @@ async def root(request: Request):
         return FileResponse(index_file, media_type="text/html")
 
     return HTMLResponse(content=FALLBACK_WEBSITE_HTML, status_code=200)
+
+
+FALLBACK_SDK_JS = (
+    "/**\n"
+    " * @cortex/sdk browser telemetry client fallback\n"
+    " * Autonomous Web Operations & Analytics Intelligence Client\n"
+    " */\n"
+    "(function(window, document) {\n"
+    "  'use strict';\n"
+    "  var config = {\n"
+    "    endpoint: '/v1/events',\n"
+    "    siteId: 'site_friday_universe',\n"
+    "    tenantId: 'tenant_default',\n"
+    "    cookieConsent: true,\n"
+    "    debug: false\n"
+    "  };\n"
+    "  var queue = (window.Cortex && window.Cortex.q) || [];\n"
+    "  function sendEvent(type, payload) {\n"
+    "    var body = Object.assign({\n"
+    "      event_type: type,\n"
+    "      timestamp: new Date().toISOString(),\n"
+    "      url: window.location.href,\n"
+    "      site_id: config.siteId,\n"
+    "      tenant_id: config.tenantId\n"
+    "    }, payload || {});\n"
+    "    try {\n"
+    "      var json = JSON.stringify(body);\n"
+    "      if (navigator.sendBeacon) {\n"
+    "        var blob = new Blob([json], { type: 'application/json' });\n"
+    "        navigator.sendBeacon(config.endpoint, blob);\n"
+    "      } else if (window.fetch) {\n"
+    "        fetch(config.endpoint, {\n"
+    "          method: 'POST',\n"
+    "          body: json,\n"
+    "          headers: { 'Content-Type': 'application/json' },\n"
+    "          keepalive: true\n"
+    "        }).catch(function() {});\n"
+    "      }\n"
+    "    } catch (e) {}\n"
+    "  }\n"
+    "  var Cortex = {\n"
+    "    init: function(opts) {\n"
+    "      Object.assign(config, opts || {});\n"
+    "      while (queue.length > 0) {\n"
+    "        var item = queue.shift();\n"
+    "        if (item && item[0] && typeof Cortex[item[0]] === 'function') {\n"
+    "          Cortex[item[0]].apply(Cortex, item[1] || []);\n"
+    "        }\n"
+    "      }\n"
+    "    },\n"
+    "    track: function(name, properties) {\n"
+    "      sendEvent('track', { event_name: name, properties: properties || {} });\n"
+    "    },\n"
+    "    page: function(properties) {\n"
+    "      sendEvent('pageview', {\n"
+    "        title: document.title,\n"
+    "        referrer: document.referrer,\n"
+    "        properties: properties || {}\n"
+    "      });\n"
+    "    },\n"
+    "    identify: function(userId, traits) {\n"
+    "      sendEvent('identify', { user_id: userId, traits: traits || {} });\n"
+    "    },\n"
+    "    trackConversion: function(goal, value) {\n"
+    "      sendEvent('conversion', { goal: goal, value: value || 0 });\n"
+    "    }\n"
+    "  };\n"
+    "  window.Cortex = Cortex;\n"
+    "  if (document.readyState === 'complete' || document.readyState === 'interactive') {\n"
+    "    Cortex.page();\n"
+    "  } else {\n"
+    "    document.addEventListener('DOMContentLoaded', function() { Cortex.page(); });\n"
+    "  }\n"
+    "})(window, document);\n"
+)
+
+
+def _sdk_script_path() -> str | None:
+    if _REPO_ROOT:
+        candidates = [
+            _REPO_ROOT / "packages" / "sdk" / "dist" / "index.min.js",
+            _REPO_ROOT / "packages" / "sdk" / "dist" / "index.js",
+            _REPO_ROOT / "packages" / "sdk" / "dist" / "index.global.js",
+        ]
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    return None
+
+
+@app.api_route("/sdk.js", methods=["GET", "HEAD"], include_in_schema=False)
+@app.api_route("/cortex.js", methods=["GET", "HEAD"], include_in_schema=False)
+async def serve_sdk_bundle():
+    """Serve the compiled standalone Cortex browser tracking SDK."""
+    script_file = _sdk_script_path()
+    if script_file and os.path.isfile(script_file):
+        return FileResponse(script_file, media_type="application/javascript")
+    return Response(content=FALLBACK_SDK_JS, media_type="application/javascript")
 
 
 @app.api_route("/dashboard", methods=["GET", "HEAD"], include_in_schema=False)

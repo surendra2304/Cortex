@@ -371,3 +371,14 @@ from .anomaly_detector import (
     TelemetryAnomalyDetector,
     global_anomaly_detector,
 )
+
+# Funnel Engine & Multi-Goal Conversion Tracker
+from .funnels import (
+    FridayConversionGoalType,
+    FridayUniverseFunnelManager,
+    FunnelAnalysisReport,
+    FunnelDefinition,
+    FunnelStep,
+    StepMetric,
+    global_funnel_manager,
+)

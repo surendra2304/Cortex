@@ -52,6 +52,11 @@ from cortex_analytics.anomaly_detector import (
 from cortex_core.compliance_ledger import (
     global_compliance_ledger,
 )
+from cortex_analytics.funnels import (
+    FridayConversionGoalType,
+    FridayUniverseFunnelManager,
+    global_funnel_manager,
+)
 
 from cortex_upgrade.dlq import global_dlq
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -1140,3 +1145,73 @@ async def get_merkle_proof(
             detail=f"Block index {block_index} not found in tenant '{tenant_id}' compliance ledger.",
         )
     return proof.model_dump()
+
+
+# ── 17. FRIDAY Universe Funnels & Conversion Goals ─────────────────────────────
+
+
+class FunnelEvaluateRequest(BaseModel):
+    sessions_events: dict[str, list[dict[str, Any]]]
+
+
+@router.get("/v1/funnels/definitions")
+async def list_funnel_definitions(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> list[dict[str, Any]]:
+    """List pre-configured conversion funnels (Demo, SaaS, Waitlist, Multi-Step)."""
+    funnels = global_funnel_manager.list_funnels()
+    return [f.model_dump() for f in funnels]
+
+
+@router.get("/v1/funnels/friday-universe")
+async def get_friday_universe_funnel_status(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Retrieve full status of the 4 FRIDAY Universe conversion goals and MAB state."""
+    tenant_id = user["tenant_id"]
+    funnels = global_funnel_manager.list_funnels()
+    return {
+        "site_id": "site_friday_universe",
+        "domain": "https://friday-universe.duckdns.org",
+        "tenant_id": tenant_id,
+        "active_funnels_count": len(funnels),
+        "funnels": [f.model_dump() for f in funnels],
+        "goals_supported": [
+            {"goal": "Option A: Enterprise Demo Bookings", "event_type": "demo_request_submitted"},
+            {"goal": "Option B: Paid SaaS Subscriptions", "event_type": "checkout_completed"},
+            {"goal": "Option C: Community Waitlist Signups", "event_type": "signup_completed"},
+            {"goal": "Option D: 10-Agent Mesh Multi-Step Journey", "event_type": "universe_multi_step_journey"},
+        ],
+    }
+
+
+@router.post("/v1/funnels/{funnel_id}/evaluate")
+async def evaluate_funnel_sessions(
+    funnel_id: str,
+    payload: FunnelEvaluateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Evaluate session event sequences against a specific conversion funnel."""
+    try:
+        report = global_funnel_manager.evaluate_funnel(funnel_id, payload.sessions_events)
+        return report.model_dump()
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Funnel '{funnel_id}' not found.",
+        )
+
+
+@router.post("/v1/funnels/seed-bandit-experiments")
+async def seed_funnel_bandit_experiments(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Pre-seed Multi-Armed Bandit optimization experiments for the 4 conversion funnels."""
+    tenant_id = user["tenant_id"]
+    created_experiments = global_funnel_manager.seed_associated_bandit_experiments(tenant_id)
+    return {
+        "tenant_id": tenant_id,
+        "site_id": "site_friday_universe",
+        "seeded_experiment_ids": created_experiments,
+        "status": "ACTIVE",
+    }
