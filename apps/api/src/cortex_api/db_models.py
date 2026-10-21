@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 from sqlalchemy.orm import relationship
 
@@ -118,6 +118,22 @@ class AuditRecordModel(Base):
     verification_status = Column(String(32), default="verified", nullable=False)
     trace_id = Column(String(64), nullable=True, index=True)
     timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+
+
+class TenantModel(Base):
+    """Durable tenant registry record for onboarding and tenant settings."""
+
+    __tablename__ = "tenants"
+    __table_args__ = (UniqueConstraint("primary_site_id", name="uq_tenants_primary_site_id"),)
+
+    id = Column(String(64), primary_key=True)
+    name = Column(String(255), nullable=False)
+    admin_email = Column(String(254), nullable=False)
+    plan = Column(String(32), nullable=False)
+    primary_site_id = Column(String(64), nullable=False)
+    created_by = Column(String(128), nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
 
 
 class ApiKeyModel(Base):

@@ -1,7 +1,9 @@
+import asyncio
 import os
 import sys
 
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 for p in [
     "packages/core/src",
@@ -20,31 +22,47 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
+from cortex_api.api_keys import authenticate_public_key
+from cortex_api.db_models import TenantModel
 from cortex_api.main import app
 
 from tests.conftest import auth_headers, event_payload
 
 
-def test_tenant_onboarding_and_credentials_generation():
-    client = TestClient(app)
-    headers = auth_headers()
-    res = client.post(
+def test_tenant_onboarding_and_credentials_generation(api_client, session_factory):
+    headers = auth_headers(role="cortex_platform_admin", tenant_id="system")
+    res = api_client.post(
         "/v1/tenants",
         headers=headers,
         json={"tenant_name": "Acme SaaS Corp", "admin_email": "admin@acme-corp.com", "plan": "pro"},
     )
 
-    assert res.status_code == 201
+    assert res.status_code == 201, res.text
     data = res.json()
     assert data["status"] == "created"
-    assert "ten_" in data["tenant_id"]
-    assert "site_" in data["primary_site_id"]
-    assert "pk_live_" in data["public_sdk_key"]
-    assert "sec_jwt_" in data["operator_jwt_secret"]
+    assert data["tenant_id"].startswith("ten_")
+    assert data["primary_site_id"].startswith("site_")
+    assert data["public_sdk_key"].startswith("pk_live_")
+    assert "operator_jwt_secret" not in data
+
+    async def _verify_persistence():
+        async with session_factory() as session:
+            tenant_result = await session.execute(select(TenantModel).where(TenantModel.id == data["tenant_id"]))
+            tenant = tenant_result.scalar_one()
+            assert tenant.name == "Acme SaaS Corp"
+            assert tenant.admin_email == "admin@acme-corp.com"
+            assert tenant.plan == "pro"
+            assert tenant.primary_site_id == data["primary_site_id"]
+
+            key = await authenticate_public_key(data["public_sdk_key"], session, site_id=data["primary_site_id"])
+            assert key.tenant_id == data["tenant_id"]
+            assert key.site_id == data["primary_site_id"]
+
+    asyncio.run(_verify_persistence())
 
 
-def test_tenant_settings_and_branding():
-    client = TestClient(app)
+def test_tenant_settings_and_branding(api_client):
+    client = api_client
     res = client.get("/v1/tenant/settings", headers=auth_headers())
     assert res.status_code == 200
     data = res.json()
@@ -80,3 +98,14 @@ def test_tenant_usage_metering_quotas(api_client, provisioned_key):
     assert data["plan"] == "enterprise"
     # ai_universe_calls is a real process counter: it must never be a canned 1240.
     assert data["ai_universe_calls"] == 0
+
+
+
+def test_tenant_admin_cannot_create_tenants(api_client):
+    """Tenant-local administrators must not be able to provision unrelated organizations."""
+    response = api_client.post(
+        "/v1/tenants",
+        headers=auth_headers(role="cortex_admin", tenant_id="tenant_test"),
+        json={"tenant_name": "Unauthorized Child", "admin_email": "attacker@example.com", "plan": "pro"},
+    )
+    assert response.status_code == 403, response.text
