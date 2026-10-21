@@ -139,6 +139,42 @@ def _authorize_command_tenant(
         )
 
 
+def _friday_read_tenant_scope(
+    requested_tenant_id: str | None, friday_auth: dict[str, Any]
+) -> list[str]:
+    """Resolve an explicit, authorized tenant set before any FRIDAY cross-tenant read.
+
+    Tenant-bound credentials may only read their own tenant. The shared FRIDAY
+    system identity may read one requested tenant or the explicit allowlist; an
+    omitted tenant filter is never interpreted as unrestricted database access.
+    """
+    requested = requested_tenant_id.strip() if requested_tenant_id else None
+    authenticated_tenant = str(friday_auth.get("tenant_id") or "").strip()
+
+    if authenticated_tenant not in {"", "system"}:
+        if requested and requested != authenticated_tenant:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="FRIDAY authenticated tenant does not match the requested tenant.",
+            )
+        return [authenticated_tenant]
+
+    if requested:
+        _authorize_command_tenant(requested, friday_auth)
+        return [requested]
+
+    allowed_tenants = _allowed_friday_tenants()
+    if not allowed_tenants:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                "FRIDAY tenant read scope is unavailable. Configure FRIDAY_ALLOWED_TENANTS "
+                "or request an explicitly authorized tenant."
+            ),
+        )
+    return sorted(allowed_tenants)
+
+
 router = APIRouter(prefix="/v1/friday", tags=["FRIDAY Integration"])
 
 # Module-level orchestrator instance (shared across requests)
@@ -493,12 +529,14 @@ async def friday_health_summary(
 async def friday_priority_leads(
     friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
-    tenant_id: str | None = Query(None, description="Scope to one tenant; omit for the platform-wide view."),
+    tenant_id: str | None = Query(None, description="Optional explicit tenant; omission uses the configured FRIDAY tenant allowlist."),
 ):
+    authorized_tenants = _friday_read_tenant_scope(tenant_id, friday_auth)
     try:
-        stmt = select(LeadModel).where(LeadModel.status.in_(["new", "engaged", "qualified"]))
-        if tenant_id:
-            stmt = stmt.where(LeadModel.tenant_id == tenant_id)
+        stmt = select(LeadModel).where(
+            LeadModel.status.in_(["new", "engaged", "qualified"]),
+            LeadModel.tenant_id.in_(authorized_tenants),
+        )
         stmt = stmt.order_by(desc(LeadModel.score)).limit(5)
         res = await db.execute(stmt)
         leads = res.scalars().all()
@@ -557,17 +595,17 @@ async def friday_priority_leads(
 async def friday_incidents(
     friday_auth: dict[str, Any] = Depends(verify_friday_token),
     db: AsyncSession = Depends(get_db_session),
-    tenant_id: str | None = Query(None, description="Scope to one tenant; omit for the platform-wide view."),
+    tenant_id: str | None = Query(None, description="Optional explicit tenant; omission uses the configured FRIDAY tenant allowlist."),
 ):
+    authorized_tenants = _friday_read_tenant_scope(tenant_id, friday_auth)
     since = _utcnow() - timedelta(hours=24)
 
     try:
         stmt = select(EventModel).where(
             EventModel.server_received_at >= since,
             EventModel.type.like("error.%") | EventModel.type.like("incident.%"),
+            EventModel.tenant_id.in_(authorized_tenants),
         )
-        if tenant_id:
-            stmt = stmt.where(EventModel.tenant_id == tenant_id)
         stmt = stmt.order_by(desc(EventModel.server_received_at)).limit(50)
         res = await db.execute(stmt)
         events = res.scalars().all()
