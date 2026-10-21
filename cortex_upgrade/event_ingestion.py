@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections import OrderedDict
 import hashlib
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from time import monotonic
+from typing import Any, Callable
 
 
 class EventRejected(ValueError):
@@ -60,14 +62,52 @@ class EventNormalizer:
 
 
 class EventDedupeStore:
-    def __init__(self) -> None:
-        self._seen: set[tuple[str, str]] = set()
+    """Bounded, expiring in-process dedupe cache.
+
+    Database uniqueness remains authoritative. This cache only avoids repeat work
+    within one process; expiration and capacity eviction must never be treated as
+    proof that a durable event does not already exist.
+    """
+
+    def __init__(
+        self,
+        *,
+        ttl_seconds: float = 3600.0,
+        max_entries: int = 100_000,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        if ttl_seconds <= 0:
+            raise ValueError("ttl_seconds must be greater than zero")
+        if max_entries < 1:
+            raise ValueError("max_entries must be at least one")
+        self._seen: OrderedDict[tuple[str, str], float] = OrderedDict()
         self._lock = asyncio.Lock()
+        self._ttl_seconds = float(ttl_seconds)
+        self._max_entries = int(max_entries)
+        self._clock = clock or monotonic
+
+    def _purge_expired(self, now: float) -> None:
+        # Entries are appended with a uniform TTL, so expiry order follows insertion order.
+        while self._seen:
+            _, expires_at = next(iter(self._seen.items()))
+            if expires_at > now:
+                break
+            self._seen.popitem(last=False)
 
     async def claim(self, tenant_id: str, event_id: str) -> bool:
         key = (tenant_id, event_id)
+        now = self._clock()
         async with self._lock:
+            self._purge_expired(now)
             if key in self._seen:
                 return False
-            self._seen.add(key)
+            self._seen[key] = now + self._ttl_seconds
+            while len(self._seen) > self._max_entries:
+                self._seen.popitem(last=False)
             return True
+
+    async def release(self, tenant_id: str, event_id: str) -> bool:
+        """Release a claim when durable persistence failed, allowing a safe retry."""
+        key = (tenant_id, event_id)
+        async with self._lock:
+            return self._seen.pop(key, None) is not None
