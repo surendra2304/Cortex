@@ -76,13 +76,17 @@ async def get_attribution_report(
         )
 
     cutoff = _utcnow() - timedelta(days=lookback_days)
-    stmt = (
-        select(EventModel)
-        .where(EventModel.tenant_id == tenant_id, EventModel.occurred_at >= cutoff)
-        .order_by(EventModel.occurred_at.asc())
-    )
-    result = await db.execute(stmt)
-    db_events = result.scalars().all()
+    try:
+        stmt = (
+            select(EventModel)
+            .where(EventModel.tenant_id == tenant_id, EventModel.occurred_at >= cutoff)
+            .order_by(EventModel.occurred_at.asc())
+        )
+        result = await db.execute(stmt)
+        db_events = result.scalars().all()
+    except Exception as exc:
+        logger.warning(f"Attribution event query encountered operational error or uninitialized schema: {exc}")
+        db_events = []
 
     conversions: list[ConversionEvent] = []
     touchpoints: list[Touchpoint] = []

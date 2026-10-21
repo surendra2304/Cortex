@@ -145,8 +145,8 @@ async def test_dlq_endpoints_with_tenant_isolation():
     assert resp_purge.json()["status"] == "purged"
 
 
-def test_attribution_endpoint():
-    client = TestClient(app)
+def test_attribution_endpoint(api_client):
+    client = api_client
 
     # Request attribution report
     resp = client.get(
