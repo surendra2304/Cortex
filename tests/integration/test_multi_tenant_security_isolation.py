@@ -1,7 +1,6 @@
 import os
 import sys
 
-from fastapi.testclient import TestClient
 
 for p in [
     "packages/core/src",
@@ -16,17 +15,17 @@ from cortex_api.main import app
 from tests.conftest import auth_headers, friday_headers
 
 
-def test_multi_tenant_security_isolation_e2e(monkeypatch):
+def test_multi_tenant_security_isolation_e2e(monkeypatch, api_client):
     """
     End-to-End Multi-Tenant Security Isolation:
     Tenant A's vulnerability findings and security incidents never appear in Tenant B.
     """
-    client = TestClient(app)
+    client = api_client
 
     # 1. Onboard Tenant Alpha
     res_a = client.post(
         "/v1/tenants",
-        headers=auth_headers(),
+        headers=auth_headers(role="cortex_platform_admin", tenant_id="system"),
         json={"tenant_name": "Tenant Alpha Security Corp", "admin_email": "ciso@alpha.com", "plan": "enterprise"},
     )
     assert res_a.status_code == 201

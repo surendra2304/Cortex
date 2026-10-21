@@ -1,7 +1,6 @@
 import os
 import sys
 
-from fastapi.testclient import TestClient
 
 for p in [
     "packages/core/src",
@@ -26,12 +25,12 @@ from cortex_core import Tenant
 from tests.conftest import auth_headers
 
 
-def test_multi_tenant_isolation_e2e():
+def test_multi_tenant_isolation_e2e(api_client):
     """
     End-to-End Multi-Tenant Isolation Test:
     Two distinct tenants onboarded -> verified separate credentials and scoped isolation.
     """
-    client = TestClient(app)
+    client = api_client
     headers = auth_headers(role="cortex_platform_admin", tenant_id="system")
 
     # Audit C4: tenant onboarding is an administrative operation.

@@ -61,8 +61,8 @@ def test_tenant_onboarding_and_credentials_generation(api_client, session_factor
     asyncio.run(_verify_persistence())
 
 
-def test_tenant_settings_and_branding():
-    client = TestClient(app)
+def test_tenant_settings_and_branding(api_client):
+    client = api_client
     res = client.get("/v1/tenant/settings", headers=auth_headers())
     assert res.status_code == 200
     data = res.json()
@@ -98,3 +98,14 @@ def test_tenant_usage_metering_quotas(api_client, provisioned_key):
     assert data["plan"] == "enterprise"
     # ai_universe_calls is a real process counter: it must never be a canned 1240.
     assert data["ai_universe_calls"] == 0
+
+
+
+def test_tenant_admin_cannot_create_tenants(api_client):
+    """Tenant-local administrators must not be able to provision unrelated organizations."""
+    response = api_client.post(
+        "/v1/tenants",
+        headers=auth_headers(role="cortex_admin", tenant_id="tenant_test"),
+        json={"tenant_name": "Unauthorized Child", "admin_email": "attacker@example.com", "plan": "pro"},
+    )
+    assert response.status_code == 403, response.text
