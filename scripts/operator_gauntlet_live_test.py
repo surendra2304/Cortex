@@ -88,8 +88,8 @@ def jwt_for(tenant_id: str, role: str = "cortex_admin") -> str:
 def main() -> int:
     F = friday_headers()
     suffix = uuid.uuid4().hex[:8]
-    tenant = f"tenant_gauntlet_{suffix}"
-    site = f"site_gauntlet_{suffix}"
+    tenant = ""
+    site = ""
     prop = f"prop_{suffix}"
     visitor = f"vis_gauntlet_{suffix}"
     task_id = f"gauntlet_task_{suffix}"
@@ -101,16 +101,21 @@ def main() -> int:
     status, ready = call("GET", "/health/ready")
     check("readiness probe", status == 200, f"{status}")
 
-    step("1. provision a tenant + ingestion key like an operator would")
-    status, tenant_res = call("POST", "/v1/tenants", {"tenant_name": "Gauntlet Corp", "admin_email": f"ops@{suffix}.example", "plan": "pro"})
-    check("tenant onboarding", status == 201 and "ten_" in tenant_res.get("tenant_id", ""), f"{status}")
-    # S5: key provisioning is tenant-bound — mint the tenant's own credential.
-    status, key_res = call(
-        "POST", "/v1/api-keys", {"tenant_id": tenant, "site_id": site, "name": "gauntlet"},
-        headers={"Authorization": f"Bearer {jwt_for(tenant)}"},
+    step("1. provision a tenant + persisted ingestion key like an operator would")
+    platform_headers = {"Authorization": f"Bearer {jwt_for('system', role='cortex_platform_admin')}"}
+    status, tenant_res = call(
+        "POST",
+        "/v1/tenants",
+        {"tenant_name": "Gauntlet Corp", "admin_email": f"ops@{suffix}.example", "plan": "pro"},
+        headers=platform_headers,
     )
-    check("ingestion key provisioned", status == 201 and key_res.get("api_key", "").startswith("pk_live_"), f"{status}")
-    public_key = key_res["api_key"]
+    check("tenant onboarding", status == 201 and str(tenant_res.get("tenant_id", "")).startswith("ten_"), f"{status}")
+    if status != 201:
+        return 1
+    tenant = tenant_res["tenant_id"]
+    site = tenant_res["primary_site_id"]
+    public_key = tenant_res.get("public_sdk_key", "")
+    check("onboarding SDK key issued", public_key.startswith("pk_live_"), "plaintext returned once after hash persistence")
 
     step("2. register a web property under governance")
     status, prop_res = call(
@@ -318,7 +323,7 @@ def main() -> int:
         headers=F,
     )
     check("finding ingested", status in (200, 201, 202), f"{status} {str(finding)[:120]}")
-    status, findings = call("GET", f"/v1/sentinel/findings?asset_id={site}")
+    status, findings = call("GET", f"/v1/sentinel/findings?asset_id={site}", headers={"Authorization": f"Bearer {jwt_for(tenant)}"})
     check("findings readable", status == 200, f"{status}")
     status, gate = call("POST", "/v1/security/deployment-gate/evaluate", {"deployment_id": f"dep_{suffix}", "asset_id": site, "endpoints": ["/api/checkout"], "simulated_findings": [{"severity": "critical", "title": "test"}]}, headers=F)
     check("deployment gate blocks critical", status == 200 and "BLOCK" in str(gate.get("verdict", gate)).upper(), f"{status} {str(gate)[:120]}")

@@ -40,11 +40,19 @@ class SentinelEventListener:
     - Integrates with AssetExposureMonitor to evaluate actual attack surface exposure
     """
 
-    def __init__(self, exposure_monitor: Any | None = None):
+    def __init__(self, exposure_monitor: Any | None = None, max_history_per_tenant: int = 500):
+        if max_history_per_tenant < 1:
+            raise ValueError("max_history_per_tenant must be at least one")
         self.exposure_monitor = exposure_monitor
-        self.received_findings: list[dict[str, Any]] = []
+        self.max_history_per_tenant = max_history_per_tenant
+        self.received_findings: dict[str, list[dict[str, Any]]] = {}
 
-    async def handle_findings(self, payload: SentinelPayload, orchestrator: Any | None = None) -> dict[str, Any]:
+    async def handle_findings(
+        self,
+        payload: SentinelPayload,
+        orchestrator: Any | None = None,
+        tenant_id: str = "unscoped",
+    ) -> dict[str, Any]:
         logger.info(
             f"Received Sentinel security findings for asset {payload.asset_id} (Task: {payload.sentinel_task_id})"
         )
@@ -52,14 +60,19 @@ class SentinelEventListener:
         processed_events = []
         for finding in payload.findings:
             finding_data = finding.model_dump()
-            self.received_findings.append(
+            tenant_history = self.received_findings.setdefault(tenant_id, [])
+            tenant_history.append(
                 {
+                    "tenant_id": tenant_id,
                     "sentinel_task_id": payload.sentinel_task_id,
                     "asset_id": payload.asset_id,
+                    "site_id": payload.asset_id,
                     "posture_score": payload.posture_score,
                     **finding_data,
                 }
             )
+            if len(tenant_history) > self.max_history_per_tenant:
+                del tenant_history[: len(tenant_history) - self.max_history_per_tenant]
 
             # Evaluate exposure if exposure monitor is available
             exposure_level = "standard"

@@ -114,7 +114,17 @@ def test_deployment_gate_and_compliance_api_endpoints(monkeypatch):
     assert res.status_code == 200
     assert res.json()["verdict"] == "BLOCKED"
 
-    # 2. GET /v1/security/compliance-report
-    comp_res = client.get("/v1/security/compliance-report", headers=auth_headers())
+    # Platform-wide compliance metrics are not available to tenant-local administrators.
+    tenant_res = client.get(
+        "/v1/security/compliance-report",
+        headers=auth_headers(role="cortex_admin", tenant_id="tenant_test"),
+    )
+    assert tenant_res.status_code == 403
+
+    # Platform admins may request the platform-wide compliance report.
+    comp_res = client.get(
+        "/v1/security/compliance-report",
+        headers=auth_headers(role="cortex_platform_admin", tenant_id="system"),
+    )
     assert comp_res.status_code == 200
     assert "compliance_readiness_score" in comp_res.json()

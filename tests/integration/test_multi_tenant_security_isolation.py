@@ -62,3 +62,17 @@ def test_multi_tenant_security_isolation_e2e(monkeypatch, api_client):
     data = res_finding.json()
     assert data["asset_id"] == tenant_a["primary_site_id"]
     assert data["asset_id"] != tenant_b["primary_site_id"]
+
+    read_a = client.get(
+        "/v1/sentinel/findings",
+        headers=auth_headers(role="cortex_viewer", tenant_id=tenant_a["tenant_id"]),
+    )
+    read_b = client.get(
+        "/v1/sentinel/findings",
+        headers=auth_headers(role="cortex_viewer", tenant_id=tenant_b["tenant_id"]),
+    )
+    assert read_a.status_code == 200, read_a.text
+    assert any(item["finding_id"] == "find_alpha_01" for item in read_a.json()["findings"])
+    assert read_b.status_code == 200, read_b.text
+    assert all(item["finding_id"] != "find_alpha_01" for item in read_b.json()["findings"])
+
