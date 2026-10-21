@@ -68,6 +68,7 @@ class Role(str, Enum):
     CORTEX_VIEWER = "cortex_viewer"
     CORTEX_OPERATOR = "cortex_operator"
     CORTEX_ADMIN = "cortex_admin"
+    CORTEX_PLATFORM_ADMIN = "cortex_platform_admin"
     FRIDAY_SYSTEM = "friday_system"
 
 
@@ -76,6 +77,12 @@ ROLE_HIERARCHY = {
     Role.CORTEX_VIEWER: [Role.CORTEX_VIEWER],
     Role.CORTEX_OPERATOR: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR],
     Role.CORTEX_ADMIN: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR, Role.CORTEX_ADMIN],
+    Role.CORTEX_PLATFORM_ADMIN: [
+        Role.CORTEX_VIEWER,
+        Role.CORTEX_OPERATOR,
+        Role.CORTEX_ADMIN,
+        Role.CORTEX_PLATFORM_ADMIN,
+    ],
     Role.FRIDAY_SYSTEM: [Role.CORTEX_VIEWER, Role.CORTEX_OPERATOR, Role.CORTEX_ADMIN, Role.FRIDAY_SYSTEM],
 }
 

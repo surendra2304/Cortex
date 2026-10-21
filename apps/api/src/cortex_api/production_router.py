@@ -5,7 +5,7 @@ import logging
 import time
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 import redis.asyncio as aioredis
@@ -24,9 +24,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from cortex_api.api_keys import provision_api_key
 from cortex_api.auth import Role, require_role, verify_friday_token
 from cortex_api.config import get_db_session, get_redis_client, settings
-from cortex_api.db_models import AuditRecordModel, EventModel, ProfileModel, VisitorModel, WorkflowRunModel
+from cortex_api.db_models import AuditRecordModel, EventModel, ProfileModel, TenantModel, VisitorModel, WorkflowRunModel
 from cortex_api.ws_auth import authenticate_websocket
 from cortex_upgrade.audit import redact
 
@@ -597,9 +598,9 @@ async def export_audit_log(
 
 
 class TenantOnboardingRequest(BaseModel):
-    tenant_name: str
-    admin_email: str
-    plan: str = "pro"  # free, pro, enterprise
+    tenant_name: str = Field(min_length=2, max_length=255)
+    admin_email: str = Field(min_length=3, max_length=254)
+    plan: Literal["free", "pro", "enterprise"] = "pro"
 
 
 class TenantSettings(BaseModel):
@@ -619,23 +620,58 @@ class TenantSettings(BaseModel):
 
 
 @router.post("/v1/tenants", status_code=status.HTTP_201_CREATED)
-async def onboard_tenant(req: TenantOnboardingRequest, auth: dict[str, Any] = Depends(require_role(Role.CORTEX_ADMIN))):
-    """Onboards a new multi-tenant organization with site credentials and operator secrets."""
-    tenant_id = f"ten_{uuid.uuid4().hex[:10]}"
-    site_id = f"site_{uuid.uuid4().hex[:8]}"
-    public_sdk_key = f"pk_live_{uuid.uuid4().hex[:16]}"
-    operator_jwt_secret = f"sec_jwt_{uuid.uuid4().hex[:24]}"
+async def onboard_tenant(
+    req: TenantOnboardingRequest,
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_PLATFORM_ADMIN)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Persist a tenant and provision a working, hashed public SDK key.
+
+    Operator sessions are issued by the configured JWT/OIDC issuer. This endpoint
+    deliberately does not return a per-tenant JWT secret because the authentication
+    layer does not support tenant-specific signing secrets.
+    """
+    tenant_id = f"ten_{uuid.uuid4().hex}"
+    site_id = f"site_{uuid.uuid4().hex}"
+    created_at = datetime.now(UTC)
+    tenant = TenantModel(
+        id=tenant_id,
+        name=req.tenant_name.strip(),
+        admin_email=req.admin_email.strip().lower(),
+        plan=req.plan,
+        primary_site_id=site_id,
+        created_by=str(auth.get("sub") or "platform-admin"),
+        is_active=True,
+        created_at=created_at,
+    )
+    db.add(tenant)
+
+    try:
+        # provision_api_key commits through this same session, atomically persisting
+        # the tenant row and its key digest; plaintext is returned once only.
+        public_sdk_key, _key_record = await provision_api_key(
+            db=db,
+            tenant_id=tenant_id,
+            site_id=site_id,
+            name="tenant-onboarding",
+        )
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Tenant onboarding persistence failed for %s", tenant_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Tenant onboarding could not be persisted; no credentials were issued.",
+        ) from exc
 
     return {
         "status": "created",
         "tenant_id": tenant_id,
-        "tenant_name": req.tenant_name,
-        "plan": req.plan,
-        "admin_email": req.admin_email,
+        "tenant_name": tenant.name,
+        "plan": tenant.plan,
+        "admin_email": tenant.admin_email,
         "primary_site_id": site_id,
         "public_sdk_key": public_sdk_key,
-        "operator_jwt_secret": operator_jwt_secret,
-        "created_at": datetime.now(UTC).isoformat(),
+        "created_at": created_at.isoformat(),
     }
 
 
@@ -647,25 +683,33 @@ DEFAULT_TENANT_PLAN = {
 }
 
 
-def _tenant_plan(tenant_id: str) -> dict[str, Any]:
-    """Plan limits for a tenant.
+def _tenant_plan(tenant_id: str, tenant: TenantModel | None = None) -> dict[str, Any]:
+    """Return the configured plan label while preserving existing enforced quota limits.
 
-    There is no tenant plan table yet, so this is the deployment default rather than a
-    per-tenant lookup; both the settings and the usage endpoint read it from here so the
-    quota a customer sees is the quota that is enforced.
+    Tier-specific quota policy is not defined in this repository yet. Existing enforced
+    limits therefore remain unchanged; a registered tenant's stored plan label is returned
+    accurately instead of reporting every tenant as enterprise.
     """
-    del tenant_id  # per-tenant overrides land in the same place once a table exists
-    return dict(DEFAULT_TENANT_PLAN)
+    del tenant_id
+    plan = dict(DEFAULT_TENANT_PLAN)
+    if tenant is not None:
+        plan["plan"] = tenant.plan
+    return plan
 
 
 @router.get("/v1/tenant/settings", response_model=TenantSettings)
-async def get_tenant_settings(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR))):
-    """Returns tenant configuration, white-label branding, and plan limits."""
+async def get_tenant_settings(
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Returns persisted tenant identity and the currently enforced plan limits."""
     tenant_id = auth.get("tenant_id", "tenant_default")
-    plan = _tenant_plan(tenant_id)
+    tenant_res = await db.execute(select(TenantModel).where(TenantModel.id == tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    plan = _tenant_plan(tenant_id, tenant)
     return TenantSettings(
         tenant_id=tenant_id,
-        name=f"Tenant ({tenant_id})",
+        name=tenant.name if tenant else f"Tenant ({tenant_id})",
         plan=plan["plan"],
         max_sites=plan["max_sites"],
         monthly_event_limit=plan["monthly_event_limit"],
@@ -711,7 +755,9 @@ async def get_tenant_usage(
         )
     ).scalar_one()
 
-    plan = _tenant_plan(tenant_id)
+    tenant_res = await db.execute(select(TenantModel).where(TenantModel.id == tenant_id))
+    tenant = tenant_res.scalar_one_or_none()
+    plan = _tenant_plan(tenant_id, tenant)
     monthly_limit = int(plan["monthly_event_limit"])
     usage_pct = round(events_ingested / monthly_limit * 100, 4) if monthly_limit else 0.0
     return {

@@ -32,7 +32,7 @@ def test_multi_tenant_isolation_e2e():
     Two distinct tenants onboarded -> verified separate credentials and scoped isolation.
     """
     client = TestClient(app)
-    headers = auth_headers()
+    headers = auth_headers(role="cortex_platform_admin", tenant_id="system")
 
     # Audit C4: tenant onboarding is an administrative operation.
     assert (
@@ -61,7 +61,8 @@ def test_multi_tenant_isolation_e2e():
     assert tenant_a["tenant_id"] != tenant_b["tenant_id"]
     assert tenant_a["primary_site_id"] != tenant_b["primary_site_id"]
     assert tenant_a["public_sdk_key"] != tenant_b["public_sdk_key"]
-    assert tenant_a["operator_jwt_secret"] != tenant_b["operator_jwt_secret"]
+    assert "operator_jwt_secret" not in tenant_a
+    assert "operator_jwt_secret" not in tenant_b
 
     # 4. Assert model validation
     t_model_a = Tenant(id=tenant_a["tenant_id"], name=tenant_a["tenant_name"])
