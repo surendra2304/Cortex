@@ -1088,3 +1088,9 @@ from .futuris_client import ChurnSegmentForecast, ConversionTrendForecast, Futur
 from .intelx_client import CompetitorProfile, IntelXClient, MarketSignal
 from .sentinel_client import AssetRecord, SecurityPosture, SentinelClient
 from .sentinel_listener import SentinelEventListener, SentinelFinding, SentinelPayload
+# Cryptographic Webhook Dispatcher
+from .webhook_dispatcher import (
+    CryptographicWebhookDispatcher,
+    WebhookDeliveryReceipt,
+    WebhookDeliveryStatus,
+)

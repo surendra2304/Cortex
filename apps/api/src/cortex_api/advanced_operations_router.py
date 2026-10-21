@@ -19,6 +19,15 @@ from cortex_analytics.attribution import (
     ConversionEvent,
     Touchpoint,
 )
+from cortex_analytics.sankey_paths import PathAnalysisEngine, RetentionMatrixEngine
+from cortex_intelligence.behavioral_churn import BehavioralChurnClassifier
+from cortex_identity.graph_stitcher import (
+    IdentityGraphStitcher,
+    IdentityNode,
+    GDPRCascadeErasureEngine,
+)
+from cortex_integrations.webhook_dispatcher import CryptographicWebhookDispatcher
+
 from cortex_analytics.experiments import ExperimentStatus, global_experiment_engine
 from cortex_core.canary_controller import global_canary_registry
 from cortex_upgrade.dlq import global_dlq
@@ -294,3 +303,269 @@ async def promote_experiment_variant(
         "tenant_id": tenant_id,
         "promoted_by": user.get("sub", "cortex_admin"),
     }
+# ── Global Registries for Stitcher & Webhook Dispatcher ───────────────────────
+_stitchers: dict[str, IdentityGraphStitcher] = {}
+_gdpr_engine = GDPRCascadeErasureEngine()
+_webhook_dispatcher = CryptographicWebhookDispatcher()
+
+
+def _get_tenant_stitcher(tenant_id: str) -> IdentityGraphStitcher:
+    if tenant_id not in _stitchers:
+        _stitchers[tenant_id] = IdentityGraphStitcher(tenant_id=tenant_id)
+    return _stitchers[tenant_id]
+
+
+class SankeyPathRequest(BaseModel):
+    conversion_events: list[str] | None = None
+    max_path_length: int = Field(default=6, ge=2, le=20)
+    lookback_days: int = Field(default=30, ge=1, le=365)
+
+
+class ChurnPredictRequest(BaseModel):
+    actor_id: str
+    lookback_days: int = Field(default=60, ge=1, le=365)
+
+
+class RFMSegmentRequest(BaseModel):
+    actors_data: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class IdentityStitchRequest(BaseModel):
+    node_a_id: str
+    node_a_type: str = "visitor_id"
+    node_b_id: str
+    node_b_type: str = "email"
+    confidence: float = Field(default=1.0, ge=0.5, le=1.0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class GDPRForgetRequest(BaseModel):
+    target_identifier: str
+    reason: str = "Customer requested erasure under GDPR Article 17"
+
+
+class WebhookDispatchRequest(BaseModel):
+    endpoint_url: str
+    event_type: str
+    payload_data: dict[str, Any]
+    webhook_secret: str
+    max_retries: int = Field(default=3, ge=1, le=5)
+
+
+# ── 5. Sankey Path Analysis ───────────────────────────────────────────────────
+
+
+@router.post("/v1/analytics/paths/sankey")
+async def get_sankey_paths(
+    payload: SankeyPathRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Generate transition flows, Sankey nodes, links, and top paths."""
+    tenant_id = user["tenant_id"]
+    cutoff = _utcnow() - timedelta(days=payload.lookback_days)
+
+    try:
+        stmt = (
+            select(EventModel)
+            .where(EventModel.tenant_id == tenant_id, EventModel.occurred_at >= cutoff)
+            .order_by(EventModel.occurred_at.asc())
+        )
+        result = await db.execute(stmt)
+        db_events = result.scalars().all()
+    except Exception as exc:
+        logger.warning(f"Sankey event query encountered error: {exc}")
+        db_events = []
+
+    raw_events = [
+        {
+            "id": ev.id,
+            "actor_id": ev.actor_id,
+            "session_id": (ev.data or {}).get("session_id", ev.actor_id),
+            "type": ev.type,
+            "data": ev.data or {},
+            "occurred_at": ev.occurred_at.isoformat() if ev.occurred_at else _utcnow().isoformat(),
+        }
+        for ev in db_events
+    ]
+
+    engine = PathAnalysisEngine()
+    report = engine.compute_sankey_paths(
+        events=raw_events,
+        conversion_event_types=payload.conversion_events,
+        max_path_length=payload.max_path_length,
+    )
+    return report.model_dump()
+
+
+# ── 6. Multi-Horizon Retention Matrix ─────────────────────────────────────────
+
+
+@router.get("/v1/analytics/retention/matrix")
+async def get_retention_matrix(
+    lookback_days: int = Query(30, ge=1, le=365),
+    horizons: str = Query("0,1,3,7,14,30", description="Comma-separated day horizons"),
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Compute multi-horizon retention curves across cohorts."""
+    tenant_id = user["tenant_id"]
+    cutoff = _utcnow() - timedelta(days=lookback_days)
+
+    try:
+        horizon_list = [int(h.strip()) for h in horizons.split(",") if h.strip().isdigit()]
+    except Exception:
+        horizon_list = [0, 1, 3, 7, 14, 30]
+
+    try:
+        stmt = (
+            select(EventModel)
+            .where(EventModel.tenant_id == tenant_id, EventModel.occurred_at >= cutoff)
+            .order_by(EventModel.occurred_at.asc())
+        )
+        result = await db.execute(stmt)
+        db_events = result.scalars().all()
+    except Exception as exc:
+        logger.warning(f"Retention matrix event query encountered error: {exc}")
+        db_events = []
+
+    raw_events = [
+        {
+            "id": ev.id,
+            "actor_id": ev.actor_id,
+            "occurred_at": ev.occurred_at.isoformat() if ev.occurred_at else _utcnow().isoformat(),
+        }
+        for ev in db_events
+    ]
+
+    engine = RetentionMatrixEngine()
+    report = engine.compute_retention_matrix(events=raw_events, horizons=horizon_list)
+    return report.model_dump()
+
+
+# ── 7. Churn Prediction & RFM Intelligence ────────────────────────────────────
+
+
+@router.post("/v1/intelligence/churn/predict")
+async def predict_customer_churn(
+    payload: ChurnPredictRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+) -> dict[str, Any]:
+    """Calculate churn hazard probability and risk factors for an actor."""
+    tenant_id = user["tenant_id"]
+    cutoff = _utcnow() - timedelta(days=payload.lookback_days)
+
+    try:
+        stmt = (
+            select(EventModel)
+            .where(
+                EventModel.tenant_id == tenant_id,
+                EventModel.actor_id == payload.actor_id,
+                EventModel.occurred_at >= cutoff,
+            )
+            .order_by(EventModel.occurred_at.asc())
+        )
+        result = await db.execute(stmt)
+        db_events = result.scalars().all()
+    except Exception as exc:
+        logger.warning(f"Churn query error: {exc}")
+        db_events = []
+
+    raw_events = [
+        {
+            "id": ev.id,
+            "actor_id": ev.actor_id,
+            "type": ev.type,
+            "data": ev.data or {},
+            "occurred_at": ev.occurred_at.isoformat() if ev.occurred_at else _utcnow().isoformat(),
+        }
+        for ev in db_events
+    ]
+
+    classifier = BehavioralChurnClassifier()
+    assessment = classifier.predict_churn(actor_id=payload.actor_id, events=raw_events)
+    return assessment.model_dump()
+
+
+@router.post("/v1/intelligence/rfm/segment")
+async def segment_rfm_customers(
+    payload: RFMSegmentRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Perform RFM segmentation on customer profiles."""
+    classifier = BehavioralChurnClassifier()
+    profiles = classifier.compute_rfm_scores(actors_data=payload.actors_data)
+    return {
+        "tenant_id": user["tenant_id"],
+        "total_profiles_scored": len(profiles),
+        "profiles": [p.model_dump() for p in profiles],
+    }
+
+
+# ── 8. Identity Graph Stitching & GDPR Erasure ────────────────────────────────
+
+
+@router.post("/v1/identity/graph/stitch")
+async def stitch_identities(
+    payload: IdentityStitchRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Stitch two identity nodes into a unified cluster within tenant scope."""
+    tenant_id = user["tenant_id"]
+    stitcher = _get_tenant_stitcher(tenant_id)
+
+    node_a = IdentityNode(
+        id=payload.node_a_id,
+        type=payload.node_a_type,
+        tenant_id=tenant_id,
+        metadata=payload.metadata,
+    )
+    node_b = IdentityNode(
+        id=payload.node_b_id,
+        type=payload.node_b_type,
+        tenant_id=tenant_id,
+        metadata=payload.metadata,
+    )
+
+    cluster = stitcher.link_identities(node_a, node_b, confidence=payload.confidence)
+    return cluster.model_dump()
+
+
+@router.post("/v1/identity/gdpr/cascade-forget")
+async def cascade_forget_identity(
+    payload: GDPRForgetRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_ADMIN)),
+) -> dict[str, Any]:
+    """Execute GDPR Article 17 cascading erasure across linked identities."""
+    tenant_id = user["tenant_id"]
+    stitcher = _get_tenant_stitcher(tenant_id)
+
+    receipt = _gdpr_engine.cascade_erase(
+        stitcher=stitcher,
+        target_identifier=payload.target_identifier,
+        tenant_id=tenant_id,
+    )
+    return receipt.model_dump()
+
+
+# ── 9. Cryptographic Webhook Dispatcher ───────────────────────────────────────
+
+
+@router.post("/v1/integrations/webhooks/dispatch")
+async def dispatch_signed_webhook(
+    payload: WebhookDispatchRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Dispatch an authenticated HMAC-SHA256 signed outbound webhook."""
+    tenant_id = user["tenant_id"]
+
+    receipt = await _webhook_dispatcher.dispatch(
+        endpoint_url=payload.endpoint_url,
+        event_type=payload.event_type,
+        payload_data=payload.payload_data,
+        secret=payload.webhook_secret,
+        tenant_id=tenant_id,
+        max_retries=payload.max_retries,
+    )
+    return receipt.model_dump()

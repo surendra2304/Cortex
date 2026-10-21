@@ -135,3 +135,23 @@ class ContextBuilder:
 from .exposure_monitor import AssetExposure, AssetExposureMonitor
 from .market_signals import MarketSignalDetector
 from .predictive_personalization import PredictionInformedPersonalization, PredictivePersonalizationAction
+from .behavioral_churn import (
+    BehavioralChurnClassifier,
+    ChurnRiskAssessment,
+    CustomerRFMProfile,
+    LeadIntentAcceleration,
+)
+
+__all__ = [
+    "ContextPackage",
+    "ContextBuilder",
+    "AssetExposure",
+    "AssetExposureMonitor",
+    "MarketSignalDetector",
+    "PredictionInformedPersonalization",
+    "PredictivePersonalizationAction",
+    "BehavioralChurnClassifier",
+    "CustomerRFMProfile",
+    "ChurnRiskAssessment",
+    "LeadIntentAcceleration",
+]
