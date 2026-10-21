@@ -316,6 +316,15 @@ from cortex_analytics.experiments import (
 )
 from cortex_analytics.nl_query import AdvancedAnalyticsEngine, NLQueryRequest, NLQueryResponse
 from cortex_analytics.outcomes import OutcomeRecord, OutcomeTracker, OutcomeVerdict, StrategyStatus
+from cortex_analytics.sankey_paths import (
+    PathAnalysisEngine,
+    RetentionCohortRow,
+    RetentionMatrixEngine,
+    RetentionMatrixReport,
+    SankeyLink,
+    SankeyNode,
+    SankeyPathReport,
+)
 
 __all__ = [
     "AttributionEngine",
@@ -328,6 +337,13 @@ __all__ = [
     "ScoreBreakdown",
     "FunnelEngine",
     "CohortEngine",
+    "PathAnalysisEngine",
+    "SankeyPathReport",
+    "SankeyNode",
+    "SankeyLink",
+    "RetentionMatrixEngine",
+    "RetentionMatrixReport",
+    "RetentionCohortRow",
     "OutcomeTracker",
     "OutcomeVerdict",
     "StrategyStatus",
