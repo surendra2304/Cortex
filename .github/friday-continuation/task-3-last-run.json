@@ -1,0 +1,28 @@
+{
+  "task": 3,
+  "repository": "Cortex",
+  "branch": "fix/task-3-cortex-strict-readiness-result",
+  "status": "code_and_tests_committed_ci_pending",
+  "code_commit_sha": "80b72e3418ca59f06ce65682e91ba2d4787ff0e3",
+  "test_commit_sha": "1e6f1399bbdf4566fdc59173292070344cef0ec6",
+  "checkpoint_commit_sha": "aecb2a84ba1783f6620ee87534600835f3769721",
+  "next_run_commit_sha": "4d6da774b1f48860f109c98d8616772154058db0",
+  "files_changed": [
+    "cortex_upgrade/health.py",
+    "tests/upgrade/test_health.py",
+    ".github/friday-continuation/task-3-checkpoint.md",
+    ".github/friday-continuation/task-3-next-run.md",
+    ".github/friday-continuation/task-3-last-run.json"
+  ],
+  "tests_run": [],
+  "tests_not_run": [
+    "pytest -q tests/upgrade/test_health.py",
+    "python -m unittest tests.upgrade.test_health"
+  ],
+  "ci_status": "not_checked_yet",
+  "active_coding_seconds": null,
+  "blockers": [
+    "No local repository execution runtime in this tool path; CI must verify the changes."
+  ],
+  "next_step": "Open or locate a focused PR, inspect CI, run focused tests, and record verified results."
+}
