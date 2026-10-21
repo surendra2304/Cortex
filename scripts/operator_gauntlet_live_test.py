@@ -323,7 +323,7 @@ def main() -> int:
         headers=F,
     )
     check("finding ingested", status in (200, 201, 202), f"{status} {str(finding)[:120]}")
-    status, findings = call("GET", f"/v1/sentinel/findings?asset_id={site}")
+    status, findings = call("GET", f"/v1/sentinel/findings?asset_id={site}", headers={"Authorization": f"Bearer {jwt_for(tenant)}"})
     check("findings readable", status == 200, f"{status}")
     status, gate = call("POST", "/v1/security/deployment-gate/evaluate", {"deployment_id": f"dep_{suffix}", "asset_id": site, "endpoints": ["/api/checkout"], "simulated_findings": [{"severity": "critical", "title": "test"}]}, headers=F)
     check("deployment gate blocks critical", status == 200 and "BLOCK" in str(gate.get("verdict", gate)).upper(), f"{status} {str(gate)[:120]}")
