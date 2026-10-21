@@ -101,3 +101,12 @@ __all__ = [
     "TargetRule",
     "global_feature_flag_engine",
 ]
+
+# Compliance & Audit Ledger
+from .compliance_ledger import (
+    ChainVerificationResult,
+    ComplianceBlock,
+    ComplianceLedger,
+    MerkleProof,
+    global_compliance_ledger,
+)
