@@ -5,10 +5,16 @@
 # Gateway: https://friday-universe.duckdns.org/cortex/*
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Stage 1: dashboard builder ────────────────────────────────────────────────
-FROM node:20-alpine AS dashboard-builder
+# ── Stage 1: frontend & SDK builder ───────────────────────────────────────────
+FROM node:20-alpine AS frontend-builder
 
-WORKDIR /dashboard/apps/dashboard
+WORKDIR /build/packages/sdk
+COPY packages/sdk/package.json ./
+RUN npm install
+COPY packages/sdk/ ./
+RUN npm run build
+
+WORKDIR /build/apps/dashboard
 COPY apps/dashboard/package.json ./
 RUN npm install
 COPY apps/dashboard/ ./
@@ -61,8 +67,9 @@ COPY --chown=appuser:appuser apps/ ./apps/
 COPY --chown=appuser:appuser cortex_upgrade/ ./cortex_upgrade/
 COPY --chown=appuser:appuser infra/ ./infra/
 
-# Copy compiled dashboard static export from builder
-COPY --from=dashboard-builder --chown=appuser:appuser /dashboard/apps/dashboard/out ./apps/dashboard/out
+# Copy compiled SDK and dashboard static export from builder
+COPY --from=frontend-builder --chown=appuser:appuser /build/packages/sdk/dist ./packages/sdk/dist
+COPY --from=frontend-builder --chown=appuser:appuser /build/apps/dashboard/out ./apps/dashboard/out
 
 # Switch to non-root user
 USER appuser

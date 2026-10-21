@@ -3,6 +3,7 @@ Unit and integration tests for FRIDAY Universe Funnels, Web Property Governance,
 """
 
 from datetime import UTC, datetime, timedelta
+from typing import Any
 import jwt
 import pytest
 from cortex_analytics.funnels import (
@@ -175,3 +176,16 @@ def test_sdk_script_endpoints(api_client: TestClient) -> None:
     resp_cortex = api_client.get("/cortex.js")
     assert resp_cortex.status_code == 200
     assert "javascript" in resp_cortex.headers.get("content-type", "").lower()
+
+
+def test_sdk_script_endpoints_fallback(api_client: TestClient, monkeypatch: Any) -> None:
+    # Test GET /sdk.js when disk file is absent (e.g. fresh clone in CI)
+    import cortex_api.main as main_mod
+
+    monkeypatch.setattr(main_mod, "_sdk_script_path", lambda: None)
+    resp = api_client.get("/sdk.js")
+    assert resp.status_code == 200
+    assert "javascript" in resp.headers.get("content-type", "").lower()
+    assert len(resp.content) > 1000
+    assert b"window.Cortex" in resp.content
+
