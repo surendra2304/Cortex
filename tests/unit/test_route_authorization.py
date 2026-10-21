@@ -40,6 +40,7 @@ CREDENTIAL_IN_HANDLER = {
     ("POST", "/v1/events/batch"),  # X-Cortex-Public-Key
     ("POST", "/v1/webhooks/{provider}"),  # X-Cortex-Public-Key + HMAC signature
     ("POST", "/v1/webhooks/stripe"),  # Stripe-Signature
+    ("GET", "/v1/stream/sse"),  # JWT token query param / Authorization header enforced in-handler
     ("GET", "/{file_name:path}"),  # static dashboard export / SPA fallback
 }
 

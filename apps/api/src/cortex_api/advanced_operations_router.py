@@ -30,6 +30,10 @@ from cortex_integrations.webhook_dispatcher import CryptographicWebhookDispatche
 
 from cortex_analytics.experiments import ExperimentStatus, global_experiment_engine
 from cortex_core.canary_controller import global_canary_registry
+from cortex_core.feature_flags import FeatureFlag, TargetRule, global_feature_flag_engine
+from cortex_intelligence.audience_segments import AudienceSegment, SegmentRule, global_audience_engine
+from cortex_workflow_engine.auto_remediation import global_remediation_engine
+
 from cortex_upgrade.dlq import global_dlq
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -567,5 +571,216 @@ async def dispatch_signed_webhook(
         secret=payload.webhook_secret,
         tenant_id=tenant_id,
         max_retries=payload.max_retries,
+    )
+    return receipt.model_dump()
+# ── 10. Dynamic Feature Flags Governor ────────────────────────────────────────
+
+
+class FeatureFlagCreateRequest(BaseModel):
+    key: str
+    enabled: bool = True
+    rollout_percentage: float = Field(default=100.0, ge=0.0, le=100.0)
+    target_rules: list[TargetRule] = Field(default_factory=list)
+    allowed_actors: list[str] = Field(default_factory=list)
+    blocked_actors: list[str] = Field(default_factory=list)
+    description: str = ""
+
+
+class FeatureFlagEvaluateRequest(BaseModel):
+    key: str
+    actor_id: str
+    context: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.get("/v1/feature-flags")
+async def list_feature_flags(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """List all feature flags registered for the tenant."""
+    tenant_id = user["tenant_id"]
+    flags = global_feature_flag_engine.list_flags(tenant_id)
+    return {"tenant_id": tenant_id, "flags": [f.model_dump() for f in flags]}
+
+
+@router.post("/v1/feature-flags")
+async def create_or_update_feature_flag(
+    payload: FeatureFlagCreateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_ADMIN)),
+) -> dict[str, Any]:
+    """Create or update a tenant feature flag."""
+    tenant_id = user["tenant_id"]
+    flag = FeatureFlag(
+        key=payload.key,
+        tenant_id=tenant_id,
+        enabled=payload.enabled,
+        rollout_percentage=payload.rollout_percentage,
+        target_rules=payload.target_rules,
+        allowed_actors=payload.allowed_actors,
+        blocked_actors=payload.blocked_actors,
+        description=payload.description,
+        updated_by=user.get("sub", "cortex_admin"),
+    )
+    saved = global_feature_flag_engine.set_flag(flag)
+    return saved.model_dump()
+
+
+@router.post("/v1/feature-flags/evaluate")
+async def evaluate_feature_flag(
+    payload: FeatureFlagEvaluateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Evaluate whether a feature flag is enabled for an actor."""
+    tenant_id = user["tenant_id"]
+    is_enabled = global_feature_flag_engine.evaluate(
+        key=payload.key,
+        actor_id=payload.actor_id,
+        context=payload.context,
+        tenant_id=tenant_id,
+    )
+    return {
+        "key": payload.key,
+        "actor_id": payload.actor_id,
+        "tenant_id": tenant_id,
+        "enabled": is_enabled,
+    }
+
+
+@router.delete("/v1/feature-flags/{key}")
+async def delete_feature_flag(
+    key: str,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_ADMIN)),
+) -> dict[str, Any]:
+    """Delete a feature flag for the tenant."""
+    tenant_id = user["tenant_id"]
+    deleted = global_feature_flag_engine.delete_flag(key, tenant_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Feature flag '{key}' not found for tenant '{tenant_id}'.",
+        )
+    return {"ok": True, "key": key, "status": "deleted"}
+
+
+# ── 11. Audience Segments Builder ─────────────────────────────────────────────
+
+
+class AudienceSegmentCreateRequest(BaseModel):
+    name: str
+    rules: list[SegmentRule] = Field(default_factory=list)
+    match_policy: str = "ALL"
+    description: str = ""
+
+
+class AudienceSegmentEvaluateRequest(BaseModel):
+    profiles: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class AudienceSegmentExportRequest(BaseModel):
+    matching_profiles: list[dict[str, Any]] = Field(default_factory=list)
+    destination: str = "hubspot"
+
+
+@router.get("/v1/intelligence/audiences")
+async def list_audience_segments(
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """List all audience segments defined for the tenant."""
+    tenant_id = user["tenant_id"]
+    segs = global_audience_engine.list_segments(tenant_id)
+    return {"tenant_id": tenant_id, "segments": [s.model_dump() for s in segs]}
+
+
+@router.post("/v1/intelligence/audiences")
+async def create_audience_segment(
+    payload: AudienceSegmentCreateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Create a new dynamic audience segment."""
+    tenant_id = user["tenant_id"]
+    segment = AudienceSegment(
+        name=payload.name,
+        tenant_id=tenant_id,
+        rules=payload.rules,
+        match_policy=payload.match_policy,
+        description=payload.description,
+    )
+    saved = global_audience_engine.save_segment(segment)
+    return saved.model_dump()
+
+
+@router.post("/v1/intelligence/audiences/{segment_id}/evaluate")
+async def evaluate_audience_segment(
+    segment_id: str,
+    payload: AudienceSegmentEvaluateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+) -> dict[str, Any]:
+    """Evaluate an audience segment against customer profiles."""
+    tenant_id = user["tenant_id"]
+    try:
+        result = global_audience_engine.evaluate_segment(
+            segment_id=segment_id,
+            profiles=payload.profiles,
+            tenant_id=tenant_id,
+        )
+        return result.model_dump()
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Audience segment '{segment_id}' not found for tenant '{tenant_id}'.",
+        )
+
+
+@router.post("/v1/intelligence/audiences/{segment_id}/export")
+async def export_audience_segment(
+    segment_id: str,
+    payload: AudienceSegmentExportRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Export segment-matched profiles formatted for a downstream connector."""
+    tenant_id = user["tenant_id"]
+    segment = global_audience_engine.get_segment(segment_id, tenant_id)
+    if not segment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Audience segment '{segment_id}' not found for tenant '{tenant_id}'.",
+        )
+
+    exported = global_audience_engine.export_for_destination(
+        matching_profiles=payload.matching_profiles,
+        destination=payload.destination,
+    )
+    return {
+        "segment_id": segment_id,
+        "destination": payload.destination,
+        "count": len(exported),
+        "payloads": exported,
+    }
+
+
+# ── 12. Self-Healing Auto-Remediation Playbooks ────────────────────────────────
+
+
+class IncidentRemediateRequest(BaseModel):
+    incident_id: str
+    incident_type: str
+    severity: str = "HIGH"
+    context: dict[str, Any] = Field(default_factory=dict)
+    auto_approve: bool = False
+
+
+@router.post("/v1/incidents/remediate")
+async def execute_incident_remediation(
+    payload: IncidentRemediateRequest,
+    user: dict[str, Any] = Depends(require_role(Role.CORTEX_OPERATOR)),
+) -> dict[str, Any]:
+    """Execute a self-healing operational remediation playbook."""
+    tenant_id = user["tenant_id"]
+    receipt = global_remediation_engine.execute_playbook(
+        tenant_id=tenant_id,
+        incident_id=payload.incident_id,
+        incident_type_str=payload.incident_type,
+        severity_str=payload.severity,
+        context=payload.context,
+        auto_approve=payload.auto_approve,
     )
     return receipt.model_dump()

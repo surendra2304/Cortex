@@ -135,6 +135,13 @@ class ContextBuilder:
 from .exposure_monitor import AssetExposure, AssetExposureMonitor
 from .market_signals import MarketSignalDetector
 from .predictive_personalization import PredictionInformedPersonalization, PredictivePersonalizationAction
+from .audience_segments import (
+    AudienceSegment,
+    AudienceSegmentEngine,
+    SegmentEvaluationResult,
+    SegmentRule,
+    global_audience_engine,
+)
 from .behavioral_churn import (
     BehavioralChurnClassifier,
     ChurnRiskAssessment,
@@ -154,4 +161,9 @@ __all__ = [
     "CustomerRFMProfile",
     "ChurnRiskAssessment",
     "LeadIntentAcceleration",
+    "AudienceSegment",
+    "AudienceSegmentEngine",
+    "SegmentRule",
+    "SegmentEvaluationResult",
+    "global_audience_engine",
 ]
