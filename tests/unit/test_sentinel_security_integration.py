@@ -2,7 +2,6 @@ import os
 import sys
 
 import pytest
-from fastapi.testclient import TestClient
 
 for p in [
     "packages/core/src",
@@ -21,7 +20,6 @@ for p in [
 ]:
     sys.path.insert(0, os.path.abspath(p))
 
-from cortex_api.main import app
 from cortex_integrations import SentinelEventListener, SentinelFinding, SentinelPayload
 from cortex_intelligence import AssetExposureMonitor
 from cortex_workflow_engine import SecurityIncidentWorkflow
@@ -87,13 +85,12 @@ async def test_sentinel_listener_and_security_incident_workflow():
     assert triage_res["friday_alert_sent"] is True
 
 
-def test_sentinel_findings_api_endpoint(monkeypatch):
-    client = TestClient(app)
-
-    # POST findings to /v1/sentinel/findings
+def test_sentinel_findings_api_endpoint(monkeypatch, api_client, provisioned_key):
+    client = api_client
+    _, tenant_id, site_id = provisioned_key
     payload = {
         "sentinel_task_id": "task_api_sec_001",
-        "asset_id": "site_main",
+        "asset_id": site_id,
         "posture_score": 88.5,
         "findings": [
             {
@@ -107,16 +104,41 @@ def test_sentinel_findings_api_endpoint(monkeypatch):
         ],
     }
 
-    # Audit C4: scanner findings are service-authenticated.
     assert client.post("/v1/sentinel/findings", json=payload).status_code == 401
     res = client.post("/v1/sentinel/findings", headers=friday_headers(monkeypatch), json=payload)
-    assert res.status_code == 202
+    assert res.status_code == 202, res.text
     data = res.json()
     assert data["status"] == "ingested"
     assert data["findings_count"] == 1
+    assert data["tenant_id"] == tenant_id
     assert len(data["security_incidents_triaged"]) == 1
 
-    # GET exposure
-    exp_res = client.get("/v1/sentinel/exposure", headers=auth_headers())
+    tenant_read = client.get(
+        "/v1/sentinel/findings",
+        params={"asset_id": site_id},
+        headers=auth_headers(role="cortex_viewer", tenant_id=tenant_id),
+    )
+    assert tenant_read.status_code == 200, tenant_read.text
+    assert tenant_read.json()["total"] == 1
+    assert tenant_read.json()["findings"][0]["finding_id"] == "find_api_01"
+    assert tenant_read.json()["findings"][0]["sentinel_task_id"] == "task_api_sec_001"
+
+    other_tenant_read = client.get(
+        "/v1/sentinel/findings",
+        headers=auth_headers(role="cortex_viewer", tenant_id="tenant_other"),
+    )
+    assert other_tenant_read.status_code == 200
+    assert other_tenant_read.json()["findings"] == []
+    assert other_tenant_read.json()["total"] == 0
+
+    tenant_exposure = client.get(
+        "/v1/sentinel/exposure",
+        headers=auth_headers(role="cortex_viewer", tenant_id=tenant_id),
+    )
+    assert tenant_exposure.status_code == 403
+    exp_res = client.get(
+        "/v1/sentinel/exposure",
+        headers=auth_headers(role="cortex_platform_admin", tenant_id="system"),
+    )
     assert exp_res.status_code == 200
     assert "assets" in exp_res.json()

@@ -21,13 +21,24 @@ from fastapi import (
     status,
 )
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import IntegrityError
 
 from cortex_api.api_keys import provision_api_key
 from cortex_api.auth import Role, require_role, verify_friday_token
 from cortex_api.config import get_db_session, get_redis_client, settings
-from cortex_api.db_models import AuditRecordModel, EventModel, ProfileModel, TenantModel, VisitorModel, WorkflowRunModel
+from cortex_api.db_models import (
+    ApiKeyModel,
+    AuditRecordModel,
+    EventModel,
+    ProfileModel,
+    SentinelFindingModel,
+    SentinelScanModel,
+    TenantModel,
+    VisitorModel,
+    WorkflowRunModel,
+)
 from cortex_api.ws_auth import authenticate_websocket
 from cortex_upgrade.audit import redact
 
@@ -797,16 +808,118 @@ _sentinel_client = SentinelClient()
 _sec_workflow = SecurityIncidentWorkflow()
 
 
+async def _resolve_sentinel_tenant(db: AsyncSession, site_id: str) -> str:
+    """Resolve a scanner asset to exactly one active tenant before accepting findings."""
+    key_result = await db.execute(
+        select(ApiKeyModel.tenant_id)
+        .where(ApiKeyModel.site_id == site_id, ApiKeyModel.is_active.is_(True))
+        .distinct()
+    )
+    owners = {str(value) for value in key_result.scalars().all() if value}
+
+    primary_result = await db.execute(select(TenantModel).where(TenantModel.primary_site_id == site_id))
+    primary_tenant = primary_result.scalar_one_or_none()
+    if primary_tenant is not None:
+        if not primary_tenant.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Sentinel asset belongs to an inactive tenant.",
+            )
+        owners.add(primary_tenant.id)
+
+    if not owners:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sentinel asset is not registered to an active tenant.")
+
+    registry_result = await db.execute(select(TenantModel).where(TenantModel.id.in_(owners)))
+    registered = {row.id: row for row in registry_result.scalars().all()}
+    disabled = {owner for owner in owners if owner in registered and not registered[owner].is_active}
+    active_owners = owners - disabled
+    if not active_owners:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Sentinel asset has no active tenant owner.")
+    if len(active_owners) != 1:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Sentinel asset has ambiguous tenant ownership.")
+    return next(iter(active_owners))
+
+
+async def _persist_sentinel_scan(db: AsyncSession, payload: SentinelPayload, tenant_id: str) -> SentinelScanModel:
+    """Persist each scan and its finding set atomically; retrying a task replaces that set."""
+    now = datetime.now(UTC)
+    try:
+        result = await db.execute(
+            select(SentinelScanModel).where(
+                SentinelScanModel.tenant_id == tenant_id,
+                SentinelScanModel.site_id == payload.asset_id,
+                SentinelScanModel.sentinel_task_id == payload.sentinel_task_id,
+            )
+        )
+        scan = result.scalar_one_or_none()
+        if scan is None:
+            scan = SentinelScanModel(
+                id=f"scan_{uuid.uuid4().hex}",
+                tenant_id=tenant_id,
+                site_id=payload.asset_id,
+                sentinel_task_id=payload.sentinel_task_id,
+                posture_score=payload.posture_score,
+                occurred_at=payload.timestamp,
+                received_at=now,
+            )
+            db.add(scan)
+            await db.flush()
+        else:
+            scan.posture_score = payload.posture_score
+            scan.occurred_at = payload.timestamp
+            scan.received_at = now
+            await db.execute(delete(SentinelFindingModel).where(SentinelFindingModel.scan_id == scan.id))
+
+        for finding in payload.findings:
+            db.add(
+                SentinelFindingModel(
+                    id=f"sf_{uuid.uuid4().hex}",
+                    scan_id=scan.id,
+                    tenant_id=tenant_id,
+                    site_id=payload.asset_id,
+                    finding_id=finding.finding_id,
+                    severity=finding.severity.lower(),
+                    title=finding.title,
+                    description=finding.description,
+                    evidence_ref=finding.evidence_ref,
+                    attack_vector=finding.attack_vector,
+                    affected_endpoint=finding.affected_endpoint,
+                    occurred_at=payload.timestamp,
+                    received_at=now,
+                )
+            )
+        await db.commit()
+        return scan
+    except IntegrityError as exc:
+        await db.rollback()
+        logger.warning("Concurrent duplicate Sentinel scan task %s for site %s", payload.sentinel_task_id, payload.asset_id)
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A conflicting Sentinel scan task was received concurrently; retry with the same task ID.",
+        ) from exc
+    except HTTPException:
+        await db.rollback()
+        raise
+    except Exception as exc:
+        await db.rollback()
+        logger.exception("Failed to persist Sentinel scan task %s for site %s", payload.sentinel_task_id, payload.asset_id)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Sentinel finding store is unavailable; findings were not accepted.",
+        ) from exc
+
+
 @router.post("/v1/sentinel/findings", status_code=status.HTTP_202_ACCEPTED)
 async def receive_sentinel_findings(
     payload: SentinelPayload,
     auth: dict[str, Any] = Depends(verify_friday_token),
+    db: AsyncSession = Depends(get_db_session),
 ):
-    """
-    Receives automated vulnerability and posture findings from Sentinel scanner.
-    Ingests into cognitive loop and automatically initiates SecurityIncidentWorkflow for critical/high findings.
-    """
-    ingest_result = await _sentinel_listener.handle_findings(payload)
+    """Accept scanner findings only for a registered tenant site, then persist them."""
+    tenant_id = await _resolve_sentinel_tenant(db, payload.asset_id)
+    await _persist_sentinel_scan(db, payload, tenant_id)
+    ingest_result = await _sentinel_listener.handle_findings(payload, tenant_id=tenant_id)
 
     triaged_incidents = []
     for finding in payload.findings:
@@ -815,15 +928,16 @@ async def receive_sentinel_findings(
                 payload.asset_id, finding.affected_endpoint or f"/api/{payload.asset_id}"
             )
             incident = await _sec_workflow.execute_security_incident_triage(
-                finding=finding.model_dump(), asset_exposure=exposure
+                finding={**finding.model_dump(), "asset_id": payload.asset_id, "tenant_id": tenant_id},
+                asset_exposure=exposure,
             )
             triaged_incidents.append(incident)
 
-    return {**ingest_result, "security_incidents_triaged": triaged_incidents}
+    return {**ingest_result, "tenant_id": tenant_id, "security_incidents_triaged": triaged_incidents}
 
 
 @router.get("/v1/sentinel/exposure")
-async def get_asset_exposure(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+async def get_asset_exposure(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_PLATFORM_ADMIN))):
     """Returns live asset exposure and attack surface mappings."""
     return {
         "assets": _exposure_monitor.list_monitored_assets(),
@@ -832,26 +946,76 @@ async def get_asset_exposure(auth: dict[str, Any] = Depends(require_role(Role.CO
 
 
 @router.get("/v1/sentinel/findings")
-async def get_sentinel_findings(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
-    """Returns list of received Sentinel findings and posture evaluation.
+async def get_sentinel_findings(
+    asset_id: str | None = Query(None, min_length=1, max_length=64),
+    auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER)),
+    db: AsyncSession = Depends(get_db_session),
+):
+    """Return persisted findings scoped to the authenticated tenant (or platform admin)."""
+    is_platform_admin = auth.get("role") == Role.CORTEX_PLATFORM_ADMIN.value
+    finding_filters = []
+    scan_filters = []
+    if not is_platform_admin:
+        tenant_id = str(auth.get("tenant_id") or "").strip()
+        if not tenant_id or tenant_id == "system":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="A tenant-bound identity is required to read Sentinel findings.",
+            )
+        finding_filters.append(SentinelFindingModel.tenant_id == tenant_id)
+        scan_filters.append(SentinelScanModel.tenant_id == tenant_id)
 
-    ``posture_score`` used to be a hardcoded 95.0 whenever nothing had been pushed, which read
-    as a live security metric. It is now the score that came with the pushed findings (or null),
-    and the live posture is a separate, attributable read at ``/v1/sentinel/posture``.
-    """
-    pushed_score = (
-        _sentinel_listener.received_findings[0].get("posture_score") if _sentinel_listener.received_findings else None
+    if asset_id:
+        finding_filters.append(SentinelFindingModel.site_id == asset_id)
+        scan_filters.append(SentinelScanModel.site_id == asset_id)
+
+    count_result = await db.execute(select(func.count()).select_from(SentinelFindingModel).where(*finding_filters))
+    total = int(count_result.scalar_one())
+    finding_result = await db.execute(
+        select(SentinelFindingModel, SentinelScanModel.sentinel_task_id, SentinelScanModel.posture_score)
+        .join(SentinelScanModel, SentinelScanModel.id == SentinelFindingModel.scan_id)
+        .where(*finding_filters)
+        .order_by(desc(SentinelFindingModel.received_at))
+        .limit(500)
     )
+    records = finding_result.all()
+    score_result = await db.execute(
+        select(SentinelScanModel.posture_score)
+        .where(*scan_filters)
+        .order_by(desc(SentinelScanModel.received_at))
+        .limit(1)
+    )
+    pushed_score = score_result.scalar_one_or_none()
+
+    findings = [
+        {
+            "finding_id": row.finding_id,
+            "sentinel_task_id": task_id,
+            "tenant_id": row.tenant_id,
+            "asset_id": row.site_id,
+            "site_id": row.site_id,
+            "posture_score": score,
+            "severity": row.severity,
+            "title": row.title,
+            "description": row.description,
+            "evidence_ref": row.evidence_ref,
+            "attack_vector": row.attack_vector,
+            "affected_endpoint": row.affected_endpoint,
+            "timestamp": row.occurred_at.isoformat(),
+            "received_at": row.received_at.isoformat(),
+        }
+        for row, task_id, score in records
+    ]
     return {
-        "findings": _sentinel_listener.received_findings,
-        "total": len(_sentinel_listener.received_findings),
+        "findings": findings,
+        "total": total,
         "posture_score": pushed_score,
         "posture_source": "sentinel_push" if pushed_score is not None else "none",
     }
 
 
 @router.get("/v1/sentinel/posture")
-async def get_live_security_posture(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+async def get_live_security_posture(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_PLATFORM_ADMIN))):
     """Live security posture read from the Sentinel service (or the documented baseline)."""
     posture = await _sentinel_client.fetch_security_posture()
     payload = posture.model_dump()
@@ -895,7 +1059,7 @@ async def evaluate_deployment_gate(
 
 
 @router.get("/v1/security/compliance-report")
-async def get_security_compliance_report(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_VIEWER))):
+async def get_security_compliance_report(auth: dict[str, Any] = Depends(require_role(Role.CORTEX_PLATFORM_ADMIN))):
     """Generates weekly compliance report (SOC2 Type II, ISO 27001, SLA compliance)."""
     return _baseline_tracker.generate_compliance_report()
 

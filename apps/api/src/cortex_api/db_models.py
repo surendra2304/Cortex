@@ -150,6 +150,52 @@ class ApiKeyModel(Base):
     last_used_at = Column(DateTime(timezone=True), nullable=True)
 
 
+class SentinelScanModel(Base):
+    """Durable scan-level posture summary, including clean scans with zero findings."""
+
+    __tablename__ = "sentinel_scans"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "site_id", "sentinel_task_id", name="uq_sentinel_scan_tenant_site_task"),
+        Index("idx_sentinel_scans_tenant_site_received", "tenant_id", "site_id", "received_at"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    site_id = Column(String(64), nullable=False, index=True)
+    sentinel_task_id = Column(String(128), nullable=False)
+    posture_score = Column(Float, nullable=False)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    findings = relationship("SentinelFindingModel", back_populates="scan", cascade="all, delete-orphan")
+
+
+class SentinelFindingModel(Base):
+    """Tenant/site-scoped security finding records associated with a Sentinel scan."""
+
+    __tablename__ = "sentinel_findings"
+    __table_args__ = (
+        UniqueConstraint("scan_id", "finding_id", name="uq_sentinel_finding_scan_finding"),
+        Index("idx_sentinel_findings_tenant_site_received", "tenant_id", "site_id", "received_at"),
+    )
+
+    id = Column(String(64), primary_key=True)
+    scan_id = Column(String(64), ForeignKey("sentinel_scans.id", ondelete="CASCADE"), nullable=False, index=True)
+    tenant_id = Column(String(64), nullable=False, index=True)
+    site_id = Column(String(64), nullable=False, index=True)
+    finding_id = Column(String(128), nullable=False)
+    severity = Column(String(16), nullable=False, index=True)
+    title = Column(String(512), nullable=False)
+    description = Column(Text, nullable=False)
+    evidence_ref = Column(Text, nullable=True)
+    attack_vector = Column(String(128), nullable=True)
+    affected_endpoint = Column(Text, nullable=True)
+    occurred_at = Column(DateTime(timezone=True), nullable=False)
+    received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+
+    scan = relationship("SentinelScanModel", back_populates="findings")
+
+
 class IdentityLinkModel(Base):
     __tablename__ = "identity_links"
 
