@@ -1,0 +1,102 @@
+import cortex_api.main as main_module
+import pytest
+from cortex_api.landing_page import FALLBACK_WEBSITE_HTML
+from cortex_api.main import app
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def client():
+    return TestClient(app)
+
+
+def test_root_serves_website_html_to_browsers(client):
+    """Browsers sending Accept: text/html should receive the visual CORTEX dashboard."""
+    response = client.get("/", headers={"Accept": "text/html,application/xhtml+xml"})
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "CORTEX" in response.text
+
+
+def test_root_serves_json_to_api_clients(client):
+    """API clients explicitly sending Accept: application/json should receive JSON health status."""
+    response = client.get("/", headers={"Accept": "application/json"})
+    assert response.status_code == 200
+    assert "application/json" in response.headers.get("content-type", "")
+    data = response.json()
+    assert data.get("status") == "healthy"
+    assert "service" in data
+
+
+def test_health_endpoints_always_return_json(client):
+    """Health endpoints /health and /v1/health should always return pure JSON."""
+    res1 = client.get("/health")
+    assert res1.status_code == 200
+    assert res1.headers.get("content-type", "").startswith("application/json")
+    assert res1.json().get("status") in ("ok", "healthy", "UP")
+
+    res2 = client.get("/v1/health")
+    assert res2.status_code == 200
+    assert res2.headers.get("content-type", "").startswith("application/json")
+    assert res2.json().get("status") == "healthy"
+
+
+def test_dashboard_route_serves_html(client):
+    """Accessing /dashboard should serve the visual dashboard."""
+    response = client.get("/dashboard")
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert "CORTEX" in response.text
+
+
+def test_spa_subpages_serve_html(client):
+    """Subpages like /agents, /analytics, /visitors, /leads should serve HTML."""
+    for page in ["/agents", "/activity", "/analytics", "/visitors", "/leads", "/settings", "/governance"]:
+        response = client.get(page)
+        assert response.status_code == 200, f"Failed for page {page}"
+        assert "text/html" in response.headers.get("content-type", "")
+
+
+def test_live_dashboard_has_no_demo_metrics_or_contacts(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    assert "48,900" not in response.text
+    assert "director@enterprise" not in response.text
+    assert "SaaSCo" not in response.text
+    if main_module._dashboard_index():
+        assert "Saved leads" in response.text
+        assert "Recent activity" in response.text
+    else:
+        # Source checkouts used by unit tests do not contain the ignored Next.js
+        # export. The fallback must say it is unconnected rather than imply
+        # live data is present.
+        assert "Runtime status is not connected on this page" in response.text
+
+
+def test_root_serves_exported_dashboard_when_configured(tmp_path, monkeypatch):
+    index = tmp_path / "index.html"
+    index.write_text("<html><body>Saved leads · Recent activity</body></html>", encoding="utf-8")
+    monkeypatch.setattr(main_module, "DASHBOARD_DIR", str(tmp_path))
+
+    response = TestClient(app).get("/")
+
+    assert response.status_code == 200
+    assert "Saved leads" in response.text
+    assert "Recent activity" in response.text
+
+
+def test_fallback_landing_page_renders():
+    """Verify fallback HTML contains key platform elements."""
+    assert "CORTEX" in FALLBACK_WEBSITE_HTML
+    assert "10-Phase" in FALLBACK_WEBSITE_HTML
+    assert "GrowthAgent" in FALLBACK_WEBSITE_HTML
+    assert "/docs" in FALLBACK_WEBSITE_HTML
+
+
+def test_fallback_landing_page_does_not_claim_unmeasured_runtime_metrics():
+    assert "100% SLA" not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-engine">ACTIVE<' not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-agents">7 Active<' not in FALLBACK_WEBSITE_HTML
+    assert 'id="stat-latency">34 ms<' not in FALLBACK_WEBSITE_HTML
+    assert "SLA not measured" in FALLBACK_WEBSITE_HTML
+    assert "Runtime status is not connected on this page" in FALLBACK_WEBSITE_HTML

@@ -1,0 +1,18 @@
+{
+  "name": "@cortex/sdk",
+  "version": "0.1.0",
+  "description": "CORTEX JavaScript and TypeScript Browser Telemetry SDK",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm,iife --global-name Cortex --minify --dts --out-dir dist",
+    "bundle": "esbuild src/index.ts --bundle --minify --sourcemap --outfile=dist/cortex.js --global-name=Cortex --format=iife",
+    "test": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "esbuild": "^0.28.2",
+    "tsup": "^8.0.2"
+  }
+}

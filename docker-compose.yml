@@ -1,0 +1,95 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    container_name: cortex-postgres
+    restart: unless-stopped
+    # Development-only loopback binding; production should use the shared private PostgreSQL service.
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: ${CORTEX_DB_USER:-cortex}
+      POSTGRES_PASSWORD: ${CORTEX_DB_PASSWORD:?CORTEX_DB_PASSWORD is required}
+      POSTGRES_DB: ${CORTEX_DB_NAME:-cortex_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: cortex-redis
+    restart: unless-stopped
+    # Keep Redis off public interfaces; internal containers use the service name.
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: cortex-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: ${CORTEX_DATABASE_URL:-postgresql+asyncpg://${CORTEX_DB_USER:-cortex}:${CORTEX_DB_PASSWORD:?CORTEX_DB_PASSWORD is required}@postgres:5432/${CORTEX_DB_NAME:-cortex_db}}
+      POSTGRES_DSN: ${CORTEX_DATABASE_URL:-postgresql+asyncpg://${CORTEX_DB_USER:-cortex}:${CORTEX_DB_PASSWORD:?CORTEX_DB_PASSWORD is required}@postgres:5432/${CORTEX_DB_NAME:-cortex_db}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MOCK_MODE: ${MOCK_MODE:-false}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://inference:8000}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    container_name: cortex-worker
+    restart: unless-stopped
+    command: ["python", "-m", "cortex_worker.main"]
+    environment:
+      DATABASE_URL: ${CORTEX_DATABASE_URL:-postgresql+asyncpg://${CORTEX_DB_USER:-cortex}:${CORTEX_DB_PASSWORD:?CORTEX_DB_PASSWORD is required}@postgres:5432/${CORTEX_DB_NAME:-cortex_db}}
+      POSTGRES_DSN: ${CORTEX_DATABASE_URL:-postgresql+asyncpg://${CORTEX_DB_USER:-cortex}:${CORTEX_DB_PASSWORD:?CORTEX_DB_PASSWORD is required}@postgres:5432/${CORTEX_DB_NAME:-cortex_db}}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
+      MOCK_MODE: ${MOCK_MODE:-false}
+      INFERENCE_BASE_URL: ${INFERENCE_BASE_URL:-http://inference:8000}
+      INFERENCE_API_KEY: ${INFERENCE_API_KEY:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    container_name: cortex-dashboard
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_CORTEX_API_URL: ${NEXT_PUBLIC_CORTEX_API_URL:-http://localhost:8000}
+    depends_on:
+      - api
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local

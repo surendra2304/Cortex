@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-api
+  namespace: nexus
+  labels:
+    app: nexus-api
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nexus-api
+  template:
+    metadata:
+      labels:
+        app: nexus-api
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/surendra2304/nexus-api:latest
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+          livenessProbe:
+            httpGet:
+              path: /v1/health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 5
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: nexus-api-hpa
+  namespace: nexus
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: nexus-api
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nexus-worker
+  namespace: nexus
+  labels:
+    app: nexus-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: nexus-worker
+  template:
+    metadata:
+      labels:
+        app: nexus-worker
+    spec:
+      containers:
+        - name: worker
+          image: ghcr.io/surendra2304/nexus-worker:latest
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1024Mi"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nexus-ingress
+  namespace: nexus
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    kubernetes.io/ingress.class: "nginx"
+spec:
+  tls:
+    - hosts:
+        - api.nexus-intel.io
+      secretName: nexus-api-tls
+  rules:
+    - host: api.nexus-intel.io
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nexus-api
+                port:
+                  number: 8000
