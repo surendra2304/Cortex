@@ -1151,7 +1151,7 @@ async def get_merkle_proof(
 
 
 class FunnelEvaluateRequest(BaseModel):
-    sessions_events: dict[str, list[dict[str, Any]]]
+    sessions_events: dict[str, list[dict[str, Any]]] = Field(default_factory=dict)
 
 
 @router.get("/v1/funnels/definitions")
