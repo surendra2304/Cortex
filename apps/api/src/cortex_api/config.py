@@ -110,7 +110,9 @@ class Settings(BaseSettings):
     @classmethod
     def _parse_postgres_dsn(cls, value):
         """Resolve database DSN from POSTGRES_DSN or DATABASE_URL with dokploy-postgres default in production."""
-        dsn = value or os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL")
+        dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL") or value
+        if isinstance(dsn, str) and dsn.startswith("oracle+oracledb://"):
+            dsn = "oracle+oracledb_async://" + dsn[len("oracle+oracledb://"):]
         if not dsn:
             if os.getenv("APP_ENV", "development").lower() == "production":
                 dsn = "postgresql+asyncpg://cortex_user:JOckBx8gtWYn4bhPkVj-mB92@dokploy-postgres:5432/cortex_db"
