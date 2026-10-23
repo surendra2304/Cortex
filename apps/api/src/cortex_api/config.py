@@ -109,10 +109,19 @@ class Settings(BaseSettings):
     @field_validator("postgres_dsn", mode="before")
     @classmethod
     def _parse_postgres_dsn(cls, value):
-        """Resolve database DSN from POSTGRES_DSN or DATABASE_URL with dokploy-postgres default in production."""
-        dsn = os.getenv("POSTGRES_DSN") or os.getenv("DATABASE_URL") or value
-        if isinstance(dsn, str) and dsn.startswith("oracle+oracledb://"):
-            dsn = "oracle+oracledb_async://" + dsn[len("oracle+oracledb://"):]
+        """Resolve database DSN supporting Oracle 23ai async, PostgreSQL async, and Zero-Disk RAM SQLite tmpfs."""
+        dsn = (
+            os.getenv("ORACLE_CORE_ASYNC_URL")
+            or os.getenv("ORACLE_CORE_URL")
+            or os.getenv("POSTGRES_DSN")
+            or os.getenv("DATABASE_URL")
+            or value
+        )
+        if isinstance(dsn, str):
+            if dsn.startswith("oracle+oracledb://"):
+                dsn = "oracle+oracledb_async://" + dsn[len("oracle+oracledb://"):]
+            elif dsn.startswith("oracle://"):
+                dsn = "oracle+oracledb_async://" + dsn[len("oracle://"):]
         if not dsn:
             if os.getenv("APP_ENV", "development").lower() == "production":
                 dsn = "postgresql+asyncpg://cortex_user:JOckBx8gtWYn4bhPkVj-mB92@dokploy-postgres:5432/cortex_db"
@@ -123,6 +132,10 @@ class Settings(BaseSettings):
                 dsn = "postgresql+asyncpg://" + dsn[len("postgresql://"):]
             elif dsn.startswith("postgres://"):
                 dsn = "postgresql+asyncpg://" + dsn[len("postgres://"):]
+            # Zero-Disk SQLite Policy Enforcement (Codex Invariant 2):
+            # In Linux production systems, ephemeral SQLite must reside in RAM tmpfs (/dev/shm)
+            if "sqlite" in dsn and os.getenv("APP_ENV", "development").lower() == "production" and os.path.exists("/dev/shm"):
+                dsn = "sqlite+aiosqlite:////dev/shm/cortex.db"
         return dsn
 
     @field_validator("allowed_origins", mode="before")

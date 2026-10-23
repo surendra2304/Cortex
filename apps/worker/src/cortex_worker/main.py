@@ -63,6 +63,24 @@ WORKER_MAX_CONCURRENCY = int(os.getenv("WORKER_MAX_CONCURRENCY", "4"))
 PEL_RECOVERY_INTERVAL_SECONDS = float(os.getenv("WORKER_PEL_RECOVERY_INTERVAL_SECONDS", "30"))
 PEL_MIN_IDLE_MS = int(os.getenv("WORKER_PEL_MIN_IDLE_MS", "30000"))
 PEL_RECOVERY_BATCH = int(os.getenv("WORKER_PEL_RECOVERY_BATCH", "100"))
+DLQ_STREAM = os.getenv("REDIS_DLQ_STREAM", "cortex:events:dlq")
+
+
+async def route_to_dlq(redis_client: aioredis.Redis, message_id: str, payload_str: str, reason: str) -> None:
+    """Quarantine unprocessable or poison events into the dead-letter stream."""
+    try:
+        await redis_client.xadd(
+            DLQ_STREAM,
+            {
+                "original_message_id": str(message_id),
+                "payload": str(payload_str),
+                "reason": str(reason),
+                "timestamp": _utcnow().isoformat(),
+            },
+        )
+        logger.warning(f"Event [stream_id={message_id}] quarantined to DLQ stream '{DLQ_STREAM}': {reason}")
+    except Exception as exc:
+        logger.error(f"Failed to quarantine message {message_id} to DLQ: {exc}")
 
 
 async def init_stream_group(redis_client: aioredis.Redis) -> None:
@@ -148,16 +166,29 @@ async def deliver_message(
     False when it must stay pending for PEL recovery.
     """
     status, _result = await process_event_with_status(message_id, payload_str, orchestrator)
-    if status in ("ok", "poison"):
+    if status == "ok":
         await redis_client.xack(STREAM_NAME, CONSUMER_GROUP, message_id)
         delivery_attempts.pop(message_id, None)
         logger.debug(f"Acknowledged event {message_id}")
         return True
 
+    if status == "poison":
+        await route_to_dlq(redis_client, message_id, payload_str, reason="Unparseable or poison payload")
+        await redis_client.xack(STREAM_NAME, CONSUMER_GROUP, message_id)
+        delivery_attempts.pop(message_id, None)
+        logger.debug(f"Acknowledged poison event {message_id} after quarantine to DLQ")
+        return True
+
     attempts = delivery_attempts.get(message_id, 0) + 1
     if attempts >= MAX_DELIVERY_ATTEMPTS:
         logger.error(
-            f"Event {message_id} failed {attempts} delivery attempts; acknowledging to stop redelivery."
+            f"Event {message_id} failed {attempts} delivery attempts; quarantining to DLQ and acknowledging."
+        )
+        await route_to_dlq(
+            redis_client,
+            message_id,
+            payload_str,
+            reason=f"Exhausted {attempts} delivery attempts without successful processing",
         )
         await redis_client.xack(STREAM_NAME, CONSUMER_GROUP, message_id)
         delivery_attempts.pop(message_id, None)
