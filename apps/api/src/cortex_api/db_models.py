@@ -2,9 +2,15 @@ from datetime import UTC, datetime
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import relationship
 
 from cortex_api.config import Base
+
+
+@compiles(JSON, "oracle")
+def _compile_json_oracle(type_, compiler, **kw):
+    return "JSON" 
 
 
 def _utcnow() -> datetime:
