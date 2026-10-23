@@ -116,7 +116,14 @@ class PeerTransport:
         return self.base_url is not None
 
     def headers(self, extra: dict[str, str] | None = None) -> dict[str, str]:
-        headers = {"Content-Type": "application/json", "X-Source-Agent": "cortex"}
+        import uuid
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Source-Agent": "cortex",
+            "X-Agent-Name": "Cortex",
+            "X-Correlation-ID": str(uuid.uuid4()),
+        }
         if self.api_key:
             headers["X-API-Key"] = self.api_key
             headers["Authorization"] = f"Bearer {self.api_key}"
