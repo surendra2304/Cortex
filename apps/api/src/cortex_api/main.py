@@ -288,6 +288,10 @@ app.include_router(campaign_optimizer_router, prefix="/api/v1/cortex")
 from cortex_api.recommendation_personalizer import router as recommendation_personalizer_router
 app.include_router(recommendation_personalizer_router, prefix="/api/v1/cortex")
 
+# --- Decision Impact Analyzer Integration ---
+from cortex_api.decision_impact_analyzer import router as decision_impact_router
+app.include_router(decision_impact_router, prefix="/api/v1/cortex")
+
 
 # ── Pydantic Schemas for Cognitive Reasoning ─────────────────────────────────
 class CognitivePlanStep(BaseModel):
