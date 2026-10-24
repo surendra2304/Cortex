@@ -83,6 +83,7 @@ from cortex_api.stripe_webhook_router import router as stripe_webhook_router  # 
 from cortex_api.tracing import TracingMiddleware  # noqa: E402
 from cortex_api.understand_router import router as understand_router  # noqa: E402
 from cortex_api.advanced_operations_router import router as advanced_operations_router  # noqa: E402
+from cortex_api.marketing_platform_integrator import router as marketing_platform_router  # noqa: E402
 from cortex_api.enhanced_crm import router as enhanced_crm_router  # noqa: E402
 from cortex_api.advanced_analytics import router as advanced_analytics_router  # noqa: E402
 from cortex_api.recommendation_engine import router as recommendation_engine_router  # noqa: E402
@@ -248,6 +249,7 @@ app.include_router(friday_router)
 app.include_router(advanced_operations_router)
 app.include_router(enhanced_crm_router)
 app.include_router(advanced_analytics_router)
+app.include_router(marketing_platform_router, prefix="/api/v1")
 app.include_router(recommendation_engine_router)
 app.include_router(ab_test_framework_router)
 app.include_router(predictive_analytics_router)
