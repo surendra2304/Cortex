@@ -304,6 +304,10 @@ app.include_router(partner_network_router, prefix="/api/v1/cortex")
 from cortex_api.decision_tree_visualizer import router as decision_tree_router
 app.include_router(decision_tree_router, prefix="/api/v1/cortex")
 
+# --- Decision Fatigue Detector Integration ---
+from cortex_api.decision_fatigue_detector import router as decision_fatigue_router
+app.include_router(decision_fatigue_router, prefix="/api/v1/cortex")
+
 
 # ── Pydantic Schemas for Cognitive Reasoning ─────────────────────────────────
 class CognitivePlanStep(BaseModel):
