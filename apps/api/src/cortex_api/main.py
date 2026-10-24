@@ -83,6 +83,13 @@ from cortex_api.stripe_webhook_router import router as stripe_webhook_router  # 
 from cortex_api.tracing import TracingMiddleware  # noqa: E402
 from cortex_api.understand_router import router as understand_router  # noqa: E402
 from cortex_api.advanced_operations_router import router as advanced_operations_router  # noqa: E402
+from cortex_api.marketing_platform_integrator import router as marketing_platform_router  # noqa: E402
+from cortex_api.predictive_demand_forecaster import router as demand_forecaster_router  # noqa: E402
+from cortex_api.multi_channel_attribution import router as attribution_router  # noqa: E402
+from cortex_api.competitive_intelligence import router as competitive_intel_router
+from cortex_api.decision_conflict_resolver import router as conflict_resolver_router
+from cortex_api.decision_recommendation_system import router as decision_rec_router
+from cortex_api.risk_assessment_framework import router as risk_framework_router  # noqa: E402
 from cortex_api.enhanced_crm import router as enhanced_crm_router  # noqa: E402
 from cortex_api.advanced_analytics import router as advanced_analytics_router  # noqa: E402
 from cortex_api.recommendation_engine import router as recommendation_engine_router  # noqa: E402
@@ -248,6 +255,14 @@ app.include_router(friday_router)
 app.include_router(advanced_operations_router)
 app.include_router(enhanced_crm_router)
 app.include_router(advanced_analytics_router)
+app.include_router(marketing_platform_router, prefix="/api/v1")
+app.include_router(demand_forecaster_router, prefix="/api/v1")
+app.include_router(attribution_router, prefix="/api/v1")
+app.include_router(ab_experiment_router, prefix="/api/v1")
+app.include_router(competitive_intel_router, prefix="/api/v1")
+app.include_router(conflict_resolver_router, prefix="/api/v1")
+app.include_router(decision_rec_router, prefix="/api/v1")
+app.include_router(risk_framework_router, prefix="/api/v1")
 app.include_router(recommendation_engine_router)
 app.include_router(ab_test_framework_router)
 app.include_router(predictive_analytics_router)
