@@ -1,0 +1,58 @@
+[
+  {
+    "test_id": "ab_397c02b82b33",
+    "name": "Landing page test",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 60.0
+  },
+  {
+    "test_id": "ab_e4f489c0ded4",
+    "name": "",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 49.999999999999986
+  },
+  {
+    "test_id": "ab_cc865d85e1a3",
+    "name": "Landing page test",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 60.0
+  },
+  {
+    "test_id": "ab_ba80c619c72d",
+    "name": "",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 49.999999999999986
+  },
+  {
+    "test_id": "ab_b16171a3b43a",
+    "name": "Landing page test",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 60.0
+  },
+  {
+    "test_id": "ab_6ccefebe9e7c",
+    "name": "",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 49.999999999999986
+  },
+  {
+    "test_id": "ab_15eb90459a73",
+    "name": "Landing page test",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 60.0
+  },
+  {
+    "test_id": "ab_e2d475360fe6",
+    "name": "",
+    "winner": "B",
+    "significance": "highly_significant",
+    "improvement_pct": 49.999999999999986
+  }
+]
