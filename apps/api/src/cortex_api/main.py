@@ -309,6 +309,10 @@ app.include_router(decision_tree_router, prefix="/api/v1/cortex")
 from cortex_api.decision_fatigue_detector import router as decision_fatigue_router
 app.include_router(decision_fatigue_router, prefix="/api/v1/cortex")
 
+# --- Agentic Inbox Engine Integration ---
+from cortex_api.real_inbox_routes import router as real_inbox_router
+app.include_router(real_inbox_router, prefix="/api/v1/cortex")
+
 
 # ── Pydantic Schemas for Cognitive Reasoning ─────────────────────────────────
 class CognitivePlanStep(BaseModel):
