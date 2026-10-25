@@ -64,7 +64,7 @@ class ExperimentationEngine:
             raise ValueError("Experiment has no variants defined.")
 
         hash_input = f"{experiment.id}:{visitor_id}".encode()
-        hash_val = int(hashlib.md5(hash_input).hexdigest(), 16) % 100
+        hash_val = int(hashlib.md5(str(hash_input).encode()).hexdigest(), 16) % 100
 
         cumulative = 0.0
         for variant in experiment.variants:

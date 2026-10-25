@@ -186,7 +186,7 @@ class CompetitiveIntelligenceEngine:
             competitor_id=competitor_id,
             product_name=product_name,
             price=price,
-            price_change_pct=(ord(hashlib.md5(f"price:{competitor_id}").encode()) % 20) / 10 - 5,
+            price_change_pct=(ord(hashlib.md5(f"price:{competitor_id}".encode()).encode()) % 20) / 10 - 5,
             discount_available=price < our_price,
             price_position="premium" if price > 100 else "mid" if price > 50 else "budget",
             value_score=price / max(1, our_price) * 100,
@@ -210,7 +210,7 @@ class CompetitiveIntelligenceEngine:
             market_size_usd=market_size_usd,
             estimated_share=5 + (ord(hashlib.md5(competitor_id.encode()).hexdigest()[:1]) % 30) / 10,
             trend="growing" if hashlib.md5(f"trend:{competitor_id}".encode()).hexdigest()[:1] < "7" else "stable",
-            confidence=0.6 + (ord(hashlib.md5(f"conf:{competitor_id}").encode()) % 30) / 100,
+            confidence=0.6 + (ord(hashlib.md5(f"conf:{competitor_id}".encode()).encode()) % 30) / 100,
             methodology="revenue_estimation",
             estimated_at=time.time(),
         )
@@ -282,7 +282,7 @@ class CompetitiveIntelligenceEngine:
     def get_report(self) -> dict:
         """Get competitive intelligence report."""
         report = CompetitiveReport(
-            report_id=hashlib.md5(f"report:{time.time()}").hexdigest()[:12],
+            report_id=hashlib.md5(f"report:{time.time()}".encode()).hexdigest()[:12],
             total_competitors=len(self._competitors),
             market_leader=max(
                 self._competitors.values(),

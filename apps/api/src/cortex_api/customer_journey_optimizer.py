@@ -220,7 +220,7 @@ class CustomerJourneyOptimizer:
     ) -> CustomerSegment:
         """Personalize journey for a customer segment."""
         seg = CustomerSegment(
-            segment_id=hashlib.md5(f"seg:{segment['name']}:{time.time()}").hexdigest()[:12],
+            segment_id=hashlib.md5(f"seg:{segment['name']}:{time.time()}".encode()).hexdigest()[:12],
             name=segment["name"],
             criteria=segment.get("criteria", ""),
             size=segment.get("size", 0),
@@ -276,7 +276,7 @@ class CustomerJourneyOptimizer:
                 recommendations.append("Reduce time to conversion")
 
             path = ConversionPath(
-                path_id=hashlib.md5(f"path:{steps}:{time.time()}").hexdigest()[:12],
+                path_id=hashlib.md5(f"path:{steps}:{time.time()}".encode()).hexdigest()[:12],
                 steps=steps,
                 conversion_rate=conversion_rate,
                 avg_time_to_convert=avg_time,
@@ -323,7 +323,7 @@ class CustomerJourneyOptimizer:
                 response = self._recommend_response(trigger)
 
                 moment = MicroMoment(
-                    moment_id=hashlib.md5(f"moment:{trigger}:{time.time()}").hexdigest()[:12],
+                    moment_id=hashlib.md5(f"moment:{trigger}:{time.time()}".encode()).hexdigest()[:12],
                     trigger=trigger,
                     action=data["action"],
                     emotion=data["emotion"],

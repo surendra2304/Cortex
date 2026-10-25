@@ -186,7 +186,7 @@ class RiskAssessmentFramework:
         cat = self._categories.get(category)
         if not cat:
             cat = RiskCategory(
-                category_id=hashlib.md5(f"category:{category}").hexdigest()[:12],
+                category_id=hashlib.md5(f"category:{category}".encode()).hexdigest()[:12],
                 name=category,
             )
             self._categories[category] = cat
