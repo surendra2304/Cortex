@@ -123,18 +123,27 @@ class Settings(BaseSettings):
             elif dsn.startswith("oracle://"):
                 dsn = "oracle+oracledb_async://" + dsn[len("oracle://"):]
         if not dsn:
-            if os.getenv("APP_ENV", "development").lower() == "production":
-                dsn = "postgresql+asyncpg://cortex_user:JOckBx8gtWYn4bhPkVj-mB92@dokploy-postgres:5432/cortex_db"
-            else:
-                dsn = "sqlite+aiosqlite:///./data/cortex.db"
+            # Never embed credentials in source. A Postgres deployment must set
+            # POSTGRES_DSN/DATABASE_URL explicitly; otherwise persist to SQLite.
+            dsn = "sqlite+aiosqlite:///./data/cortex.db"
         if isinstance(dsn, str):
             if dsn.startswith("postgresql://"):
                 dsn = "postgresql+asyncpg://" + dsn[len("postgresql://"):]
             elif dsn.startswith("postgres://"):
                 dsn = "postgresql+asyncpg://" + dsn[len("postgres://"):]
-            # Zero-Disk SQLite Policy Enforcement (Codex Invariant 2):
-            # In Linux production systems, ephemeral SQLite must reside in RAM tmpfs (/dev/shm)
-            if "sqlite" in dsn and os.getenv("APP_ENV", "development").lower() == "production" and os.path.exists("/dev/shm"):
+            # SQLite is DURABLE by default. Cortex persists CRM records (leads,
+            # visitors, tenants, audit chains); rewriting the path to /dev/shm
+            # silently discarded all of them on restart, and production was
+            # observed serving from an already-unlinked /dev/shm/cortex.db inode.
+            # RAM-backed storage is now opt-in for ephemeral/test deployments.
+            tmpfs_requested = os.getenv("CORTEX_SQLITE_TMPFS", "").strip().lower() in {"1", "true", "yes", "on"}
+            if (
+                "sqlite" in dsn
+                and os.getenv("APP_ENV", "development").lower() == "production"
+                and tmpfs_requested
+                and os.path.exists("/dev/shm")
+            ):
+                logger.warning("CORTEX_SQLITE_TMPFS enabled: database will NOT survive a restart.")
                 dsn = "sqlite+aiosqlite:////dev/shm/cortex.db"
         return dsn
 
