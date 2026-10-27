@@ -18,6 +18,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+from sqlalchemy.dialects.oracle import TIMESTAMP as OracleTIMESTAMP
 from sqlalchemy.orm import relationship
 
 from cortex_api.config import Base
@@ -58,6 +59,38 @@ class OracleJSON(TypeDecorator):
 JSONB = JSON().with_variant(PG_JSONB, "postgresql").with_variant(OracleJSON(), "oracle")
 
 
+class UTCDateTime(TypeDecorator):
+    """Timezone-aware UTC timestamp that survives a round trip through Oracle.
+
+    Oracle's generic ``DateTime(timezone=True)`` maps to plain ``TIMESTAMP`` and
+    silently drops the offset, so an aware UTC value comes back naive and every
+    comparison against ``datetime.now(UTC)`` raises. On Oracle this uses
+    ``TIMESTAMP WITH TIME ZONE``; on every backend values are normalised to UTC.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "oracle":
+            return dialect.type_descriptor(OracleTIMESTAMP(timezone=True))
+        return dialect.type_descriptor(DateTime(timezone=True))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+
 class ProfileModel(Base):
     __tablename__ = "profiles"
 
@@ -66,8 +99,8 @@ class ProfileModel(Base):
     primary_email = Column(String(255), nullable=True, index=True)
     identities = Column(JSONB, default=list, nullable=False)
     traits = Column(JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    updated_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    updated_at = Column(UTCDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
 
     visitors = relationship("VisitorModel", back_populates="profile")
     leads = relationship("LeadModel", back_populates="profile")
@@ -80,8 +113,8 @@ class VisitorModel(Base):
     tenant_id = Column(String(64), nullable=False, index=True)
     site_id = Column(String(64), nullable=False, index=True)
     profile_id = Column(String(64), ForeignKey("profiles.id", ondelete="SET NULL"), nullable=True, index=True)
-    first_seen_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    last_seen_at = Column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow, nullable=False)
+    first_seen_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    last_seen_at = Column(UTCDateTime, default=_utcnow, onupdate=_utcnow, nullable=False)
     attributes = Column(JSONB, default=dict, nullable=False)
 
     profile = relationship("ProfileModel", back_populates="visitors")
@@ -96,10 +129,10 @@ class SessionModel(Base):
     visitor_id = Column(String(64), nullable=False, index=True)
     user_agent = Column(Text, nullable=True)
     ip_address = Column(String(45), nullable=True)
-    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    ended_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    ended_at = Column(UTCDateTime, nullable=True)
     session_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
 
     events = relationship("EventModel", back_populates="session", cascade="all, delete-orphan")
 
@@ -112,14 +145,14 @@ class EventModel(Base):
     site_id = Column(String(64), nullable=False, index=True)
     session_id = Column(String(64), ForeignKey("sessions.id", ondelete="SET NULL"), nullable=True, index=True)
     type = Column(String(128), nullable=False, index=True)
-    occurred_at = Column(DateTime(timezone=True), nullable=False, index=True)
+    occurred_at = Column(UTCDateTime, nullable=False, index=True)
     actor_type = Column(String(32), default="visitor", nullable=False)
     actor_id = Column(String(64), nullable=False, index=True)
     source = Column(String(64), default="web-sdk", nullable=False)
     data = Column(JSONB, default=dict, nullable=False)
     consent = Column(JSONB, nullable=True)
     trace_id = Column(String(64), nullable=True)
-    server_received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    server_received_at = Column(UTCDateTime, default=_utcnow, nullable=False)
     client_ip = Column(String(45), nullable=True)
     user_agent = Column(Text, nullable=True)
 
@@ -141,7 +174,7 @@ class LeadModel(Base):
     status = Column(String(32), default="new", nullable=False)
     source = Column(String(64), nullable=True)
     lead_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
 
     profile = relationship("ProfileModel", back_populates="leads")
 
@@ -157,7 +190,7 @@ class AuditRecordModel(Base):
     changes = Column(JSONB, default=dict, nullable=False)
     verification_status = Column(String(32), default="verified", nullable=False)
     trace_id = Column(String(64), nullable=True, index=True)
-    timestamp = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    timestamp = Column(UTCDateTime, default=_utcnow, nullable=False)
 
 
 class TenantModel(Base):
@@ -173,7 +206,7 @@ class TenantModel(Base):
     primary_site_id = Column(String(64), nullable=False)
     created_by = Column(String(128), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
 
 
 class ApiKeyModel(Base):
@@ -186,8 +219,8 @@ class ApiKeyModel(Base):
     key_prefix = Column(String(16), nullable=False)
     name = Column(String(128), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    last_used_at = Column(UTCDateTime, nullable=True)
 
 
 class SentinelScanModel(Base):
@@ -204,8 +237,8 @@ class SentinelScanModel(Base):
     site_id = Column(String(64), nullable=False, index=True)
     sentinel_task_id = Column(String(128), nullable=False)
     posture_score = Column(Float, nullable=False)
-    occurred_at = Column(DateTime(timezone=True), nullable=False)
-    received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    occurred_at = Column(UTCDateTime, nullable=False)
+    received_at = Column(UTCDateTime, default=_utcnow, nullable=False, index=True)
 
     findings = relationship("SentinelFindingModel", back_populates="scan", cascade="all, delete-orphan")
 
@@ -230,8 +263,8 @@ class SentinelFindingModel(Base):
     evidence_ref = Column(Text, nullable=True)
     attack_vector = Column(String(128), nullable=True)
     affected_endpoint = Column(Text, nullable=True)
-    occurred_at = Column(DateTime(timezone=True), nullable=False)
-    received_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False, index=True)
+    occurred_at = Column(UTCDateTime, nullable=False)
+    received_at = Column(UTCDateTime, default=_utcnow, nullable=False, index=True)
 
     scan = relationship("SentinelScanModel", back_populates="findings")
 
@@ -247,7 +280,7 @@ class IdentityLinkModel(Base):
     target_id = Column(String(64), nullable=False, index=True)
     confidence = Column(Float, default=1.0, nullable=False)
     link_metadata = Column("metadata", JSONB, default=dict, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
 
 
 class LeadScoreHistoryModel(Base):
@@ -263,7 +296,7 @@ class LeadScoreHistoryModel(Base):
     source_score = Column(Float, default=0.0, nullable=False)
     score_breakdown = Column(JSONB, default=dict, nullable=False)
     triggered_by = Column(String(64), default="event", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
 
 
 class MemoryEntryModel(Base):
@@ -277,8 +310,8 @@ class MemoryEntryModel(Base):
     content = Column(JSONB, default=dict, nullable=False)
     trust_label = Column(String(32), default="verified_telemetry", nullable=False)
     source = Column(String(64), default="cognitive_loop", nullable=False)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    expires_at = Column(UTCDateTime, nullable=True)
 
 
 class WorkflowRunModel(Base):
@@ -291,8 +324,8 @@ class WorkflowRunModel(Base):
     state = Column(String(32), nullable=False, index=True)  # TRIGGERED, PLANNING, EXECUTING, COMPLETED, etc.
     steps = Column(JSONB, default=list, nullable=False)
     context_data = Column("context", JSONB, default=dict, nullable=False)
-    started_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    started_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    completed_at = Column(UTCDateTime, nullable=True)
 
 
 class ApprovalQueueModel(Base):
@@ -310,9 +343,9 @@ class ApprovalQueueModel(Base):
     status = Column(String(32), default="pending", nullable=False)  # pending, approved, rejected, expired
     decision_by = Column(String(128), nullable=True)
     decision_reason = Column(Text, nullable=True)
-    created_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    decided_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(UTCDateTime, default=_utcnow, nullable=False)
+    expires_at = Column(UTCDateTime, nullable=False)
+    decided_at = Column(UTCDateTime, nullable=True)
     # Filled when an approved action is executed through the tool bus on approval.
     execution_status = Column(String(32), nullable=True)  # executed | failed | blocked | skipped
     execution_result = Column(JSONB, nullable=True)
@@ -331,4 +364,4 @@ class StrategyPerformanceModel(Base):
     success_rate = Column(Float, default=0.0, nullable=False)
     confidence = Column(Float, default=0.0, nullable=False)
     recent_outcomes = Column(JSONB, default=list, nullable=False)
-    last_updated_at = Column(DateTime(timezone=True), default=_utcnow, nullable=False)
+    last_updated_at = Column(UTCDateTime, default=_utcnow, nullable=False)
