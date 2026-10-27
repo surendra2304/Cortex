@@ -1,16 +1,26 @@
 from datetime import UTC, datetime
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+import json
+
+from sqlalchemy import (
+    CLOB,
+    JSON,
+    Boolean,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
-from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import relationship
 
 from cortex_api.config import Base
-
-
-@compiles(JSON, "oracle")
-def _compile_json_oracle(type_, compiler, **kw):
-    return "JSON" 
 
 
 def _utcnow() -> datetime:
@@ -18,9 +28,34 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-# Universal JSON type: compiles to native JSONB on PostgreSQL and JSON on SQLite.
-# Defined after the imports so the module's import block stays contiguous.
-JSONB = JSON().with_variant(PG_JSONB, "postgresql")
+class OracleJSON(TypeDecorator):
+    """JSON stored as CLOB text on Oracle.
+
+    Oracle's async dialect does not expose ``_json_serializer`` /
+    ``_json_deserializer``, which SQLAlchemy's generic ``JSON`` type reads during
+    bind processing. Serialising in Python keeps JSON columns working on every
+    engine (SQLite, PostgreSQL and Oracle) without touching dialect internals.
+    """
+
+    impl = CLOB
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        return json.dumps(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, (dict, list, bool, int, float)):
+            return value
+        return json.loads(value)
+
+
+# Universal JSON type: native JSONB on PostgreSQL, JSON on SQLite, CLOB text on
+# Oracle (whose async dialect cannot drive the generic JSON bind processor).
+JSONB = JSON().with_variant(PG_JSONB, "postgresql").with_variant(OracleJSON(), "oracle")
 
 
 class ProfileModel(Base):
@@ -93,7 +128,6 @@ class EventModel(Base):
     __table_args__ = (
         Index("idx_events_site_type_occurred", "site_id", "type", "occurred_at"),
         Index("idx_events_actor_occurred", "actor_id", "occurred_at"),
-        Index("idx_events_session", "session_id"),
     )
 
 
