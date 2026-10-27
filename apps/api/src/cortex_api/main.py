@@ -256,14 +256,15 @@ app.include_router(friday_router)
 app.include_router(advanced_operations_router)
 app.include_router(enhanced_crm_router)
 app.include_router(advanced_analytics_router)
-app.include_router(marketing_platform_router, prefix="/api/v1")
-app.include_router(demand_forecaster_router, prefix="/api/v1")
-app.include_router(attribution_router, prefix="/api/v1")
-app.include_router(ab_experiment_router, prefix="/api/v1")
-app.include_router(competitive_intel_router, prefix="/api/v1")
-app.include_router(conflict_resolver_router, prefix="/api/v1")
-app.include_router(decision_rec_router, prefix="/api/v1")
-app.include_router(risk_framework_router, prefix="/api/v1")
+# These routers declare absolute /api/v1/cortex/... paths; mount at root.
+app.include_router(marketing_platform_router)
+app.include_router(demand_forecaster_router)
+app.include_router(attribution_router)
+app.include_router(ab_experiment_router)
+app.include_router(competitive_intel_router)
+app.include_router(conflict_resolver_router)
+app.include_router(decision_rec_router)
+app.include_router(risk_framework_router)
 app.include_router(recommendation_engine_router)
 app.include_router(ab_test_framework_router)
 app.include_router(predictive_analytics_router)
@@ -279,35 +280,35 @@ app.include_router(streaming_router)
 
 # --- Customer Segmentation Engine Integration ---
 from cortex_api.customer_segmentation_engine import router as segmentation_router
-app.include_router(segmentation_router, prefix="/api/v1/cortex")
+app.include_router(segmentation_router, prefix="/api/v1")
 
 # --- Marketing Campaign Optimizer Integration ---
 from cortex_api.marketing_campaign_optimizer import router as campaign_optimizer_router
-app.include_router(campaign_optimizer_router, prefix="/api/v1/cortex")
+app.include_router(campaign_optimizer_router, prefix="/api/v1")
 
 # --- Recommendation Personalizer Integration ---
 from cortex_api.recommendation_personalizer import router as recommendation_personalizer_router
-app.include_router(recommendation_personalizer_router, prefix="/api/v1/cortex")
+app.include_router(recommendation_personalizer_router, prefix="/api/v1")
 
 # --- Decision Impact Analyzer Integration ---
 from cortex_api.decision_impact_analyzer import router as decision_impact_router
-app.include_router(decision_impact_router, prefix="/api/v1/cortex")
+app.include_router(decision_impact_router, prefix="/api/v1")
 
 # --- Strategic Foresight Engine Integration ---
 from cortex_api.strategic_foresight_engine import router as strategic_foresight_router
-app.include_router(strategic_foresight_router, prefix="/api/v1/cortex")
+app.include_router(strategic_foresight_router, prefix="/api/v1")
 
 # --- Strategic Partner Network Analyzer Integration ---
 from cortex_api.strategic_partner_network_analyzer import router as partner_network_router
-app.include_router(partner_network_router, prefix="/api/v1/cortex")
+app.include_router(partner_network_router, prefix="/api/v1")
 
 # --- Decision Tree Visualizer Integration ---
 from cortex_api.decision_tree_visualizer import router as decision_tree_router
-app.include_router(decision_tree_router, prefix="/api/v1/cortex")
+app.include_router(decision_tree_router, prefix="/api/v1")
 
 # --- Decision Fatigue Detector Integration ---
 from cortex_api.decision_fatigue_detector import router as decision_fatigue_router
-app.include_router(decision_fatigue_router, prefix="/api/v1/cortex")
+app.include_router(decision_fatigue_router, prefix="/api/v1")
 
 # --- Agentic Inbox Engine Integration ---
 from cortex_api.real_inbox_routes import router as real_inbox_router
