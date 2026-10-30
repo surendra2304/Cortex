@@ -36,7 +36,11 @@ from cortex_api.db_models import Base  # noqa: E402
 target_metadata = Base.metadata
 
 # The DSN comes from the environment (12-factor) with the ini value as fallback.
-_env_dsn = os.getenv("DATABASE_URL") or os.getenv("POSTGRES_DSN")
+_env_dsn = (
+    os.getenv("DATABASE_URL")
+    or os.getenv("ORACLE_CORE_ASYNC_URL")
+    or os.getenv("ORACLE_CORE_URL")
+)
 if _env_dsn:
     config.set_main_option("sqlalchemy.url", _env_dsn)
 

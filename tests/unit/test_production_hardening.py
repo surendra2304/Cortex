@@ -93,8 +93,8 @@ def test_readiness_probe_success(monkeypatch):
     assert res.status_code == 200, res.text
     data = res.json()
     assert data["status"] == "READY"
-    assert data["required_dependencies"] == ["postgres", "schema", "redis"]
-    assert data["dependencies"]["postgres"] == "UP"
+    assert data["required_dependencies"] == ["database", "schema", "redis"]
+    assert data["dependencies"]["database"] == "UP"
     assert data["dependencies"]["redis"] == "UP"
     for dependency in ("ai_universe", "sentinel", "intelx", "futuris"):
         assert data["dependencies"][dependency].startswith("UNKNOWN:")
@@ -125,7 +125,7 @@ def test_readiness_probe_fails_when_required_redis_is_unavailable():
         assert res.status_code == 503
         data = res.json()
         assert data["status"] == "NOT_READY"
-        assert data["dependencies"]["postgres"] == "UP"
+        assert data["dependencies"]["database"] == "UP"
         assert data["dependencies"]["redis"].startswith("DOWN:")
     finally:
         app.dependency_overrides.clear()

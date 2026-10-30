@@ -123,10 +123,21 @@ class Settings(BaseSettings):
             elif dsn.startswith("oracle://"):
                 dsn = "oracle+oracledb_async://" + dsn[len("oracle://"):]
         if not dsn:
-            # Never embed credentials in source. A Postgres deployment must set
-            # POSTGRES_DSN/DATABASE_URL explicitly; otherwise persist to SQLite.
+            if os.getenv("APP_ENV", "development").lower() == "production":
+                raise ValueError(
+                    "DATABASE_URL (or ORACLE_CORE_ASYNC_URL) is required in production. "
+                    "Oracle Autonomous Database is the only supported backend."
+                )
+            # Local development/test only. Production never reaches this branch.
             dsn = "sqlite+aiosqlite:///./data/cortex.db"
         if isinstance(dsn, str):
+            if os.getenv("APP_ENV", "development").lower() == "production" and dsn.startswith(
+                ("sqlite", "postgresql", "postgres://")
+            ):
+                raise ValueError(
+                    "Cortex production requires an Oracle Autonomous Database DSN; "
+                    "SQLite and PostgreSQL are not supported backends."
+                )
             if dsn.startswith("postgresql://"):
                 dsn = "postgresql+asyncpg://" + dsn[len("postgresql://"):]
             elif dsn.startswith("postgres://"):

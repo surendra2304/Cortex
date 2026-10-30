@@ -303,7 +303,7 @@ Interactive Swagger UI — `https://friday-universe.duckdns.org/cortex/docs`
 |---|---|---|
 | `APP_ENV` | `development` | `production` or `development` |
 | `PORT` | `8000` | Internal container port |
-| `POSTGRES_DSN` | SQLite local | PostgreSQL or SQLite DSN |
+| `ORACLE_CORE_ASYNC_URL` | Required in production | Oracle Autonomous Database DSN (`CORTEX` login/schema). PostgreSQL and SQLite are not supported. |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
 | `CORTEX_API_KEY` | — | Master operator API key (≥32 chars) |
 | `JWT_SECRET` | — | JWT signing secret (≥32 chars) |
@@ -404,7 +404,7 @@ Cortex/
 
 - **No Render.com**: Fully migrated to Oracle Cloud Always Free. All legacy Render URLs are permanently removed.
 - **Internal mesh only**: Agent-to-agent calls use Docker DNS (`http://service:port`), never public internet routes.
-- **SQLite WAL Mode**: Enforces `PRAGMA journal_mode=WAL;` and `PRAGMA busy_timeout=5000;` on all database connections for concurrent non-blocking reads/writes. Switch to `POSTGRES_DSN=postgresql+asyncpg://...` for high-write multi-node clusters.
+- **Oracle Autonomous Database**: Cortex persists CRM records in the Oracle `CORTEX` schema. PostgreSQL and SQLite are not supported backends.
 - **Async Connection Pooling & Circuit Breakers**: All outbound inter-agent calls (`FRIDAY Core`, `Memora`, `IntelX`, `Futuris`, `Sentinel`) utilize pooled `httpx.AsyncClient` instances with bounded timeouts, circuit breakers, and exponential backoff with jitter.
 - **In-Memory TTL & LRU Caching**: Thread-safe bounded cache stores repeated expensive operations and state checks to minimize compute overhead on 2 OCPU instances.
 - **Non-root container**: Runs as `appuser` (UID 1000) on `python:3.11-slim` with `PORT=8000` default.

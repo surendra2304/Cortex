@@ -1,5 +1,10 @@
 # CORTEX Production Infrastructure, Deployment & Operations Manual
 
+> **Status (Oracle-only):** Production persistence is Oracle Autonomous Database. The AWS/RDS
+> PostgreSQL topology, Terraform, Kubernetes and RDS recovery commands below are historical
+> design material — PostgreSQL and SQLite are not supported backends and must not be used for
+> new deployments.
+
 This document defines the deployment architecture, cloud infrastructure, Kubernetes manifests, CI/CD automation, monitoring stack, and disaster recovery procedures for **CORTEX — Autonomous Website & Web App Operations Intelligence**.
 
 ---

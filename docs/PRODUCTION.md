@@ -2,7 +2,7 @@
 
 ## 1. Authentication & Security Tiers
 - **Public SDK Endpoint (`/v1/events`, `/v1/events/batch`)**:
-  - Authenticated via `X-Cortex-Public-Key` validated against hashed `api_keys` records in PostgreSQL.
+  - Authenticated via `X-Cortex-Public-Key` validated against hashed `api_keys` records in the Oracle `CORTEX` schema.
   - Rate limited to **1,000 events/minute** per site key using Redis sliding-window buckets.
 - **Operator Dashboard Gateway (`/v1/*`)**:
   - Authenticated via OIDC RS256 JWT tokens.
@@ -22,7 +22,7 @@
   - `strategy_performance_gauge`: Aggregated strategy success rate.
 - **Health Probes**:
   - `GET /health`: Liveness probe for container orchestrators (Kubernetes/Docker).
-  - `GET /health/ready`: Readiness probe actively verifying PostgreSQL, Redis, and AI Universe connectivity.
+  - `GET /health/ready`: Readiness probe actively verifying Oracle Autonomous Database, Redis, and AI Universe connectivity.
 - **Structured Tracing**:
   - Distributed `trace_id` correlation across headers (`X-Cortex-Trace-Id`), database records, and logs.
 - **Live Event Stream**:
@@ -32,7 +32,7 @@
 
 ## 3. Storage & High-Performance Indexing
 - **Database Connection Pooling**:
-  - `asyncpg` connection pool with `pool_size=20`, `max_overflow=10`, `pool_pre_ping=True`.
+  - Oracle (`python-oracledb`) connection pool with `pool_size=20`, `max_overflow=10`, `pool_pre_ping=True`.
 - **Event Store Composite Indexing**:
   - `idx_events_site_type_occurred` (`site_id`, `type`, `occurred_at`)
   - `idx_events_actor_occurred` (`actor_id`, `occurred_at`)

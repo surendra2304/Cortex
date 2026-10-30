@@ -217,9 +217,9 @@ async def status_probe():
 async def readiness_probe(
     db: AsyncSession = Depends(get_db_session), redis_client: aioredis.Redis = Depends(get_redis_client)
 ):
-    """Readiness probe: validates PostgreSQL, Redis, AI Universe, Sentinel, IntelX, and Futuris dependencies."""
+    """Readiness probe: validates the Oracle database, Redis, and optional peer integrations."""
     checks = {
-        "postgres": "UNKNOWN",
+        "database": "UNKNOWN",
         "schema": "UNKNOWN",
         "redis": "UNKNOWN",
         # These integrations do not have live readiness probes wired here.
@@ -230,12 +230,12 @@ async def readiness_probe(
         "futuris": "UNKNOWN: no live readiness probe configured",
     }
 
-    # 1. Database check
+    # 1. Database check (Oracle Autonomous Database in production)
     try:
-        await db.execute(text("SELECT 1"))
-        checks["postgres"] = "UP"
+        await db.execute(text("SELECT 1 FROM DUAL"))
+        checks["database"] = "UP"
     except Exception as exc:
-        checks["postgres"] = f"DOWN: {str(exc)[:50]}"
+        checks["database"] = f"DOWN: {str(exc)[:50]}"
 
     # 1b. Schema check — a reachable database with no tables is NOT ready.
     try:
@@ -266,7 +266,7 @@ async def readiness_probe(
     # probe configured by default, and treating "UNKNOWN" as fatal made a healthy
     # deployment permanently NOT_READY — a readiness gate that can never pass is worse than
     # none, because platforms stop routing traffic to a service that is actually fine.
-    required = ("postgres", "schema", "redis")
+    required = ("database", "schema", "redis")
     required_ok = all(checks[name] == "UP" for name in required)
     degraded = [name for name, value in checks.items() if name not in required and value.startswith("UNKNOWN")]
 

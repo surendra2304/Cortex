@@ -1,6 +1,6 @@
 # CORTEX Core Data Model & Schema Reference
 
-## 1. Relational Entities (PostgreSQL)
+## 1. Relational Entities (Oracle Autonomous Database)
 
 | Table Name | Primary Key | Key Columns | Purpose |
 | :--- | :--- | :--- | :--- |
